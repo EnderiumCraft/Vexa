@@ -28,23 +28,25 @@ graphics), so work on one moves the other forward.
 
 ---
 
-## Phase 1: Boot and CPU basics *(in progress)*
+## Phase 1: Boot and CPU basics *(done)*
 
 - [x] Boot with Limine on BIOS and UEFI, higher-half 64-bit kernel
 - [x] Serial logging, `kprintf`, `panic`
 - [x] GDT and IDT with CPU exception reporting
 - [x] Read the memory map and framebuffer from the bootloader
-- [ ] Text console on the framebuffer (bitmap font, scrolling)
-- [ ] Parse ACPI tables (MADT) and set up the Local APIC and I/O APIC
-- [ ] Timer (APIC timer calibrated against HPET or PIT)
-- [ ] PS/2 keyboard driver
+- [x] Text console on the framebuffer (bitmap font, scrolling)
+- [x] Parse ACPI tables (MADT) and set up the Local APIC and I/O APIC
+- [x] Timer (APIC timer calibrated against the PIT; HPET fallback later)
+- [x] PS/2 keyboard driver
 
-**Milestone:** type on the keyboard and see the characters on screen.
+**Milestone:** type on the keyboard and see the characters on screen. Reached: the kernel
+ends in a small built-in command line (the kernel monitor) that stays until `vsh` replaces it.
 
 ## Phase 2: Memory management
 
 - [ ] Physical page allocator (free list or buddy allocator)
 - [ ] Virtual memory manager: build Vexa's own page tables, map/unmap, drop Limine's tables
+      (replaces the stopgap `map_phys` and `early_alloc_page` in `core/mm_early.c`)
 - [ ] Kernel heap (`kmalloc`/`kfree`, then a slab allocator)
 - [ ] Page fault handler that can grow the kernel stack and later do demand paging
 

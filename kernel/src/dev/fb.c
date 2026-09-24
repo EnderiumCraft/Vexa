@@ -3,8 +3,20 @@
 
 static struct limine_framebuffer *fb;
 
-void fb_init(struct limine_framebuffer *framebuffer) {
+bool fb_init(struct limine_framebuffer *framebuffer) {
+    if (framebuffer->bpp != 32) {
+        return false;
+    }
     fb = framebuffer;
+    return true;
+}
+
+uint64_t fb_width(void) {
+    return fb ? fb->width : 0;
+}
+
+uint64_t fb_height(void) {
+    return fb ? fb->height : 0;
 }
 
 static uint32_t pack_color(uint32_t rgb) {
@@ -14,35 +26,33 @@ static uint32_t pack_color(uint32_t rgb) {
            (b >> (8 - fb->blue_mask_size)) << fb->blue_mask_shift;
 }
 
+static uint32_t *row_ptr(uint64_t y) {
+    return (uint32_t *)((uint8_t *)fb->address + y * fb->pitch);
+}
+
 void fb_fill_rect(uint64_t x, uint64_t y, uint64_t w, uint64_t h, uint32_t rgb) {
-    if (!fb || fb->bpp != 32) {
+    if (!fb) {
         return;
     }
     uint32_t color = pack_color(rgb);
     for (uint64_t row = y; row < y + h && row < fb->height; row++) {
-        uint32_t *line = (uint32_t *)((uint8_t *)fb->address + row * fb->pitch);
+        uint32_t *line = row_ptr(row);
         for (uint64_t col = x; col < x + w && col < fb->width; col++) {
             line[col] = color;
         }
     }
 }
 
-/* A "V" built from blocks, so we can see the kernel is alive without a font. */
-void fb_draw_splash(void) {
-    if (!fb) {
+void fb_draw_bitmap8(uint64_t x, uint64_t y, const uint8_t *rows, uint64_t height,
+                     uint32_t fg_rgb, uint32_t bg_rgb) {
+    if (!fb || x + 8 > fb->width || y + height > fb->height) {
         return;
     }
-    for (uint64_t row = 0; row < fb->height; row++) {
-        uint32_t shade = (uint32_t)(0x10 + row * 0x30 / fb->height);
-        fb_fill_rect(0, row, fb->width, 1, shade << 16 | 0x08 << 8 | (shade + 0x20));
-    }
-
-    uint64_t cell = fb->height / 24;
-    uint64_t cx = fb->width / 2;
-    uint64_t top = fb->height / 2 - cell * 4;
-    for (uint64_t i = 0; i < 8; i++) {
-        uint64_t offset = (7 - i) * cell / 2 + cell / 2;
-        fb_fill_rect(cx - offset - cell / 2, top + i * cell, cell, cell, 0xb07cff);
-        fb_fill_rect(cx + offset - cell / 2, top + i * cell, cell, cell, 0xb07cff);
+    uint32_t fg = pack_color(fg_rgb), bg = pack_color(bg_rgb);
+    for (uint64_t r = 0; r < height; r++) {
+        uint32_t *line = row_ptr(y + r) + x;
+        for (int c = 0; c < 8; c++) {
+            line[c] = (rows[r] & (0x80 >> c)) ? fg : bg;
+        }
     }
 }

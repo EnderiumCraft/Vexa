@@ -2,6 +2,7 @@
 #   make          build build/vexa.iso
 #   make run      boot the ISO in QEMU (window + serial log in the terminal)
 #   make run-nographic   boot headless; serial log only (Ctrl-A X to quit)
+#   make test     boot in QEMU (BIOS, then UEFI with 4 CPUs) and check it responds
 #   make clean
 
 CC      ?= cc
@@ -24,7 +25,7 @@ LDFLAGS := -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 \
 SRCS := $(shell find kernel/src -name '*.c' -o -name '*.S')
 OBJS := $(patsubst kernel/src/%,$(BUILD)/obj/%.o,$(SRCS))
 
-.PHONY: all kernel iso run run-nographic clean distclean
+.PHONY: all kernel iso run run-nographic test clean distclean
 
 all: iso
 kernel: $(KERNEL)
@@ -65,6 +66,10 @@ run: $(ISO)
 
 run-nographic: $(ISO)
 	$(QEMU) -M q35 -m 512M -cdrom $(ISO) -nographic -no-reboot
+
+test: $(ISO)
+	tools/qemu-smoke-test.py
+	tools/qemu-smoke-test.py --uefi --smp 4
 
 clean:
 	rm -rf $(BUILD)

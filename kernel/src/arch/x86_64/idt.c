@@ -19,8 +19,10 @@ struct __attribute__((packed)) idt_pointer {
 
 static struct idt_entry idt[256];
 
-/* Defined in isr.S: one stub per CPU exception vector 0-31. */
-extern uint64_t isr_stub_table[32];
+/* Defined in isr.S: one entry stub per vector. */
+extern uint64_t isr_stub_table[256];
+
+static irq_handler_t irq_handlers[256];
 
 static const char *exception_names[32] = {
     "Divide Error", "Debug", "NMI", "Breakpoint", "Overflow", "BOUND Range Exceeded",
@@ -44,8 +46,8 @@ static void idt_set_gate(uint8_t vector, uint64_t handler) {
 }
 
 void idt_init(void) {
-    for (uint8_t v = 0; v < 32; v++) {
-        idt_set_gate(v, isr_stub_table[v]);
+    for (int v = 0; v < 256; v++) {
+        idt_set_gate((uint8_t)v, isr_stub_table[v]);
     }
     struct idt_pointer idtr = {
         .limit = sizeof(idt) - 1,
@@ -54,8 +56,32 @@ void idt_init(void) {
     __asm__ volatile("lidt %0" : : "m"(idtr) : "memory");
 }
 
+void irq_register(uint8_t vector, irq_handler_t handler) {
+    irq_handlers[vector] = handler;
+}
+
+static void handle_irq(struct interrupt_frame *frame) {
+    uint64_t vector = frame->vector;
+    if (vector == VECTOR_SPURIOUS) {
+        return; /* Spurious APIC interrupts must not be acknowledged. */
+    }
+    if (vector >= VECTOR_LEGACY_PIC_BASE && vector < VECTOR_LEGACY_PIC_BASE + 16) {
+        return; /* The 8259 PIC is masked; anything from it is spurious. */
+    }
+    if (irq_handlers[vector]) {
+        irq_handlers[vector](frame);
+    } else {
+        kprintf("[idt] unexpected interrupt on vector %lu\n", vector);
+    }
+    lapic_eoi();
+}
+
 /* Called from isr_common in isr.S. */
 void interrupt_dispatch(struct interrupt_frame *frame) {
+    if (frame->vector >= 32) {
+        handle_irq(frame);
+        return;
+    }
     if (frame->vector == 3) {
         kprintf("[idt] breakpoint at rip=%p, resuming\n", (void *)frame->rip);
         return;

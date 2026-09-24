@@ -103,5 +103,5 @@ libvexa/                  Vexa's C library
 userland/                 native programs: vinit, vsh, utilities, compositor
 ```
 
-Today only `arch/`, `dev/` and `lib/` exist. The other directories appear as the
+Today `arch/`, `core/`, `dev/` and `lib/` exist. The other directories appear as the
 [roadmap](ROADMAP.md) reaches them.
