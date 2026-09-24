@@ -1,13 +1,18 @@
 #include <stddef.h>
 #include <vexa/fb.h>
 
+/* A copy: the bootloader's structure goes away when its memory is reclaimed. */
+static struct limine_framebuffer fb_info;
 static struct limine_framebuffer *fb;
 
 bool fb_init(struct limine_framebuffer *framebuffer) {
     if (framebuffer->bpp != 32) {
         return false;
     }
-    fb = framebuffer;
+    fb_info = *framebuffer;
+    fb_info.edid = NULL;
+    fb_info.modes = NULL;
+    fb = &fb_info;
     return true;
 }
 

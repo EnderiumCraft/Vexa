@@ -11,8 +11,9 @@
 #include <vexa/mm.h>
 #include <vexa/monitor.h>
 #include <vexa/serial.h>
+#include <vexa/string.h>
 
-#define VEXA_VERSION "0.1.1"
+#define VEXA_VERSION "0.2.0"
 
 /* Limine boot protocol requests. The bootloader scans for these and fills in
  * the response pointers before jumping to kmain. */
@@ -49,39 +50,26 @@ static volatile struct limine_executable_cmdline_request cmdline_request = {
     .revision = 0,
 };
 
+__attribute__((used, section(".limine_requests")))
+static volatile struct limine_executable_address_request executable_address_request = {
+    .id = LIMINE_EXECUTABLE_ADDRESS_REQUEST_ID,
+    .revision = 0,
+};
+
 __attribute__((used, section(".limine_requests_start")))
 static volatile uint64_t limine_requests_start_marker[] = LIMINE_REQUESTS_START_MARKER;
 
 __attribute__((used, section(".limine_requests_end")))
 static volatile uint64_t limine_requests_end_marker[] = LIMINE_REQUESTS_END_MARKER;
 
-static const char *memmap_type_name(uint64_t type) {
-    switch (type) {
-    case LIMINE_MEMMAP_USABLE: return "usable";
-    case LIMINE_MEMMAP_RESERVED: return "reserved";
-    case LIMINE_MEMMAP_ACPI_RECLAIMABLE: return "ACPI reclaimable";
-    case LIMINE_MEMMAP_ACPI_NVS: return "ACPI NVS";
-    case LIMINE_MEMMAP_BAD_MEMORY: return "bad memory";
-    case LIMINE_MEMMAP_BOOTLOADER_RECLAIMABLE: return "bootloader reclaimable";
-    case LIMINE_MEMMAP_EXECUTABLE_AND_MODULES: return "kernel and modules";
-    case LIMINE_MEMMAP_FRAMEBUFFER: return "framebuffer";
-    default: return "unknown";
-    }
-}
+#define MAX_MEMORY_RANGES 128
+#define KERNEL_STACK_SIZE (64 * 1024)
 
-static void print_memory_map(struct limine_memmap_response *memmap) {
-    uint64_t usable = 0;
-    kprintf("[mem] %lu memory map entries:\n", memmap->entry_count);
-    for (uint64_t i = 0; i < memmap->entry_count; i++) {
-        struct limine_memmap_entry *e = memmap->entries[i];
-        kprintf("  %p - %p  %s\n", (void *)e->base, (void *)(e->base + e->length),
-                memmap_type_name(e->type));
-        if (e->type == LIMINE_MEMMAP_USABLE) {
-            usable += e->length;
-        }
-    }
-    kprintf("[mem] %lu MiB usable\n", usable / (1024 * 1024));
-}
+/* Copied out of the bootloader's responses, which live in memory that is
+ * reclaimed during boot. */
+static struct mem_range memory_ranges[MAX_MEMORY_RANGES];
+static size_t memory_range_count;
+static uint64_t rsdp_phys;
 
 static void console_setup(void) {
     struct limine_framebuffer_response *fbr = framebuffer_request.response;
@@ -101,6 +89,46 @@ static void console_setup(void) {
     kprintf("[fb] %lux%lu, %u bpp\n", fb->width, fb->height, fb->bpp);
 }
 
+static void copy_boot_info(void) {
+    struct limine_memmap_response *memmap = memmap_request.response;
+    if (!memmap || !hhdm_request.response || !executable_address_request.response) {
+        panic("bootloader did not provide a memory map, direct map and kernel address");
+    }
+    if (memmap->entry_count > MAX_MEMORY_RANGES) {
+        kprintf("[mem] warning: using the first %d of %lu memory map entries\n",
+                MAX_MEMORY_RANGES, memmap->entry_count);
+    }
+    for (uint64_t i = 0; i < memmap->entry_count && i < MAX_MEMORY_RANGES; i++) {
+        memory_ranges[i] = (struct mem_range){
+            .base = memmap->entries[i]->base,
+            .length = memmap->entries[i]->length,
+            .type = memmap->entries[i]->type,
+        };
+        memory_range_count++;
+    }
+    hhdm_offset = hhdm_request.response->offset;
+    if (rsdp_request.response) {
+        rsdp_phys = (uint64_t)rsdp_request.response->address;
+    }
+    if (cmdline_request.response) {
+        cmdline_init(cmdline_request.response->cmdline);
+    }
+}
+
+/* The rest of boot, running on a kernel stack with a guard page. */
+__attribute__((noreturn)) static void kmain_on_kernel_stack(void) {
+    pmm_reclaim_bootloader_memory();
+
+    acpi_init(rsdp_phys);
+    interrupt_controller_init();
+    timer_init();
+    interrupts_enable();
+    keyboard_init();
+
+    kprintf("\nVexa kernel initialized.\n");
+    monitor_run();
+}
+
 void kmain(void) {
     serial_init();
     kprintf("\nVexa " VEXA_VERSION " booting\n");
@@ -109,29 +137,28 @@ void kmain(void) {
         panic("bootloader does not support Limine base revision 3");
     }
     console_setup();
-    if (cmdline_request.response) {
-        cmdline_init(cmdline_request.response->cmdline);
-    }
+    copy_boot_info();
     if (*cmdline_get()) {
         kprintf("[boot] command line: %s\n", cmdline_get());
     }
 
     gdt_init();
     idt_init();
-    kprintf("[cpu] GDT and IDT loaded\n");
+    kprintf("[cpu] GDT, TSS and IDT loaded\n");
 
-    if (!memmap_request.response || !hhdm_request.response) {
-        panic("bootloader did not provide a memory map and direct map");
-    }
-    print_memory_map(memmap_request.response);
-    mm_early_init(memmap_request.response, hhdm_request.response->offset);
+    pmm_init(memory_ranges, memory_range_count);
+    vmm_init(memory_ranges, memory_range_count,
+             executable_address_request.response->physical_base,
+             executable_address_request.response->virtual_base);
 
-    acpi_init(rsdp_request.response ? (uint64_t)rsdp_request.response->address : 0);
-    interrupt_controller_init();
-    timer_init();
-    interrupts_enable();
-    keyboard_init();
-
-    kprintf("\nVexa kernel initialized.\n");
-    monitor_run();
+    /* Leave the bootloader's stack so its memory can be reclaimed. */
+    uint64_t stack_top = vmm_alloc_kernel_stack(KERNEL_STACK_SIZE);
+    __asm__ volatile(
+        "mov %0, %%rsp\n"
+        "xor %%ebp, %%ebp\n"
+        "call *%1\n"
+        :
+        : "r"(stack_top), "r"(kmain_on_kernel_stack)
+        : "memory");
+    __builtin_unreachable();
 }

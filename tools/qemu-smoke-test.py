@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Boot build/vexa.iso in QEMU, type into the PS/2 keyboard, and check the serial log.
 
-Usage: tools/qemu-smoke-test.py [--iso PATH] [--uefi] [--smp N] [--safe-mode]
+Usage: tools/qemu-smoke-test.py [--iso PATH] [--uefi] [--smp N] [--memory SIZE] [--safe-mode]
                                 [--screenshot out.png] [--keep-log]
 
 Exits non-zero if an expected message is missing or the kernel panics.
@@ -37,15 +37,17 @@ EXPECTED_BOOT_LEGACY = [
     "Vexa kernel initialized",
 ]
 
-# Typed at the monitor prompt, with text that must appear in response.
-# The repeated "help" fills the screen so the console has to scroll.
+# Typed at the monitor prompt, with text that must appear in response and how
+# many seconds to wait for it. The repeated "help" makes the console scroll.
 TYPED_COMMANDS = [
-    ("help", "reboot"),
-    ("help", "reboot"),
-    ("help", "reboot"),
-    ("cpux\b", "vendor"),  # Backspace erases the typo, so this runs "cpu".
-    ("uptime", "up "),
-    ("Hello Vexa", "unknown command: Hello Vexa"),
+    ("help", "reboot", 10),
+    ("help", "reboot", 10),
+    ("help", "reboot", 10),
+    ("cpux\b", "vendor", 10),  # Backspace erases the typo, so this runs "cpu".
+    ("uptime", "up ", 10),
+    ("mem", "heap ", 10),
+    ("memtest", "memtest: passed", 180),
+    ("Hello Vexa", "unknown command: Hello Vexa", 10),
 ]
 
 # QEMU `sendkey` names for characters that aren't plain lowercase letters or digits.
@@ -125,6 +127,7 @@ def main():
     parser.add_argument("--keep-log", action="store_true", help="print the serial log")
     parser.add_argument("--uefi", action="store_true", help="boot with UEFI firmware (OVMF)")
     parser.add_argument("--smp", type=int, default=1, help="number of CPUs")
+    parser.add_argument("--memory", default="512M", help="RAM size, e.g. 512M or 6G")
     parser.add_argument("--iso", default="build/vexa.iso", help="ISO image to boot")
     parser.add_argument("--safe-mode", action="store_true",
                         help="expect a safe mode boot (use with the ISO from "
@@ -136,7 +139,7 @@ def main():
     mon_path = os.path.join(tmp, "monitor.sock")
     open(log_path, "w").close()
     command = [
-        "qemu-system-x86_64", "-M", "q35", "-m", "512M", "-smp", str(args.smp),
+        "qemu-system-x86_64", "-M", "q35", "-m", args.memory, "-smp", str(args.smp),
         "-cdrom", args.iso, "-serial", "file:" + log_path, "-display", "none", "-no-reboot",
         "-monitor", "unix:" + mon_path + ",server,nowait",
     ]
@@ -152,10 +155,10 @@ def main():
                 break
 
         if not failures:
-            for command, expected in TYPED_COMMANDS:
+            for command, expected, timeout in TYPED_COMMANDS:
                 for key in keys_for(command + "\n"):
                     monitor.command("sendkey " + key)
-                if not wait_for(log_path, expected, 10):
+                if not wait_for(log_path, expected, timeout):
                     failures.append(f"typed {command!r}: missing {expected!r}")
 
         if args.screenshot:

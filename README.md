@@ -11,7 +11,7 @@ that sits on top of the Vexa kernel. See [docs/ARCHITECTURE.md](docs/ARCHITECTUR
 
 ## Status
 
-Phase 1 (boot and CPU basics) is complete. The kernel:
+Phases 1 (boot and CPU basics) and 2 (memory management) are complete. The kernel:
 
 - boots through the [Limine](https://github.com/limine-bootloader/limine) bootloader (BIOS and UEFI)
 - runs in 64-bit long mode as a higher-half kernel
@@ -21,15 +21,19 @@ Phase 1 (boot and CPU basics) is complete. The kernel:
   the legacy 8259 PIC on machines without them
 - runs a 1000 Hz timer: the local APIC timer calibrated against the PIT, or the PIT
   itself
+- manages memory with a buddy page allocator, its own page tables (read-only code,
+  no-execute data) and a slab-based kernel heap (`kmalloc`/`kfree`)
+- runs on kernel stacks with guard pages, and reports stack overflows and other faults
+  in plain words
 - reads the PS/2 keyboard (US layout, Shift, Caps Lock, Ctrl)
-- ends in a small built-in command line, the kernel monitor (`help`, `cpu`,
-  `uptime`, `clear`, `reboot`), until it can run real programs
+- ends in a small built-in command line, the kernel monitor (`help`, `cpu`, `mem`,
+  `memmap`, `memtest`, `uptime`, `clear`, `reboot`), until it can run real programs
 
 If Vexa has trouble on a machine, pick **safe mode** in the boot menu. It ignores ACPI
 and uses only the oldest, most widely supported interrupt and timer hardware. The
 kernel options behind it (`acpi=off`, `noapic`) can also be set in `limine.conf`.
 
-Next up is Phase 2, memory management. See [docs/ROADMAP.md](docs/ROADMAP.md) for the full
+Next up is Phase 3: processes, threads and user mode. See [docs/ROADMAP.md](docs/ROADMAP.md) for the full
 plan from here to Firefox.
 
 ## Download
@@ -62,7 +66,7 @@ You need a Linux host (or WSL) with:
 make                # builds build/vexa.iso (fetches Limine on first run)
 make run            # boots in QEMU; kernel log appears in your terminal
 make run-nographic  # headless boot, serial only (Ctrl-A then X to quit)
-make test           # boots in QEMU (BIOS, UEFI with 4 CPUs, safe mode), types commands
+make test           # boots in QEMU (BIOS; UEFI with 4 CPUs and 6 GiB; safe mode), types commands
                     # into the virtual keyboard and checks the replies
 make clean
 ```
@@ -78,8 +82,8 @@ kernel/
   include/limine.h   Limine boot protocol header (0BSD, vendored)
   include/vexa/      kernel headers
   src/kmain.c        kernel entry point and boot sequence
-  src/arch/x86_64/   GDT, IDT, interrupt entry, APIC and 8259 PIC, timer
-  src/core/          early memory mapping, ACPI, command line, kernel monitor
+  src/arch/x86_64/   GDT and TSS, IDT, interrupt entry, APIC and 8259 PIC, timer
+  src/core/          memory (pmm, vmm, heap, memtest), ACPI, command line, monitor
   src/dev/           serial, framebuffer, text console, font, PS/2 keyboard
   src/lib/           string functions, kprintf, panic
 tools/

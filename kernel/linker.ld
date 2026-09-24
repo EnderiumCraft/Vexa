@@ -14,6 +14,7 @@ SECTIONS
 {
     /* Top 2 GiB of the address space, as required by -mcmodel=kernel. */
     . = 0xffffffff80000000;
+    __kernel_start = .;
 
     .limine_requests : {
         KEEP(*(.limine_requests_start))
@@ -23,18 +24,23 @@ SECTIONS
 
     . = ALIGN(CONSTANT(MAXPAGESIZE));
 
+    __text_start = .;
     .text : {
         *(.text .text.*)
     } :text
+    __text_end = .;
 
     . = ALIGN(CONSTANT(MAXPAGESIZE));
 
+    __rodata_start = .;
     .rodata : {
         *(.rodata .rodata.*)
     } :rodata
+    __rodata_end = .;
 
     . = ALIGN(CONSTANT(MAXPAGESIZE));
 
+    __data_start = .;
     .data : {
         *(.data .data.*)
     } :data
@@ -43,6 +49,7 @@ SECTIONS
         *(.bss .bss.*)
         *(COMMON)
     } :data
+    __kernel_end = .;
 
     /DISCARD/ : {
         *(.eh_frame*)

@@ -43,15 +43,22 @@ graphics), so work on one moves the other forward.
 **Milestone:** type on the keyboard and see the characters on screen. Reached: the kernel
 ends in a small built-in command line (the kernel monitor) that stays until `vsh` replaces it.
 
-## Phase 2: Memory management
+## Phase 2: Memory management *(done)*
 
-- [ ] Physical page allocator (free list or buddy allocator)
-- [ ] Virtual memory manager: build Vexa's own page tables, map/unmap, drop Limine's tables
-      (replaces the stopgap `map_phys` and `early_alloc_page` in `core/mm_early.c`)
-- [ ] Kernel heap (`kmalloc`/`kfree`, then a slab allocator)
-- [ ] Page fault handler that can grow the kernel stack and later do demand paging
+- [x] Physical page allocator (buddy allocator, blocks of 4 KiB to 4 MiB)
+- [x] Virtual memory manager: Vexa's own page tables with a direct map of RAM, the kernel
+      mapped with W^X permissions (NX and read-only data), and the bootloader's memory
+      reclaimed
+- [x] Kernel heap: `kmalloc`/`kfree` on slab caches, whole pages for larger objects
+- [x] Page fault handler that explains the fault; kernel stacks with guard pages, and a
+      TSS with separate stacks for double faults, NMIs and machine checks, so a stack
+      overflow is reported instead of resetting the machine
+- [ ] Moved to later phases: locking for SMP (Phase 3) and demand paging for user
+      memory (Phase 5, with `mmap`)
 
-**Milestone:** allocate and free millions of objects without leaking or crashing.
+**Milestone:** allocate and free millions of objects without leaking or crashing. Reached:
+the `memtest` command runs 5 million random allocator operations (over a million heap
+allocations) and checks every byte and page comes back.
 
 ## Phase 3: Processes, threads and user mode
 

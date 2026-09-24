@@ -2,12 +2,17 @@
 #include <vexa/cmdline.h>
 #include <vexa/string.h>
 
-static const char *kernel_cmdline = "";
+#define CMDLINE_MAX 256
+
+/* A copy: the bootloader's string goes away when its memory is reclaimed. */
+static char kernel_cmdline[CMDLINE_MAX];
 
 void cmdline_init(const char *cmdline) {
-    if (cmdline) {
-        kernel_cmdline = cmdline;
+    size_t i = 0;
+    for (; cmdline && cmdline[i] && i < CMDLINE_MAX - 1; i++) {
+        kernel_cmdline[i] = cmdline[i];
     }
+    kernel_cmdline[i] = '\0';
 }
 
 const char *cmdline_get(void) {
