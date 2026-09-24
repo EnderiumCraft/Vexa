@@ -11,6 +11,7 @@
 #include <vexa/kprintf.h>
 #include <vexa/memtest.h>
 #include <vexa/mm.h>
+#include <vexa/pci.h>
 #include <vexa/monitor.h>
 #include <vexa/process.h>
 #include <vexa/block.h>
@@ -49,6 +50,7 @@ static void cmd_mkdir(const char *args);
 static void cmd_rm(const char *args);
 static void cmd_mount(const char *args);
 static void cmd_disks(const char *args);
+static void cmd_pci(const char *args);
 static void cmd_reboot(const char *args);
 
 static const struct command commands[] = {
@@ -67,6 +69,7 @@ static const struct command commands[] = {
     {"rm", "<path>", "remove a file or empty directory", cmd_rm},
     {"mount", "", "list mounted file systems", cmd_mount},
     {"disks", "", "list disks and partitions", cmd_disks},
+    {"pci", "", "list PCI devices", cmd_pci},
     {"programs", "", "list programs in /bin", cmd_programs},
     {"run", "<program>", "run a program and wait for it", cmd_run},
     {"spawn", "<program>", "start a program in the background", cmd_spawn},
@@ -334,6 +337,14 @@ static void cmd_disks(const char *args) {
         pad_to(strlen(device->name), 12);
         print_size(block_size_bytes(device));
         kprintf("%s\n", device->parent ? "  (partition)" : "");
+    }
+}
+
+static void cmd_pci(const char *args) {
+    (void)args;
+    for (struct pci_device *d = pci_first(); d; d = d->next) {
+        kprintf("  %x:%x.%u  %x:%x  %s\n", d->bus, d->slot, d->function, d->vendor_id,
+                d->device_id, pci_class_name(d));
     }
 }
 

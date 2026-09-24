@@ -43,6 +43,8 @@ void interrupt_controller_init(void);
 bool interrupt_controller_is_apic(void);
 uint32_t arch_cpu_count(void);
 void irq_register(uint8_t vector, irq_handler_t handler);
+/* Reserves a free vector for a device (e.g. for MSI). Returns -1 if none are left. */
+int irq_alloc_vector(void);
 /* Installs `handler` for a legacy ISA IRQ (0-15) and unmasks it. */
 void isa_irq_enable(uint8_t irq, irq_handler_t handler);
 

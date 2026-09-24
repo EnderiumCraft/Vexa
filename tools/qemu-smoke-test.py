@@ -2,13 +2,18 @@
 """Boot build/vexa.iso in QEMU, type into the PS/2 keyboard, and check the serial log.
 
 Usage: tools/qemu-smoke-test.py [--iso PATH] [--uefi] [--smp N] [--memory SIZE] [--cpu MODEL]
-                                [--safe-mode]
+                                [--safe-mode] [--disks DIR]
+
+With --disks, attaches the test disks from `make test-disks` (copies, so the
+originals stay pristine), runs file commands on them, and checks each with
+e2fsck afterwards.
                                 [--screenshot out.png] [--keep-log]
 
 Exits non-zero if an expected message is missing or the kernel panics.
 """
 import argparse
 import os
+import shutil
 import socket
 import struct
 import subprocess
@@ -70,6 +75,42 @@ TYPED_COMMANDS = [
     ("threads", "monitor", 10),
     ("Hello Vexa", "unknown command: Hello", 10),
 ]
+
+# With --disks: one ext2 file system on each kind of disk.
+DISK_COMMANDS = [
+    ("disks", "nvme0n1", 10),
+    ("mount", "/mnt/nvme0n1", 10),
+    ("cat /mnt/vda1/hello.txt", "Hello from an ext2 disk!", 10),
+    ("cat /mnt/sda1/docs/notes.txt", "lives on a test disk", 10),
+    ("run /mnt/nvme0n1/hello-world", "Hello, world!", 30, 3),
+    ("run fs-test", "on the disk at /mnt/vda1", 120),
+    ("write /mnt/sda1/from-vexa.txt written on sata", "vexa> write /mnt/sda1", 10),
+    ("cat /mnt/sda1/from-vexa.txt", "written on sata", 10, 2),
+    ("mkdir /mnt/nvme0n1/made-by-vexa", "vexa> mkdir", 10),
+    ("write /mnt/nvme0n1/made-by-vexa/note.txt written on nvme", "vexa> write /mnt/nvme0n1", 10),
+    ("cat /mnt/nvme0n1/made-by-vexa/note.txt", "written on nvme", 10, 2),
+]
+
+# (file name in the disks directory, QEMU arguments, where the ext2 starts)
+TEST_DISKS = [
+    ("virtio-gpt.img", ["-drive", "file={},if=virtio,format=raw"], 1024 * 1024),
+    ("sata-mbr.img", ["-drive", "file={},if=none,id=sata0,format=raw",
+                      "-device", "ide-hd,drive=sata0,bus=ide.0"], 1024 * 1024),
+    ("nvme-whole.img", ["-drive", "file={},if=none,id=nvme0,format=raw",
+                        "-device", "nvme,serial=vexa0,drive=nvme0"], 0),
+]
+
+
+def check_filesystem(image, offset, tmp):
+    """Runs e2fsck (read-only) on the ext2 file system inside a disk image."""
+    target = image
+    if offset:
+        target = os.path.join(tmp, os.path.basename(image) + ".fs")
+        with open(image, "rb") as src, open(target, "wb") as dst:
+            src.seek(offset)
+            dst.write(src.read())
+    result = subprocess.run(["e2fsck", "-fn", target], capture_output=True, text=True)
+    return result.returncode == 0, result.stdout + result.stderr
 
 # QEMU `sendkey` names for characters that aren't plain lowercase letters or digits.
 KEY_NAMES = {" ": "spc", "\n": "ret", "\b": "backspace", "-": "minus", ".": "dot", "/": "slash",
@@ -151,6 +192,7 @@ def main():
     parser.add_argument("--smp", type=int, default=1, help="number of CPUs")
     parser.add_argument("--memory", default="512M", help="RAM size, e.g. 512M or 6G")
     parser.add_argument("--cpu", help="QEMU CPU model, e.g. max (adds AVX, SMEP, SMAP)")
+    parser.add_argument("--disks", help="directory with the test disk images")
     parser.add_argument("--iso", default="build/vexa.iso", help="ISO image to boot")
     parser.add_argument("--safe-mode", action="store_true",
                         help="expect a safe mode boot (use with the ISO from "
@@ -163,9 +205,18 @@ def main():
     open(log_path, "w").close()
     command = [
         "qemu-system-x86_64", "-M", "q35", "-m", args.memory, "-smp", str(args.smp),
-        "-cdrom", args.iso, "-serial", "file:" + log_path, "-display", "none", "-no-reboot",
-        "-monitor", "unix:" + mon_path + ",server,nowait",
+        "-cdrom", args.iso, "-boot", "d", "-serial", "file:" + log_path, "-display", "none",
+        "-no-reboot", "-monitor", "unix:" + mon_path + ",server,nowait",
     ]
+    disks = []
+    commands = list(TYPED_COMMANDS)
+    if args.disks:
+        for name, qemu_args, offset in TEST_DISKS:
+            copy = os.path.join(tmp, name)
+            shutil.copyfile(os.path.join(args.disks, name), copy)
+            command += [a.format(copy) for a in qemu_args]
+            disks.append((copy, offset))
+        commands[-1:-1] = DISK_COMMANDS
     if args.uefi:
         command += ["-bios", OVMF]
     if args.cpu:
@@ -180,7 +231,7 @@ def main():
                 break
 
         if not failures:
-            for command, expected, timeout, *count in TYPED_COMMANDS:
+            for command, expected, timeout, *count in commands:
                 for key in keys_for(command + "\n"):
                     monitor.command("sendkey " + key)
                 if not wait_for(log_path, expected, timeout, *count):
@@ -198,6 +249,10 @@ def main():
         except subprocess.TimeoutExpired:
             qemu.kill()
 
+    for image, offset in disks:
+        clean, report = check_filesystem(image, offset, tmp)
+        if not clean:
+            failures.append(f"e2fsck found problems on {os.path.basename(image)}:\n{report}")
     log = read_log(log_path)
     if "VEXA KERNEL PANIC" in log:
         failures.append("kernel panicked")

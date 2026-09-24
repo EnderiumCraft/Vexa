@@ -1,6 +1,7 @@
 # Vexa build system.
 #   make          build build/vexa.iso
 #   make run      boot the ISO in QEMU (window + serial log in the terminal)
+#   make run-disk the same, with a disk that keeps its files between runs
 #   make run-nographic   boot headless; serial log only (Ctrl-A X to quit)
 #   make programs build the user programs in userland/ (with libvexa)
 #   make test     boot in QEMU (BIOS; UEFI with 4 CPUs, 6 GiB and a modern CPU
@@ -45,10 +46,18 @@ PROGRAMS := $(notdir $(wildcard userland/*))
 PROGRAM_BINS := $(addprefix $(BUILD)/programs/,$(PROGRAMS))
 INITRAMFS := $(BUILD)/initramfs.tar
 ROOTFS_FILES := $(shell find rootfs -type f)
+
+# Test disks for `make test`: the same ext2 file system (tests/disk-content
+# plus hello-world) on three kinds of disk, each with a different layout.
+DISK_CONTENT_FILES := $(shell find tests/disk-content -type f)
+TEST_DISKS := $(BUILD)/disks/virtio-gpt.img $(BUILD)/disks/sata-mbr.img \
+	$(BUILD)/disks/nvme-whole.img
+# A disk for `make run-disk`, created once and kept, so changes survive reboots.
+MY_DISK := $(BUILD)/my-disk.img
 USER_OBJS := $(LIBVEXA_OBJS) \
 	$(patsubst %,$(BUILD)/%.o,$(wildcard $(addsuffix /*.c,$(addprefix userland/,$(PROGRAMS)))))
 
-.PHONY: all kernel programs iso run run-nographic test clean distclean
+.PHONY: all kernel programs iso run run-disk run-nographic test test-disks clean distclean
 
 all: iso
 kernel: $(KERNEL)
@@ -90,6 +99,28 @@ $(INITRAMFS): $(PROGRAM_BINS) $(ROOTFS_FILES)
 	tar --format=ustar --owner=0 --group=0 --numeric-owner --mtime=@0 --sort=name \
 		-cf $@ -C $(BUILD)/rootfs .
 
+$(BUILD)/disk-content: $(DISK_CONTENT_FILES) $(BUILD)/programs/hello-world
+	rm -rf $@
+	cp -R tests/disk-content $@
+	cp $(BUILD)/programs/hello-world $@/
+
+$(BUILD)/disks/virtio-gpt.img: $(BUILD)/disk-content tools/make-disk.py
+	@mkdir -p $(dir $@)
+	tools/make-disk.py $@ 32 gpt $<
+
+$(BUILD)/disks/sata-mbr.img: $(BUILD)/disk-content tools/make-disk.py
+	@mkdir -p $(dir $@)
+	tools/make-disk.py $@ 24 mbr $<
+
+$(BUILD)/disks/nvme-whole.img: $(BUILD)/disk-content tools/make-disk.py
+	@mkdir -p $(dir $@)
+	tools/make-disk.py $@ 16 none $<
+
+test-disks: $(TEST_DISKS)
+
+$(MY_DISK): | $(BUILD)/disks/virtio-gpt.img
+	cp $(BUILD)/disks/virtio-gpt.img $@
+
 # The boot menu loads the initramfs next to the kernel in every entry.
 $(BUILD)/limine.conf: limine.conf Makefile
 	@mkdir -p $(BUILD)
@@ -129,13 +160,19 @@ $(SAFE_ISO): $(KERNEL) $(INITRAMFS) $(BUILD)/limine.conf limine/limine
 run: $(ISO)
 	$(QEMU) -M q35 -m 512M -cdrom $(ISO) -serial stdio -no-reboot
 
+# Like run, with a virtio disk mounted at /mnt/vda1. It keeps what you write;
+# delete build/my-disk.img to start over.
+run-disk: $(ISO) $(MY_DISK)
+	$(QEMU) -M q35 -m 512M -cdrom $(ISO) -boot d -serial stdio -no-reboot \
+		-drive file=$(MY_DISK),if=virtio,format=raw
+
 run-nographic: $(ISO)
 	$(QEMU) -M q35 -m 512M -cdrom $(ISO) -nographic -no-reboot
 
-test: $(ISO) $(SAFE_ISO)
-	tools/qemu-smoke-test.py
-	tools/qemu-smoke-test.py --uefi --smp 4 --memory 6G --cpu max
-	tools/qemu-smoke-test.py --safe-mode --iso $(SAFE_ISO)
+test: $(ISO) $(SAFE_ISO) $(TEST_DISKS)
+	tools/qemu-smoke-test.py --disks $(BUILD)/disks
+	tools/qemu-smoke-test.py --disks $(BUILD)/disks --uefi --smp 4 --memory 6G --cpu max
+	tools/qemu-smoke-test.py --disks $(BUILD)/disks --safe-mode --iso $(SAFE_ISO)
 
 clean:
 	rm -rf $(BUILD)

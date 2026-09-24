@@ -113,6 +113,38 @@ static void test_in(const char *base) {
     join(below_file, file, "x");
     CHECK(vx_open(below_file, VX_OPEN_READ) == -VX_ENOTDIR);
 
+    /* A 600 KiB file: on a disk with 1 KiB blocks that needs indirect and
+     * double-indirect blocks. Write it, read it back, then shrink it. */
+    static unsigned char chunk[4096];
+    char big[160];
+    join(big, dir, "big.bin");
+    h = vx_open(big, VX_OPEN_WRITE | VX_OPEN_CREATE | VX_OPEN_TRUNCATE);
+    CHECK(h >= 0);
+    const long big_size = 600 * 1024;
+    for (long at = 0; at < big_size; at += sizeof(chunk)) {
+        for (unsigned i = 0; i < sizeof(chunk); i++) {
+            chunk[i] = (unsigned char)((at + i) * 7 + (at + i) / 4096);
+        }
+        CHECK(vx_write(h, chunk, sizeof(chunk)) == (long)sizeof(chunk));
+    }
+    vx_close(h);
+    h = vx_open(big, VX_OPEN_READ);
+    CHECK(h >= 0);
+    bool same = true;
+    for (long at = 0; at < big_size && same; at += sizeof(chunk)) {
+        same = vx_read(h, chunk, sizeof(chunk)) == (long)sizeof(chunk);
+        for (unsigned i = 0; i < sizeof(chunk) && same; i++) {
+            same = chunk[i] == (unsigned char)((at + i) * 7 + (at + i) / 4096);
+        }
+    }
+    CHECK(same);
+    vx_close(h);
+    h = vx_open(big, VX_OPEN_WRITE | VX_OPEN_TRUNCATE);
+    CHECK(h >= 0 && vx_write(h, "small now", 9) == 9);
+    vx_close(h);
+    CHECK(vx_stat(big, &st) == 0 && st.size == 9);
+    CHECK(vx_remove(big) == 0);
+
     /* Clean up. */
     CHECK(vx_remove(file) == 0);
     CHECK(vx_remove(inner) == 0);

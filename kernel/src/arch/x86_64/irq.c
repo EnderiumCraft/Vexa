@@ -27,6 +27,15 @@ void irq_register(uint8_t vector, irq_handler_t handler) {
     irq_handlers[vector] = handler;
 }
 
+#define FIRST_DEVICE_VECTOR 0x40
+#define LAST_DEVICE_VECTOR 0xef
+
+int irq_alloc_vector(void) {
+    static int next = FIRST_DEVICE_VECTOR;
+    int vector = __atomic_fetch_add(&next, 1, __ATOMIC_RELAXED);
+    return vector <= LAST_DEVICE_VECTOR ? vector : -1;
+}
+
 void isa_irq_enable(uint8_t irq, irq_handler_t handler) {
     irq_register(VECTOR_ISA_BASE + irq, handler);
     if (using_apic) {

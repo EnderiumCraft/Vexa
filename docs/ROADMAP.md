@@ -85,17 +85,25 @@ allocations) and checks every byte and page comes back.
 system) and three `fpu-stress` programs at once, which check that every program's vector
 registers survive being interrupted.
 
-## Phase 4: Files and storage
+## Phase 4: Files and storage *(done)*
 
 - [x] Handle table: one kernel object model (files now; pipes, processes and more later)
 - [x] VFS layer (vnodes, path lookup, mount points) and file system calls: `vx_open`,
       `vx_read`, `vx_write`, `vx_seek`, `vx_stat`, `vx_read_dir`, `vx_mkdir`, `vx_remove`
 - [x] initramfs loaded as a Limine module (tar), unpacked into the root file system
 - [x] tmpfs and a device file system (`/dev/null`, `/dev/zero`, `/dev/console`, disks)
-- [ ] PCI enumeration; virtio-blk driver (QEMU), then AHCI and NVMe for real hardware
-- [ ] ext2 read/write (ext4 later), so disks can be shared with other systems
+- [x] PCI enumeration (ECAM or legacy ports), MSI and MSI-X interrupts
+- [x] Block layer: write-through block cache, GPT and MBR partitions
+- [x] virtio-blk driver (QEMU), then AHCI and NVMe for real hardware; each falls back to
+      polling without MSI
+- [x] ext2 read/write (ext4 later), so disks can be shared with other systems
+- [ ] Moved to later phases: USB storage (with USB in Phase 8), ext4, a journal or
+      another crash-safe file system, finer-grained VFS locking, running `vinit` from a
+      disk as the root file system
 
-**Milestone:** boot from a disk image and read files from it.
+**Milestone:** boot from a disk image and read files from it. Reached: disks are
+mounted under `/mnt`, and `run /mnt/vda1/hello-world` runs a program from one. `make test`
+writes to virtio, SATA and NVMe disks and then checks them with Linux's `e2fsck`.
 
 ## Phase 5: Vexa userland
 

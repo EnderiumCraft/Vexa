@@ -1,0 +1,1 @@
+Hello from an ext2 disk!

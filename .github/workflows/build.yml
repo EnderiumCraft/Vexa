@@ -21,12 +21,12 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential xorriso qemu-system-x86 ovmf python3
+            build-essential xorriso qemu-system-x86 ovmf python3 e2fsprogs
 
       - name: Build ISO
         run: make
 
-      - name: Boot tests (BIOS, UEFI with 4 CPUs, safe mode)
+      - name: Boot tests (BIOS, UEFI with 4 CPUs, safe mode; with test disks)
         run: |
           for f in /usr/share/qemu/OVMF.fd /usr/share/ovmf/OVMF.fd; do
             if [ -f "$f" ]; then export OVMF="$f"; break; fi

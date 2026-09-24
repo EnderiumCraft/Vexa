@@ -11,8 +11,8 @@ that sits on top of the Vexa kernel. See [docs/ARCHITECTURE.md](docs/ARCHITECTUR
 
 ## Status
 
-Phases 1 to 3 are complete: boot and CPU basics, memory management, and processes,
-threads and user mode. The kernel:
+Phases 1 to 4 are complete: boot and CPU basics, memory management, processes and
+user mode, and files and storage. The kernel:
 
 - boots through the [Limine](https://github.com/limine-bootloader/limine) bootloader (BIOS and UEFI)
 - runs in 64-bit long mode as a higher-half kernel
@@ -32,6 +32,10 @@ threads and user mode. The kernel:
   that misbehaves without taking the system down
 - saves and restores each program's floating point and vector registers (SSE, AVX)
 - has its own system call interface and C library, `libvexa`
+- has a file system tree with a root in memory (unpacked from an initramfs), `/dev`,
+  and disks mounted under `/mnt`
+- drives disks through virtio-blk (virtual machines), AHCI (SATA) and NVMe, reads GPT
+  and MBR partition tables, and reads and writes ext2 file systems
 - ends in a small built-in command line, the kernel monitor, until Vexa has a real
   shell
 
@@ -47,6 +51,7 @@ Some things to try at the `vexa>` prompt:
 | `run hello-world` | runs the first Vexa program, in user mode |
 | `run crash` | runs a program that misbehaves on purpose, to show it gets stopped |
 | `run fs-test` | checks the file system calls from a user program |
+| `disks`, `mount`, `pci` | disks and partitions, mounted file systems, PCI devices |
 | `spawn fpu-stress` | starts a program in the background (try it three times, then `threads`) |
 | `threads`, `ps` | list threads and processes |
 | `cpu`, `mem`, `memtest` | processor and memory information, and a memory stress test |
@@ -56,7 +61,25 @@ and uses only the oldest, most widely supported interrupt and timer hardware. Th
 kernel options behind it (`acpi=off`, `noapic`) can also be set in `limine.conf`, as can
 `nosmp` to use only the first CPU core.
 
-Next up is Phase 4: files and storage. See [docs/ROADMAP.md](docs/ROADMAP.md) for the full
+### Disks
+
+Vexa mounts every ext2 file system it finds at `/mnt/<disk>`, such as `/mnt/vda1`
+or `/mnt/nvme0n1`. The easiest way to try it is `make run-disk`: it boots with a small
+disk (kept in `build/my-disk.img`, so what you write survives restarts). To prepare
+your own disk image on Linux:
+
+```sh
+truncate -s 64M disk.img && mke2fs -t ext2 disk.img
+qemu-system-x86_64 -M q35 -m 512M -cdrom build/vexa.iso -boot d \
+    -drive file=disk.img,if=virtio,format=raw
+```
+
+ext4 disks are refused (Vexa doesn't support their extra features yet), and ext2 has no
+journal, so pulling the plug mid-write can leave the disk needing a check with
+`e2fsck` on Linux.
+
+Next up is Phase 5: a Vexa userland (shell and tools), and the start of the Linux
+subsystem. See [docs/ROADMAP.md](docs/ROADMAP.md) for the full
 plan from here to Firefox.
 
 ## Download
@@ -84,13 +107,16 @@ You need a Linux host (or WSL) with:
 | git, make | `git`, `make` |
 | Python 3 (for `make test`) | `python3` |
 | UEFI firmware (for `make test`) | `ovmf` |
+| mke2fs and e2fsck (for test disks) | `e2fsprogs` |
 
 ```sh
 make                # builds build/vexa.iso (fetches Limine on first run)
 make run            # boots in QEMU; kernel log appears in your terminal
+make run-disk       # the same, with a disk mounted at /mnt/vda1
 make run-nographic  # headless boot, serial only (Ctrl-A then X to quit)
-make test           # boots in QEMU (BIOS; UEFI with 4 CPUs and 6 GiB; safe mode), types commands
-                    # into the virtual keyboard and checks the replies
+make test           # boots in QEMU (BIOS; UEFI with 4 CPUs and 6 GiB; safe mode), with
+                    # virtio, SATA and NVMe test disks; types commands into the virtual
+                    # keyboard, checks the replies, then checks the disks with e2fsck
 make clean
 ```
 
@@ -107,19 +133,22 @@ kernel/
   src/kmain.c        kernel entry point and boot sequence
   src/arch/x86_64/   per-CPU setup, interrupts, APIC and 8259 PIC, timer, FPU state,
                      system call entry, context switch, starting other CPUs
-  src/core/          memory (pmm, vmm, heap), scheduler, processes, ELF loader, ACPI,
-                     command line, kernel monitor
+  src/core/          memory (pmm, vmm, heap), scheduler, processes, handles, VFS,
+                     block cache and partitions, ELF loader, ACPI, init, kernel monitor
   src/personality/vexa/  the native Vexa system calls
-  src/dev/           serial, framebuffer, text console, font, PS/2 keyboard
+  src/dev/           serial, framebuffer, text console, font, PS/2 keyboard, clock,
+                     PCI, virtio-blk, AHCI, NVMe
   src/lib/           string functions, kprintf, panic
-  src/fs/            tmpfs, devfs, initramfs unpacking
+  src/fs/            ext2, tmpfs, devfs, initramfs unpacking
 abi/vexa/abi.h       system call numbers and error codes, shared by kernel and libvexa
 rootfs/              files for the root file system (packed into initramfs.tar)
 libvexa/             Vexa's C library: program startup, system calls, printf, strings
-userland/            Vexa programs, one directory each (hello-world, fpu-stress, crash)
+userland/            Vexa programs, one directory each (hello-world, fs-test, ...)
+tests/disk-content/  files put on the test disks
 tools/
   bdf2c.py           converts a BDF bitmap font into the console font table
   qemu-smoke-test.py boot test used by `make test`
+  make-disk.py       builds disk images (GPT, MBR or none) holding an ext2 file system
 docs/
   ARCHITECTURE.md    how the kernel, native interface and Linux subsystem fit together
   ROADMAP.md         the plan, phase by phase

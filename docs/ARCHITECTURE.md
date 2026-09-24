@@ -105,8 +105,27 @@ libvexa/                  Vexa's C library
 userland/                 native programs: vinit, vsh, utilities, compositor
 ```
 
-Everything but `personality/linux/` exists today. Handles, the VFS, IPC and networking
-arrive in later phases of the [roadmap](ROADMAP.md), as do `vinit` and `vsh`.
+Everything but `personality/linux/` exists today, along with `fs/` (file systems) under
+`kernel/src/`. IPC and networking arrive in later phases of the [roadmap](ROADMAP.md), as
+do `vinit` and `vsh`.
+
+## Handles and files today
+
+A process refers to kernel objects through **handles**: small numbers in its handle
+table, each with the rights it was opened with (read, write). Open files are the first
+kind of object; pipes, processes and sockets will be others. The Linux subsystem will map
+Unix file descriptors onto the same table.
+
+Files live in one tree managed by the **VFS** (`core/vfs.c`). File systems plug in
+underneath it:
+
+- `tmpfs`: in memory; the root file system, filled from `initramfs.tar` at boot
+- `devfs`: `/dev`, with `null`, `zero`, `console` and every disk and partition
+- `ext2`: disks, mounted at `/mnt/<disk>`
+
+Disks sit behind the block layer (`core/block.c`), which caches them in 4 KiB chunks,
+reads partition tables, and calls the drivers (`dev/virtio_blk.c`, `dev/ahci.c`,
+`dev/nvme.c`).
 
 ## How a system call works today
 
