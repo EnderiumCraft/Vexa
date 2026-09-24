@@ -14,6 +14,8 @@ LIMINE_BRANCH := v9.x-binary
 BUILD   := build
 KERNEL  := $(BUILD)/vexa-kernel
 ISO     := $(BUILD)/vexa.iso
+# Same kernel, but the boot menu defaults to safe mode. Used by `make test`.
+SAFE_ISO := $(BUILD)/vexa-safe-mode-test.iso
 
 CFLAGS := -g -O2 -pipe -std=gnu11 -Wall -Wextra -Werror \
 	-ffreestanding -fno-stack-protector -fno-stack-check -fno-lto \
@@ -48,19 +50,29 @@ limine/limine:
 	git clone https://github.com/limine-bootloader/limine.git --branch=$(LIMINE_BRANCH) --depth=1 limine
 	$(MAKE) -C limine
 
-$(ISO): $(KERNEL) limine.conf limine/limine
+# $(call make_iso,limine config file,output ISO)
+define make_iso
 	rm -rf $(BUILD)/iso_root
 	mkdir -p $(BUILD)/iso_root/boot/limine $(BUILD)/iso_root/EFI/BOOT
 	cp $(KERNEL) $(BUILD)/iso_root/boot/
-	cp limine.conf limine/limine-bios.sys limine/limine-bios-cd.bin \
+	cp $(1) $(BUILD)/iso_root/boot/limine/limine.conf
+	cp limine/limine-bios.sys limine/limine-bios-cd.bin \
 		limine/limine-uefi-cd.bin $(BUILD)/iso_root/boot/limine/
 	cp limine/BOOTX64.EFI limine/BOOTIA32.EFI $(BUILD)/iso_root/EFI/BOOT/
 	xorriso -as mkisofs -R -r -J -b boot/limine/limine-bios-cd.bin \
 		-no-emul-boot -boot-load-size 4 -boot-info-table -hfsplus \
 		-apm-block-size 2048 --efi-boot boot/limine/limine-uefi-cd.bin \
 		-efi-boot-part --efi-boot-image --protective-msdos-label \
-		$(BUILD)/iso_root -o $@ 2>/dev/null
-	./limine/limine bios-install $@
+		$(BUILD)/iso_root -o $(2) 2>/dev/null
+	./limine/limine bios-install $(2)
+endef
+
+$(ISO): $(KERNEL) limine.conf limine/limine
+	$(call make_iso,limine.conf,$@)
+
+$(SAFE_ISO): $(KERNEL) limine.conf limine/limine
+	{ echo 'default_entry: 2'; cat limine.conf; } > $(BUILD)/limine-safe-mode.conf
+	$(call make_iso,$(BUILD)/limine-safe-mode.conf,$@)
 
 run: $(ISO)
 	$(QEMU) -M q35 -m 512M -cdrom $(ISO) -serial stdio -no-reboot
@@ -68,10 +80,10 @@ run: $(ISO)
 run-nographic: $(ISO)
 	$(QEMU) -M q35 -m 512M -cdrom $(ISO) -nographic -no-reboot
 
-test: $(ISO)
+test: $(ISO) $(SAFE_ISO)
 	tools/qemu-smoke-test.py
 	tools/qemu-smoke-test.py --uefi --smp 4
-	tools/qemu-smoke-test.py --safe-mode
+	tools/qemu-smoke-test.py --safe-mode --iso $(SAFE_ISO)
 
 clean:
 	rm -rf $(BUILD)

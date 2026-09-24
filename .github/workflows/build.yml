@@ -1,0 +1,98 @@
+# Builds the Vexa ISO and boot-tests it in QEMU on every push and pull request.
+# On the default branch, a passing build is published to GitHub Releases:
+#   - "Latest build" (tag `latest-build`): replaced on every push
+#   - "Vexa X.Y.Z" (tag `vX.Y.Z`): created once whenever VEXA_VERSION changes
+name: Build and release
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential xorriso qemu-system-x86 ovmf python3
+
+      - name: Build ISO
+        run: make
+
+      - name: Boot tests (BIOS, UEFI with 4 CPUs, safe mode)
+        run: |
+          for f in /usr/share/qemu/OVMF.fd /usr/share/ovmf/OVMF.fd; do
+            if [ -f "$f" ]; then export OVMF="$f"; break; fi
+          done
+          make test
+
+      - name: Read version
+        id: version
+        run: |
+          version=$(sed -n 's/^#define VEXA_VERSION "\(.*\)"/\1/p' kernel/src/kmain.c)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          cp build/vexa.iso "vexa-$version.iso"
+          sha256sum "vexa-$version.iso" > "vexa-$version.iso.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vexa-${{ steps.version.outputs.version }}
+          path: |
+            vexa-${{ steps.version.outputs.version }}.iso
+            vexa-${{ steps.version.outputs.version }}.iso.sha256
+
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+
+  release:
+    needs: build
+    if: github.event_name == 'push' && github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    # Publish one push at a time so releases from quick successive pushes don't collide.
+    concurrency:
+      group: release
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.build.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: vexa-${{ needs.build.outputs.version }}
+
+      - name: Update "Latest build"
+        run: |
+          short_sha=${GITHUB_SHA::7}
+          notes="Automatic build of commit ${short_sha} on \`${GITHUB_REF_NAME}\`, $(date -u '+%Y-%m-%d %H:%M UTC').
+
+          Built and boot-tested in QEMU (BIOS, UEFI with 4 CPUs, and safe mode). This is replaced on every push; see the versioned releases for stable downloads.
+
+          Run it with: \`qemu-system-x86_64 -M q35 -m 512M -cdrom vexa-${VERSION}.iso\`"
+          # Move the tag to this commit, then replace the release and its files.
+          git tag -f latest-build
+          git push -f origin refs/tags/latest-build
+          gh release delete latest-build --yes 2>/dev/null || true
+          gh release create latest-build \
+            --title "Latest build (${VERSION}, ${short_sha})" \
+            --notes "$notes" --prerelease --latest=false \
+            "vexa-${VERSION}.iso" "vexa-${VERSION}.iso.sha256"
+
+      - name: Create versioned release if VEXA_VERSION is new
+        run: |
+          if gh release view "v${VERSION}" >/dev/null 2>&1; then
+            echo "Release v${VERSION} already exists; bump VEXA_VERSION in kernel/src/kmain.c to cut a new one."
+            exit 0
+          fi
+          gh release create "v${VERSION}" --target "$GITHUB_SHA" \
+            --title "Vexa ${VERSION}" --generate-notes --latest \
+            "vexa-${VERSION}.iso" "vexa-${VERSION}.iso.sha256"

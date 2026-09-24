@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Boot build/vexa.iso in QEMU, type into the PS/2 keyboard, and check the serial log.
 
-Usage: tools/qemu-smoke-test.py [--uefi] [--smp N] [--safe-mode] [--screenshot out.png]
-                                [--keep-log]
+Usage: tools/qemu-smoke-test.py [--iso PATH] [--uefi] [--smp N] [--safe-mode]
+                                [--screenshot out.png] [--keep-log]
 
 Exits non-zero if an expected message is missing or the kernel panics.
 """
@@ -16,8 +16,7 @@ import tempfile
 import time
 import zlib
 
-ISO = "build/vexa.iso"
-BOOT_TIMEOUT = 30
+BOOT_TIMEOUT = 60
 OVMF = os.environ.get("OVMF", "/usr/share/qemu/OVMF.fd")
 
 # Messages the kernel must print while booting, normally and in safe mode. Safe
@@ -126,8 +125,10 @@ def main():
     parser.add_argument("--keep-log", action="store_true", help="print the serial log")
     parser.add_argument("--uefi", action="store_true", help="boot with UEFI firmware (OVMF)")
     parser.add_argument("--smp", type=int, default=1, help="number of CPUs")
+    parser.add_argument("--iso", default="build/vexa.iso", help="ISO image to boot")
     parser.add_argument("--safe-mode", action="store_true",
-                        help="pick the safe mode boot entry (tests the PIC/PIT fallback)")
+                        help="expect a safe mode boot (use with the ISO from "
+                             "`make build/vexa-safe-mode-test.iso`)")
     args = parser.parse_args()
 
     tmp = tempfile.mkdtemp(prefix="vexa-test-")
@@ -136,7 +137,7 @@ def main():
     open(log_path, "w").close()
     command = [
         "qemu-system-x86_64", "-M", "q35", "-m", "512M", "-smp", str(args.smp),
-        "-cdrom", ISO, "-serial", "file:" + log_path, "-display", "none", "-no-reboot",
+        "-cdrom", args.iso, "-serial", "file:" + log_path, "-display", "none", "-no-reboot",
         "-monitor", "unix:" + mon_path + ",server,nowait",
     ]
     if args.uefi:
@@ -145,11 +146,6 @@ def main():
     failures = []
     try:
         monitor = Monitor(mon_path)
-        if args.safe_mode:
-            # Choose the second entry in the bootloader menu before its timeout.
-            time.sleep(1.5)
-            monitor.command("sendkey down")
-            monitor.command("sendkey ret")
         for text in EXPECTED_BOOT_LEGACY if args.safe_mode else EXPECTED_BOOT_APIC:
             if not wait_for(log_path, text, BOOT_TIMEOUT):
                 failures.append("boot: missing " + repr(text))

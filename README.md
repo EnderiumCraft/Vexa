@@ -32,6 +32,18 @@ kernel options behind it (`acpi=off`, `noapic`) can also be set in `limine.conf`
 Next up is Phase 2, memory management. See [docs/ROADMAP.md](docs/ROADMAP.md) for the full
 plan from here to Firefox.
 
+## Download
+
+Every push to the default branch is built and boot-tested by GitHub Actions, then
+published on the [Releases page](https://github.com/EnderiumCraft/Vexa/releases):
+
+- **[Latest build](https://github.com/EnderiumCraft/Vexa/releases/tag/latest-build)**:
+  the newest ISO, replaced on every push
+- **Versioned releases** (`v0.1.1`, ...): created whenever `VEXA_VERSION` in
+  `kernel/src/kmain.c` changes, and kept permanently
+
+Run a downloaded ISO with `qemu-system-x86_64 -M q35 -m 512M -cdrom vexa-<version>.iso`.
+
 ## Building
 
 You need a Linux host (or WSL) with:
@@ -59,6 +71,7 @@ make clean
 
 ```
 Makefile             build, ISO creation, QEMU and test targets
+.github/workflows/   CI: build, boot-test and publish releases
 limine.conf          bootloader menu entry
 kernel/
   linker.ld          higher-half kernel link script
