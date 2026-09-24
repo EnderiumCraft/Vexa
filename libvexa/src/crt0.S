@@ -1,13 +1,13 @@
-/* Program entry point. The kernel starts us with an empty 16-byte-aligned
- * stack; call main() and pass its return value to vx_exit(). */
+/* Program entry point. The kernel starts us with rsp pointing at argc, then
+ * argv[], NULL, envp[], NULL (the System V layout). __libvexa_start does the
+ * rest in C. */
 .text
 .globl _start
 _start:
     xorl %ebp, %ebp
+    movq %rsp, %rdi
     andq $-16, %rsp
-    call main
-    movl %eax, %edi
-    call vx_exit
+    call __libvexa_start
     ud2
 
 /* The note that marks this as a native Vexa program (see abi/vexa/abi.h). */

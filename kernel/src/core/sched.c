@@ -4,7 +4,9 @@
 #include <vexa/fpu.h>
 #include <vexa/kprintf.h>
 #include <vexa/mm.h>
+#include <vexa/abi.h>
 #include <vexa/process.h>
+#include <vexa/signal.h>
 #include <vexa/sched.h>
 #include <vexa/spinlock.h>
 #include <vexa/string.h>
@@ -261,15 +263,31 @@ void thread_yield(void) {
     spin_unlock_irqrestore(&sched_lock, flags);
 }
 
-void thread_sleep_ms(uint64_t ms) {
+static int sleep_common(uint64_t ms, bool interruptible) {
     uint64_t flags = spin_lock_irqsave(&sched_lock);
     struct thread *thread = cpu_current()->current;
+    if (interruptible && thread_signal_pending(thread)) {
+        spin_unlock_irqrestore(&sched_lock, flags);
+        return -VX_EINTR;
+    }
     thread->wake_at = timer_ms() + ms;
     thread->state = THREAD_SLEEPING;
+    thread->interruptible = interruptible;
     thread->next = sleepers;
     sleepers = thread;
     schedule();
+    thread->interruptible = false;
+    bool early = timer_ms() < thread->wake_at;
     spin_unlock_irqrestore(&sched_lock, flags);
+    return early ? -VX_EINTR : 0;
+}
+
+void thread_sleep_ms(uint64_t ms) {
+    sleep_common(ms, false);
+}
+
+int thread_sleep_ms_interruptible(uint64_t ms) {
+    return sleep_common(ms, true);
 }
 
 void thread_exit(void) {
@@ -279,15 +297,22 @@ void thread_exit(void) {
     panic("thread_exit: dead thread was scheduled again");
 }
 
-void wait_queue_wait(struct wait_queue *queue, bool (*ready)(void *), void *arg) {
+static int wait_common(struct wait_queue *queue, bool (*ready)(void *), void *arg,
+                       bool interruptible) {
     for (;;) {
         uint64_t flags = spin_lock_irqsave(&sched_lock);
         if (ready(arg)) {
             spin_unlock_irqrestore(&sched_lock, flags);
-            return;
+            return 0;
         }
         struct thread *thread = cpu_current()->current;
+        if (interruptible && thread_signal_pending(thread)) {
+            spin_unlock_irqrestore(&sched_lock, flags);
+            return -VX_EINTR;
+        }
         thread->state = THREAD_BLOCKED;
+        thread->waiting_on = queue;
+        thread->interruptible = interruptible;
         thread->next = NULL;
         if (queue->tail) {
             queue->tail->next = thread;
@@ -296,8 +321,17 @@ void wait_queue_wait(struct wait_queue *queue, bool (*ready)(void *), void *arg)
         }
         queue->tail = thread;
         schedule();
+        thread->interruptible = false;
         spin_unlock_irqrestore(&sched_lock, flags);
     }
+}
+
+void wait_queue_wait(struct wait_queue *queue, bool (*ready)(void *), void *arg) {
+    wait_common(queue, ready, arg, false);
+}
+
+int wait_queue_wait_interruptible(struct wait_queue *queue, bool (*ready)(void *), void *arg) {
+    return wait_common(queue, ready, arg, true);
 }
 
 void wait_queue_wake_all_locked(struct wait_queue *queue) {
@@ -305,9 +339,56 @@ void wait_queue_wake_all_locked(struct wait_queue *queue) {
     queue->head = queue->tail = NULL;
     while (thread) {
         struct thread *next = thread->next;
+        thread->waiting_on = NULL;
         make_ready(thread);
         thread = next;
     }
+}
+
+void sched_interrupt_locked(struct thread *thread) {
+    if (thread->interruptible && thread->state == THREAD_BLOCKED && thread->waiting_on) {
+        struct wait_queue *queue = thread->waiting_on;
+        struct thread *previous = NULL;
+        for (struct thread *t = queue->head; t; previous = t, t = t->next) {
+            if (t == thread) {
+                if (previous) {
+                    previous->next = t->next;
+                } else {
+                    queue->head = t->next;
+                }
+                if (queue->tail == t) {
+                    queue->tail = previous;
+                }
+                break;
+            }
+        }
+        thread->waiting_on = NULL;
+        make_ready(thread);
+    } else if (thread->interruptible && thread->state == THREAD_SLEEPING) {
+        for (struct thread **link = &sleepers; *link; link = &(*link)->next) {
+            if (*link == thread) {
+                *link = thread->next;
+                break;
+            }
+        }
+        make_ready(thread);
+    }
+}
+
+void sched_interrupt(struct thread *thread) {
+    uint64_t flags = spin_lock_irqsave(&sched_lock);
+    sched_interrupt_locked(thread);
+    spin_unlock_irqrestore(&sched_lock, flags);
+}
+
+void sched_interrupt_process(struct process *process) {
+    uint64_t flags = spin_lock_irqsave(&sched_lock);
+    /* main_thread is cleared (under this lock) when the thread is reaped. */
+    struct thread *thread = process->main_thread;
+    if (thread && thread_signal_pending(thread)) {
+        sched_interrupt_locked(thread);
+    }
+    spin_unlock_irqrestore(&sched_lock, flags);
 }
 
 void wait_queue_wake_all(struct wait_queue *queue) {

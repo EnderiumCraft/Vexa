@@ -91,7 +91,17 @@ static bool write_data(uint8_t value) {
     return true;
 }
 
+static void (*consumer)(int key);
+
+void keyboard_set_consumer(void (*function)(int key)) {
+    consumer = function;
+}
+
 static void push_key(int key) {
+    if (consumer) {
+        consumer(key);
+        return;
+    }
     uint32_t next = (buffer_head + 1) % BUFFER_SIZE;
     if (next != buffer_tail) { /* Drop keys when the buffer is full. */
         buffer[buffer_head] = key;
@@ -166,7 +176,7 @@ static void keyboard_irq(struct interrupt_frame *frame) {
     while (inb(PS2_STATUS) & STATUS_OUTPUT_FULL) {
         handle_scancode(inb(PS2_DATA));
     }
-    if (buffer_head != buffer_tail) {
+    if (!consumer && buffer_head != buffer_tail) {
         wait_queue_wake_all(&key_waiters);
     }
 }

@@ -16,5 +16,8 @@ bool keyboard_init(void);
 int keyboard_read(void);
 /* Waits (sleeping, not spinning) for the next key. */
 int keyboard_read_blocking(void);
+/* Sends every key to `consumer` (called from the keyboard interrupt) instead
+ * of buffering it for keyboard_read. */
+void keyboard_set_consumer(void (*consumer)(int key));
 
 #endif

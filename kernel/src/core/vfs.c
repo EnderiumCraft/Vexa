@@ -235,9 +235,19 @@ static void file_destroy(struct object *object) {
     kfree(file);
 }
 
+static int64_t file_object_read(struct object *object, void *buffer, size_t size) {
+    return vfs_read((struct file *)object, buffer, size);
+}
+
+static int64_t file_object_write(struct object *object, const void *buffer, size_t size) {
+    return vfs_write((struct file *)object, buffer, size);
+}
+
 const struct object_type file_object_type = {
     .name = "file",
     .destroy = file_destroy,
+    .read = file_object_read,
+    .write = file_object_write,
 };
 
 static bool writes(uint32_t flags) {
@@ -365,6 +375,62 @@ int vfs_remove(const char *path, size_t length) {
     return modify_parent(path, length, false);
 }
 
+static bool is_dot_or_dotdot(const char *name, size_t length) {
+    return (length == 1 && name[0] == '.') || (length == 2 && name[0] == '.' && name[1] == '.');
+}
+
+int vfs_rename(const char *from, size_t from_length, const char *to, size_t to_length) {
+    /* Moving a directory inside itself would cut it off from the tree. Paths
+     * from system calls are absolute and normalized, so a prefix check works. */
+    if (to_length > from_length && memcmp(from, to, from_length) == 0 && to[from_length] == '/') {
+        return -VX_EINVAL;
+    }
+    vfs_lock();
+    struct vnode *old_dir = NULL, *new_dir = NULL, *moving = NULL;
+    const char *old_name, *new_name;
+    size_t old_length, new_length;
+    int error = resolve(from, from_length, true, &old_dir, &old_name, &old_length);
+    if (!error) {
+        error = resolve(to, to_length, true, &new_dir, &new_name, &new_length);
+    }
+    if (!error && (old_length == 0 || new_length == 0 || is_dot_or_dotdot(old_name, old_length) ||
+                   is_dot_or_dotdot(new_name, new_length))) {
+        error = -VX_EBUSY;
+    }
+    if (!error && (old_dir->type != VX_TYPE_DIRECTORY || new_dir->type != VX_TYPE_DIRECTORY)) {
+        error = -VX_ENOTDIR;
+    }
+    if (!error && new_length > VX_NAME_MAX) {
+        error = -VX_ENAMETOOLONG;
+    }
+    if (!error && old_dir->mount != new_dir->mount) {
+        error = -VX_EXDEV;
+    }
+    if (!error && (old_dir->mount->read_only || !old_dir->ops->rename)) {
+        error = -VX_EROFS;
+    }
+    if (!error) {
+        error = old_dir->ops->lookup(old_dir, old_name, old_length, &moving);
+    }
+    if (!error && moving->mounted_here) {
+        error = -VX_EBUSY;
+    }
+    if (!error) {
+        error = old_dir->ops->rename(old_dir, old_name, old_length, new_dir, new_name, new_length);
+    }
+    if (moving) {
+        vnode_put(moving);
+    }
+    if (old_dir) {
+        vnode_put(old_dir);
+    }
+    if (new_dir) {
+        vnode_put(new_dir);
+    }
+    vfs_unlock();
+    return error;
+}
+
 /* ---- Operations on open files ---- */
 
 int64_t vfs_pread(struct file *file, void *buffer, size_t size, uint64_t offset) {
@@ -374,6 +440,10 @@ int64_t vfs_pread(struct file *file, void *buffer, size_t size, uint64_t offset)
     }
     if (!vnode->ops->read) {
         return -VX_EINVAL;
+    }
+    if (vnode->type == VX_TYPE_CHAR_DEVICE) {
+        /* Devices like the terminal can wait a long time: not under the lock. */
+        return vnode->ops->read(vnode, buffer, size, offset);
     }
     vfs_lock();
     int64_t result = vnode->ops->read(vnode, buffer, size, offset);
@@ -398,6 +468,9 @@ int64_t vfs_write(struct file *file, const void *buffer, size_t size) {
     struct vnode *vnode = file->vnode;
     if (!vnode->ops->write) {
         return -VX_EINVAL;
+    }
+    if (vnode->type == VX_TYPE_CHAR_DEVICE) {
+        return vnode->ops->write(vnode, buffer, size, file->offset);
     }
     vfs_lock();
     uint64_t offset = (file->flags & VX_OPEN_APPEND) ? vnode->size : file->offset;

@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <vexa/spinlock.h>
 
 #define PAGE_SIZE ((uint64_t)4096)
 #define PAGE_SHIFT 12
@@ -43,6 +44,13 @@ uint64_t pmm_alloc(unsigned order);
 void pmm_free(uint64_t phys, unsigned order);
 /* One zeroed page; panics when memory runs out. For page tables and such. */
 uint64_t pmm_alloc_zeroed_page(void);
+/* User pages are reference counted, so copy-on-write can share them between
+ * address spaces. page_ref_new() returns a zeroed page with one reference;
+ * the page is freed when the last reference is put. */
+uint64_t page_ref_new(void);
+void page_ref_get(uint64_t phys);
+void page_ref_put(uint64_t phys);
+uint32_t page_ref_count(uint64_t phys);
 uint64_t pmm_total_pages(void);
 uint64_t pmm_free_pages(void);
 
@@ -63,29 +71,66 @@ void vmm_init(const struct mem_range *ranges, size_t count, uint64_t kernel_phys
 /* Makes [phys, phys + size) reachable at phys_to_virt(phys). RAM is already
  * mapped there; device registers and some ACPI tables need this first. */
 void *map_phys(uint64_t phys, size_t size, enum map_cache cache);
-/* A process's page tables: its own lower half, the kernel's upper half. */
-struct address_space {
-    uint64_t *pml4;
-    uint64_t pml4_phys;
-};
-
-struct address_space *vmm_create_address_space(void);
-/* Frees every user page and page table. It must not be active on any CPU. */
-void vmm_destroy_address_space(struct address_space *as);
-/* Loads `as`, or the kernel-only tables for NULL. */
+/* Loads a process's page tables, or the kernel-only tables for NULL. */
+struct address_space;
 void vmm_activate(struct address_space *as);
-/* Maps a zeroed page at user address `virt` (flags: VMM_WRITE, VMM_EXEC). If a
- * page is already there, adds the flags to it. Returns the page's physical
- * address, or 0 if out of memory or `virt` is not a user address. */
-uint64_t vmm_map_user_page(struct address_space *as, uint64_t virt, unsigned flags);
-/* True if [virt, virt + size) is mapped, user-accessible memory in the active
- * address space (and writable, if `write`). */
-bool vmm_user_range_mapped(uint64_t virt, uint64_t size, bool write);
 
 /* Allocates a kernel stack with an unmapped guard page below it. Returns its top. */
 uint64_t vmm_alloc_kernel_stack(size_t size);
 /* True if `virt` falls in a kernel stack guard page (i.e. a stack overflowed). */
 bool vmm_is_stack_guard(uint64_t virt);
+
+/* ---- User address spaces (vm.c) ---- */
+
+/*
+ * A process's memory is a list of areas (the program's segments, its stack,
+ * its heap, memory from vx_map/mmap). Pages inside an area are only allocated
+ * when first touched, and after a fork both processes share pages until one
+ * writes ("copy on write").
+ */
+
+#define VM_WRITE 0x1
+#define VM_EXEC 0x2
+
+struct vm_area {
+    uint64_t start, end; /* Page aligned, end exclusive. */
+    unsigned flags;      /* VM_* (every area is readable). */
+    struct vm_area *next;
+};
+
+struct address_space {
+    uint64_t *pml4;
+    uint64_t pml4_phys;
+    struct spinlock lock;
+    struct vm_area *areas; /* Sorted by address. */
+    uint64_t heap_start, heap_end; /* The brk heap. */
+};
+
+struct address_space *vm_create(void);
+/* Frees every page and table. It must not be active on any CPU. */
+void vm_destroy(struct address_space *as);
+/* A copy for fork(): pages are shared read-only until either side writes. */
+struct address_space *vm_fork(struct address_space *parent);
+/* Adds [start, end) (page aligned) with `flags`. Where it overlaps existing
+ * areas, those parts get the union of both flags (ELF segments can share a page). */
+int vm_add_area(struct address_space *as, uint64_t start, uint64_t end, unsigned flags);
+/* Finds room for `size` bytes and adds an area there. Returns 0 if full. */
+uint64_t vm_map(struct address_space *as, uint64_t size, unsigned flags);
+/* Maps exactly at `start`, replacing whatever was there. */
+int vm_map_fixed(struct address_space *as, uint64_t start, uint64_t size, unsigned flags);
+int vm_unmap(struct address_space *as, uint64_t start, uint64_t size);
+int vm_protect(struct address_space *as, uint64_t start, uint64_t size, unsigned flags);
+/* Sets the end of the brk heap; returns the (possibly unchanged) end. */
+uint64_t vm_set_heap_end(struct address_space *as, uint64_t end);
+/* Makes the page at `address` present (and writable, if `write`), allocating
+ * or copying it as needed. Returns its physical address, or 0 if the address
+ * isn't in an area that allows it. Works on inactive address spaces too. */
+uint64_t vm_page_for(struct address_space *as, uint64_t address, bool write);
+/* Page fault handler for user addresses. Returns false for a real fault. */
+bool vm_handle_fault(struct address_space *as, uint64_t address, bool write);
+/* Copies into another (inactive) address space, e.g. to set up a new stack. */
+bool vm_write(struct address_space *as, uint64_t address, const void *data, size_t size);
+uint64_t vm_resident_bytes(struct address_space *as);
 
 /* ---- Kernel heap (heap.c): slab caches for small objects. ---- */
 

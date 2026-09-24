@@ -829,6 +829,81 @@ static int ext2_remove(struct vnode *dir_vnode, const char *name, size_t length)
     return 0;
 }
 
+struct dotdot_args {
+    uint32_t parent;
+};
+
+static bool dotdot_visitor(struct dir_entry *entry, struct dir_entry *previous, uint8_t *block,
+                           bool *dirty, void *arg) {
+    (void)previous;
+    (void)block;
+    if (entry->name_len == 2 && entry->name[0] == '.' && entry->name[1] == '.') {
+        entry->inode = ((struct dotdot_args *)arg)->parent;
+        *dirty = true;
+        return true;
+    }
+    return false;
+}
+
+static int ext2_rename(struct vnode *old_dir_vnode, const char *old_name, size_t old_length,
+                       struct vnode *new_dir_vnode, const char *new_name, size_t new_length) {
+    struct ext2 *fs = fs_of(old_dir_vnode);
+    struct ext2_node *old_dir = node_of(old_dir_vnode), *new_dir = node_of(new_dir_vnode);
+    struct vnode *moving_vnode;
+    int error = ext2_lookup(old_dir_vnode, old_name, old_length, &moving_vnode);
+    if (error) {
+        return error;
+    }
+    struct ext2_node *moving = node_of(moving_vnode);
+    bool directory = moving_vnode->type == VX_TYPE_DIRECTORY;
+
+    struct vnode *existing;
+    if (ext2_lookup(new_dir_vnode, new_name, new_length, &existing) == 0) {
+        bool same = existing == moving_vnode;
+        bool existing_dir = existing->type == VX_TYPE_DIRECTORY;
+        vnode_put(existing);
+        if (same) {
+            vnode_put(moving_vnode);
+            return 0;
+        }
+        error = existing_dir && !directory ? -VX_EISDIR
+                : !existing_dir && directory ? -VX_ENOTDIR
+                                             : ext2_remove(new_dir_vnode, new_name, new_length);
+        if (error) {
+            vnode_put(moving_vnode);
+            return error;
+        }
+    }
+    /* Link under the new name first, then drop the old one: an interruption
+     * leaves an extra name rather than a lost file. */
+    error = add_entry(fs, new_dir, new_name, new_length, moving->number, moving_vnode->type);
+    if (!error) {
+        struct find_args find = {.name = old_name, .length = old_length, .remove = true};
+        bool stopped;
+        error = walk_directory(fs, old_dir, find_visitor, &find, &stopped);
+    }
+    if (!error && directory && old_dir != new_dir) {
+        struct dotdot_args args = {new_dir->number};
+        bool stopped;
+        walk_directory(fs, moving, dotdot_visitor, &args, &stopped);
+        old_dir->inode.links_count--;
+        old_dir->vnode.links = old_dir->inode.links_count;
+        new_dir->inode.links_count++;
+        new_dir->vnode.links = new_dir->inode.links_count;
+        write_inode(fs, new_dir);
+    }
+    if (!error) {
+        uint32_t now = (uint32_t)time_now();
+        old_dir->inode.mtime = old_dir->inode.ctime = now;
+        old_dir->vnode.modified = now;
+        write_inode(fs, old_dir);
+        moving->inode.ctime = now;
+        write_inode(fs, moving);
+    }
+    vnode_put(moving_vnode);
+    return error;
+}
+
 /* ---- Files ---- */
 
 static int64_t ext2_read(struct vnode *vnode, void *buffer, size_t size, uint64_t offset) {
@@ -917,6 +992,7 @@ static const struct vnode_ops ext2_ops = {
     .lookup = ext2_lookup,
     .create = ext2_create,
     .remove = ext2_remove,
+    .rename = ext2_rename,
     .read_dir = ext2_read_dir,
     .read = ext2_read,
     .write = ext2_write,

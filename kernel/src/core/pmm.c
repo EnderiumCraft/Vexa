@@ -29,6 +29,8 @@ static struct spinlock pmm_lock = SPINLOCK_INIT;
 static struct free_block free_lists[PMM_MAX_ORDER + 1];
 /* For each page: the order of the free block starting there, or PAGE_NOT_FREE. */
 static uint8_t *page_state;
+/* For user pages: how many address spaces map the page (copy-on-write sharing). */
+static uint16_t *page_refs;
 static uint64_t page_count; /* Pages covered by page_state. */
 static uint64_t total_pages;
 static uint64_t free_pages;
@@ -112,8 +114,9 @@ void pmm_init(const struct mem_range *ranges, size_t count) {
     }
     page_count = highest >> PAGE_SHIFT;
 
-    /* Carve the page_state array out of the first usable range big enough. */
-    uint64_t state_size = (page_count + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+    /* Carve the page_state and page_refs arrays out of the first usable range
+     * big enough. */
+    uint64_t state_size = (page_count * 3 + 2 + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
     uint64_t state_phys = 0;
     for (size_t i = 0; i < count && !state_phys; i++) {
         uint64_t base = ranges[i].base < LOW_MEMORY_LIMIT ? LOW_MEMORY_LIMIT : ranges[i].base;
@@ -127,7 +130,9 @@ void pmm_init(const struct mem_range *ranges, size_t count) {
         panic("pmm: no room for %lu KiB of page metadata", state_size / 1024);
     }
     page_state = phys_to_virt(state_phys);
-    memset(page_state, PAGE_NOT_FREE, state_size);
+    memset(page_state, PAGE_NOT_FREE, page_count);
+    page_refs = (uint16_t *)(page_state + ((page_count + 1) & ~1ULL));
+    memset(page_refs, 0, page_count * 2);
 
     for (size_t i = 0; i < count; i++) {
         uint64_t base = ranges[i].base, end = base + ranges[i].length;
@@ -210,6 +215,29 @@ uint64_t pmm_alloc_zeroed_page(void) {
 const struct mem_range *pmm_memory_map(size_t *count) {
     *count = memory_map_count;
     return memory_map;
+}
+
+uint64_t page_ref_new(void) {
+    uint64_t phys = pmm_alloc(0);
+    if (phys) {
+        memset(phys_to_virt(phys), 0, PAGE_SIZE);
+        __atomic_store_n(&page_refs[phys >> PAGE_SHIFT], 1, __ATOMIC_RELAXED);
+    }
+    return phys;
+}
+
+void page_ref_get(uint64_t phys) {
+    __atomic_add_fetch(&page_refs[phys >> PAGE_SHIFT], 1, __ATOMIC_RELAXED);
+}
+
+void page_ref_put(uint64_t phys) {
+    if (__atomic_sub_fetch(&page_refs[phys >> PAGE_SHIFT], 1, __ATOMIC_ACQ_REL) == 0) {
+        pmm_free(phys, 0);
+    }
+}
+
+uint32_t page_ref_count(uint64_t phys) {
+    return __atomic_load_n(&page_refs[phys >> PAGE_SHIFT], __ATOMIC_ACQUIRE);
 }
 
 uint64_t pmm_total_pages(void) {

@@ -123,6 +123,57 @@ static int tmpfs_remove(struct vnode *dir, const char *name, size_t length) {
     return 0;
 }
 
+static int tmpfs_rename(struct vnode *old_dir, const char *old_name, size_t old_length,
+                        struct vnode *new_dir, const char *new_name, size_t new_length) {
+    struct tmpfs_node *from = node_of(old_dir), *to = node_of(new_dir);
+    struct tmpfs_node *node = find_child(from, old_name, old_length);
+    if (!node) {
+        return -VX_ENOENT;
+    }
+    struct tmpfs_node *existing = find_child(to, new_name, new_length);
+    if (existing == node) {
+        return 0;
+    }
+    if (existing) {
+        bool node_dir = node->vnode.type == VX_TYPE_DIRECTORY;
+        bool existing_dir = existing->vnode.type == VX_TYPE_DIRECTORY;
+        if (existing_dir && !node_dir) {
+            return -VX_EISDIR;
+        }
+        if (!existing_dir && node_dir) {
+            return -VX_ENOTDIR;
+        }
+        int error = tmpfs_remove(new_dir, new_name, new_length);
+        if (error) {
+            return error;
+        }
+    }
+    char *name = kmalloc(new_length + 1);
+    if (!name) {
+        return -VX_ENOMEM;
+    }
+    memcpy(name, new_name, new_length);
+    name[new_length] = '\0';
+    for (struct tmpfs_node **link = &from->children; *link; link = &(*link)->next_sibling) {
+        if (*link == node) {
+            *link = node->next_sibling;
+            break;
+        }
+    }
+    kfree(node->name);
+    node->name = name;
+    node->name_length = new_length;
+    node->parent = to;
+    node->next_sibling = to->children;
+    to->children = node;
+    if (node->vnode.type == VX_TYPE_DIRECTORY && from != to) {
+        old_dir->links--;
+        new_dir->links++;
+    }
+    old_dir->modified = new_dir->modified = time_now();
+    return 0;
+}
+
 static int tmpfs_read_dir(struct vnode *dir, uint64_t *cookie, struct vx_dir_entry *entry) {
     struct tmpfs_node *child = node_of(dir)->children;
     for (uint64_t i = 0; child && i < *cookie; i++) {
@@ -240,6 +291,7 @@ static const struct vnode_ops tmpfs_ops = {
     .lookup = tmpfs_lookup,
     .create = tmpfs_create,
     .remove = tmpfs_remove,
+    .rename = tmpfs_rename,
     .read_dir = tmpfs_read_dir,
     .read = tmpfs_read,
     .write = tmpfs_write,

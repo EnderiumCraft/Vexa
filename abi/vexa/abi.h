@@ -32,6 +32,93 @@
 #define VX_SYS_REMOVE 14   /* vx_remove(path, length): a file or an empty directory */
 #define VX_SYS_HANDLE_STAT 15 /* vx_handle_stat(handle, struct vx_stat *) */
 
+/* Processes. A new process gets its arguments, environment and standard
+ * handles (0 input, 1 output, 2 errors) from vx_spawn. */
+#define VX_SYS_SPAWN 16    /* vx_spawn(path, length, struct vx_spawn *) -> process handle */
+#define VX_SYS_WAIT 17     /* vx_wait(process handle, VX_WAIT_* flags) -> exit code */
+#define VX_SYS_MAP 18      /* vx_map(size, VX_MAP_* flags) -> address of zeroed memory */
+#define VX_SYS_UNMAP 19    /* vx_unmap(address, size) */
+#define VX_SYS_PIPE 20     /* vx_pipe(int handles[2]): [0] reads, [1] writes */
+#define VX_SYS_CHDIR 21    /* vx_chdir(path, length) */
+#define VX_SYS_GETCWD 22   /* vx_getcwd(buffer, size) -> length */
+#define VX_SYS_KILL 23     /* vx_kill(process id, signal) */
+#define VX_SYS_SIGNAL 24   /* vx_signal(signal, VX_SIGNAL_DEFAULT or VX_SIGNAL_IGNORE) */
+#define VX_SYS_SET_FOREGROUND 25 /* vx_set_foreground(process group): who gets Ctrl+C */
+#define VX_SYS_SYSTEM_INFO 26    /* vx_system_info(struct vx_system_info *) */
+#define VX_SYS_PROCESS_LIST 27   /* vx_process_list(struct vx_process_info *, count) -> count */
+#define VX_SYS_KERNEL_COMMAND 28 /* vx_kernel_command(text, length): a kernel monitor command */
+#define VX_SYS_CLOSE_ALL 29      /* reserved */
+#define VX_SYS_RENAME 30   /* vx_rename(from, from_length, to, to_length) */
+#define VX_SYS_HANDLE_PROCESS_ID 31 /* vx_handle_process_id(process handle) -> its id */
+
+#define VX_MAP_WRITE 0x1
+#define VX_MAP_EXEC 0x2
+
+/* vx_spawn flags. */
+#define VX_SPAWN_NEW_GROUP 0x1 /* Start a new process group (for a shell's jobs). */
+#define VX_SPAWN_JOIN_GROUP 0x2 /* Join the process group in vx_spawn.group. */
+
+/* vx_wait flags. */
+#define VX_WAIT_NO_HANG 0x1 /* Return -VX_EAGAIN at once if it hasn't exited. */
+
+struct vx_spawn {
+    const char *const *argv; /* argc strings; argv[0] is usually the program name. */
+    unsigned long argc;
+    const char *const *envp; /* "NAME=value" strings. */
+    unsigned long envc;
+    int handles[3];          /* The new process's 0, 1, 2; -1 for none. */
+    unsigned int flags;      /* VX_SPAWN_* */
+    unsigned int group;      /* With VX_SPAWN_JOIN_GROUP. */
+};
+
+/* Signals: the usual Unix numbers. Native programs can only ignore them or
+ * take the default action (which, for most, ends the process). */
+#define VX_SIGHUP 1
+#define VX_SIGINT 2  /* Ctrl+C */
+#define VX_SIGQUIT 3
+#define VX_SIGILL 4
+#define VX_SIGTRAP 5
+#define VX_SIGABRT 6
+#define VX_SIGBUS 7
+#define VX_SIGFPE 8
+#define VX_SIGKILL 9 /* Can't be ignored. */
+#define VX_SIGUSR1 10
+#define VX_SIGSEGV 11
+#define VX_SIGUSR2 12
+#define VX_SIGPIPE 13
+#define VX_SIGALRM 14
+#define VX_SIGTERM 15
+#define VX_SIGCHLD 17
+#define VX_SIGCONT 18
+#define VX_SIGSTOP 19
+#define VX_SIGTSTP 20
+#define VX_SIGTTIN 21
+#define VX_SIGTTOU 22
+#define VX_SIGURG 23
+#define VX_SIGWINCH 28
+#define VX_SIGNAL_COUNT 64
+
+#define VX_SIGNAL_DEFAULT 0
+#define VX_SIGNAL_IGNORE 1
+
+struct vx_system_info {
+    char version[16];
+    unsigned int cpus;
+    unsigned int reserved;
+    unsigned long long memory_total; /* Bytes. */
+    unsigned long long memory_free;
+    unsigned long long uptime_ms;
+};
+
+struct vx_process_info {
+    unsigned int id;
+    unsigned int parent;  /* 0 if none. */
+    unsigned int group;
+    unsigned int state;   /* 0 running, 1 exited */
+    unsigned long long memory; /* Bytes of memory in use. */
+    char name[32];
+};
+
 /* vx_open flags. A handle can only be used the ways it was opened for. */
 #define VX_OPEN_READ 0x1
 #define VX_OPEN_WRITE 0x2
@@ -85,6 +172,15 @@ struct vx_dir_entry {
 #define VX_EROFS 16        /* The file system is read-only. */
 #define VX_EBUSY 17        /* In use, e.g. a directory with something mounted on it. */
 #define VX_EXDEV 18        /* Crosses file systems. */
+#define VX_EINTR 19        /* Interrupted by a signal. */
+#define VX_EPIPE 20        /* Writing to a pipe nobody reads. */
+#define VX_ECHILD 21       /* Not a child process. */
+#define VX_ESRCH 22        /* No such process. */
+#define VX_EAGAIN 23       /* Try again (nothing available right now). */
+#define VX_ENOEXEC 24      /* Not a program Vexa can run. */
+#define VX_E2BIG 25        /* Arguments and environment too large. */
+#define VX_ENOTTY 26       /* Not a terminal. */
+#define VX_ESPIPE 27       /* Can't seek on a pipe or terminal. */
 
 /* Every Vexa program carries an ELF note with this name and type, holding the
  * ABI version as a 32-bit integer. The kernel uses it to tell native programs

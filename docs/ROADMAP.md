@@ -108,11 +108,17 @@ writes to virtio, SATA and NVMe disks and then checks them with Linux's `e2fsck`
 ## Phase 5: Vexa userland
 
 Native track:
-- [ ] `libvexa`: C startup code, strings, memory allocator, `printf`, file I/O
-      over native system calls
-- [ ] Native process calls: spawn, wait, exit; memory mapping; pipes
-- [ ] `vinit` (first process) and `vsh` (the Vexa shell)
-- [ ] Core utilities written for Vexa: `ls`, `cat`, `echo`, `mkdir`, `rm`
+- [x] `libvexa`: C startup code, strings, memory allocator, `printf`, buffered file I/O,
+      environment variables, over native system calls
+- [x] Native process calls: spawn, wait, exit, kill, signals, process groups; memory
+      mapping; pipes; current directory
+- [x] A terminal (`/dev/tty`): line editing, Ctrl-C, Ctrl-D, raw mode; ANSI escape
+      sequences on the console
+- [x] Demand paging and copy-on-write pages (the Linux `fork` needs them)
+- [x] `vinit` (first process) and `vsh` (the Vexa shell: pipes, redirection, variables,
+      background programs, scripts)
+- [x] Core utilities written for Vexa: `ls`, `cat`, `echo`, `mkdir`, `rm`, `cp`, `mv`,
+      `pwd`, `ps`, `kill`, `sleep`, `clear`, `uptime`, `hello`, `sys`
 
 Linux track:
 - [ ] Create `kernel/src/personality/linux/` and the `LINUX_COMPAT` build option

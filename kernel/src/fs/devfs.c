@@ -3,6 +3,7 @@
 #include <vexa/kprintf.h>
 #include <vexa/mm.h>
 #include <vexa/string.h>
+#include <vexa/tty.h>
 #include <vexa/vfs.h>
 
 /* devfs: /dev, a flat directory of device files. null, zero and console are
@@ -39,10 +40,14 @@ static int64_t zero_read(struct vnode *v, void *b, size_t s, uint64_t o) {
     return (int64_t)s;
 }
 
+static int64_t console_read(struct vnode *v, void *b, size_t s, uint64_t o) {
+    (void)v, (void)o;
+    return tty_read(b, s);
+}
+
 static int64_t console_write(struct vnode *v, const void *b, size_t s, uint64_t o) {
     (void)v, (void)o;
-    kwrite(b, s);
-    return (int64_t)s;
+    return tty_write(b, s);
 }
 
 static int64_t block_node_read(struct vnode *vnode, void *buffer, size_t size, uint64_t offset) {
@@ -74,7 +79,7 @@ static int64_t block_node_write(struct vnode *vnode, const void *buffer, size_t 
 
 static const struct vnode_ops null_ops = {.read = null_read, .write = null_write};
 static const struct vnode_ops zero_ops = {.read = zero_read, .write = null_write};
-static const struct vnode_ops console_ops = {.read = null_read, .write = console_write};
+static const struct vnode_ops console_ops = {.read = console_read, .write = console_write};
 static const struct vnode_ops block_ops = {.read = block_node_read, .write = block_node_write};
 
 static void add_node(const char *name, uint32_t type, const struct vnode_ops *ops,
@@ -146,6 +151,7 @@ static int devfs_mount(struct mount *mount, struct block_device *device) {
     add_node("null", VX_TYPE_CHAR_DEVICE, &null_ops, NULL);
     add_node("zero", VX_TYPE_CHAR_DEVICE, &zero_ops, NULL);
     add_node("console", VX_TYPE_CHAR_DEVICE, &console_ops, NULL);
+    add_node("tty", VX_TYPE_CHAR_DEVICE, &console_ops, NULL);
     for (int i = 0; i < pending_count; i++) {
         add_node(pending_blocks[i]->name, VX_TYPE_BLOCK_DEVICE, &block_ops, pending_blocks[i]);
     }

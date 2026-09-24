@@ -30,5 +30,8 @@ static inline void user_access_end(void) {
  * false instead of faulting if not. */
 bool copy_from_user(void *dest, uint64_t user_src, size_t size);
 bool copy_to_user(uint64_t user_dest, const void *src, size_t size);
+/* Copies a NUL-terminated string of at most max - 1 characters. Returns its
+ * length, or -1 if it is too long or not valid user memory. */
+int64_t copy_string_from_user(char *dest, uint64_t user_src, size_t max);
 
 #endif

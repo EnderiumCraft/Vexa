@@ -8,6 +8,7 @@
 #include <vexa/uaccess.h>
 
 #define IA32_PAT_MSR 0x277
+#define IA32_FS_BASE_MSR 0xc0000100
 #define IA32_GS_BASE_MSR 0xc0000101
 #define IA32_KERNEL_GS_BASE_MSR 0xc0000102
 
@@ -110,6 +111,12 @@ void arch_prepare_switch(struct cpu *cpu, struct thread *prev, struct thread *ne
         fpu_restore(next->fpu_state);
     }
     vmm_activate(next->process ? next->process->address_space : NULL);
+    if (prev->process) {
+        prev->fs_base = rdmsr(IA32_FS_BASE_MSR); /* A program may have changed it. */
+    }
+    if (next->process) {
+        wrmsr(IA32_FS_BASE_MSR, next->fs_base);
+    }
     /* Where the CPU switches stacks on entry from user mode (interrupts use the
      * TSS, system calls read kernel_rsp). */
     cpu->kernel_rsp = next->stack_top;

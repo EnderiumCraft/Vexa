@@ -6,16 +6,7 @@
 #include <vexa/string.h>
 #include <vexa/uaccess.h>
 
-#define PTE_PRESENT (1ULL << 0)
-#define PTE_WRITE (1ULL << 1)
-#define PTE_USER (1ULL << 2)
-#define PTE_PWT (1ULL << 3)
-#define PTE_PCD (1ULL << 4)
-#define PTE_HUGE (1ULL << 7)     /* In a PD or PDPT entry: maps 2 MiB / 1 GiB. */
-#define PTE_PAT_4K (1ULL << 7)   /* In a PT entry: third PAT index bit. */
-#define PTE_PAT_2M (1ULL << 12)  /* The same bit, in a 2 MiB entry. */
-#define PTE_NX (1ULL << 63)
-#define PTE_ADDR_MASK 0x000ffffffffff000ULL
+#include "paging.h"
 
 #define LARGE_PAGE_SIZE (2ULL * 1024 * 1024)
 
@@ -215,73 +206,14 @@ bool vmm_is_stack_guard(uint64_t virt) {
     return !pte || !(*pte & PTE_PRESENT);
 }
 
-/* ---- User address spaces ---- */
+/* ---- Helpers for user address spaces (core/vm.c) ---- */
 
-static uint64_t *active_pml4(void) {
-    return phys_to_virt(read_cr3() & PTE_ADDR_MASK);
+uint64_t vmm_kernel_pml4_phys(void) {
+    return virt_to_phys(kernel_pml4);
 }
 
-/* Like pt_entry(), but in a user address space and creating user-accessible
- * intermediate tables. */
-static uint64_t *user_pte(uint64_t *pml4, uint64_t virt, bool create) {
-    uint64_t *table = pml4;
-    for (int shift = 39; shift > 12; shift -= 9) {
-        uint64_t *entry = &table[(virt >> shift) & 0x1ff];
-        if (!(*entry & PTE_PRESENT)) {
-            if (!create) {
-                return NULL;
-            }
-            uint64_t phys = pmm_alloc(0);
-            if (!phys) {
-                return NULL;
-            }
-            memset(phys_to_virt(phys), 0, PAGE_SIZE);
-            *entry = phys | PTE_PRESENT | PTE_WRITE | PTE_USER;
-        } else if (*entry & PTE_HUGE) {
-            return NULL;
-        }
-        table = phys_to_virt(*entry & PTE_ADDR_MASK);
-    }
-    return &table[(virt >> 12) & 0x1ff];
-}
-
-struct address_space *vmm_create_address_space(void) {
-    struct address_space *as = kzalloc(sizeof(*as));
-    uint64_t phys = as ? pmm_alloc(0) : 0;
-    if (!phys) {
-        kfree(as);
-        return NULL;
-    }
-    as->pml4_phys = phys;
-    as->pml4 = phys_to_virt(phys);
-    memset(as->pml4, 0, PAGE_SIZE / 2);
-    memcpy(as->pml4 + 256, kernel_pml4 + 256, PAGE_SIZE / 2);
-    return as;
-}
-
-static void free_table(uint64_t *table, int level) {
-    for (int i = 0; i < 512; i++) {
-        if (!(table[i] & PTE_PRESENT)) {
-            continue;
-        }
-        uint64_t phys = table[i] & PTE_ADDR_MASK;
-        if (level > 1) {
-            free_table(phys_to_virt(phys), level - 1);
-        }
-        pmm_free(phys, 0); /* A lower-level table, or (level 1) a user page. */
-    }
-}
-
-void vmm_destroy_address_space(struct address_space *as) {
-    for (int i = 0; i < 256; i++) {
-        if (as->pml4[i] & PTE_PRESENT) {
-            uint64_t *pdpt = phys_to_virt(as->pml4[i] & PTE_ADDR_MASK);
-            free_table(pdpt, 3);
-            pmm_free(as->pml4[i] & PTE_ADDR_MASK, 0);
-        }
-    }
-    pmm_free(as->pml4_phys, 0);
-    kfree(as);
+uint64_t vmm_nx_bit(void) {
+    return nx_bit;
 }
 
 void vmm_activate(struct address_space *as) {
@@ -289,45 +221,4 @@ void vmm_activate(struct address_space *as) {
     if ((read_cr3() & PTE_ADDR_MASK) != phys) {
         __asm__ volatile("mov %0, %%cr3" : : "r"(phys) : "memory");
     }
-}
-
-uint64_t vmm_map_user_page(struct address_space *as, uint64_t virt, unsigned flags) {
-    virt &= ~(PAGE_SIZE - 1);
-    if (virt < USER_BASE || virt >= USER_END) {
-        return 0;
-    }
-    uint64_t lock_flags = spin_lock_irqsave(&vmm_lock);
-    uint64_t phys = 0;
-    uint64_t *pte = user_pte(as->pml4, virt, true);
-    if (pte) {
-        if (*pte & PTE_PRESENT) {
-            phys = *pte & PTE_ADDR_MASK;
-            if (flags & VMM_WRITE) {
-                *pte |= PTE_WRITE;
-            }
-            if (flags & VMM_EXEC) {
-                *pte &= ~PTE_NX;
-            }
-        } else if ((phys = pmm_alloc(0))) {
-            memset(phys_to_virt(phys), 0, PAGE_SIZE);
-            *pte = phys | flags_for(flags, MAP_WRITEBACK) | PTE_USER;
-        }
-    }
-    spin_unlock_irqrestore(&vmm_lock, lock_flags);
-    return phys;
-}
-
-bool vmm_user_range_mapped(uint64_t virt, uint64_t size, bool write) {
-    if (virt < USER_BASE || virt + size < virt || virt + size > USER_END) {
-        return false;
-    }
-    uint64_t *pml4 = active_pml4();
-    uint64_t lock_flags = spin_lock_irqsave(&vmm_lock);
-    bool ok = true;
-    for (uint64_t page = virt & ~(PAGE_SIZE - 1); ok && page < virt + size; page += PAGE_SIZE) {
-        uint64_t *pte = user_pte(pml4, page, false);
-        ok = pte && (*pte & PTE_PRESENT) && (*pte & PTE_USER) && (!write || (*pte & PTE_WRITE));
-    }
-    spin_unlock_irqrestore(&vmm_lock, lock_flags);
-    return ok;
 }

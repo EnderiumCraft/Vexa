@@ -23,7 +23,7 @@ import time
 import zlib
 
 BOOT_TIMEOUT = 60
-PROMPT = "vexa> "
+PROMPT = "vexa:"
 OVMF = os.environ.get("OVMF", "/usr/share/qemu/OVMF.fd")
 
 # Messages the kernel must print while booting, normally and in safe mode. Safe
@@ -44,52 +44,73 @@ EXPECTED_BOOT_LEGACY = [
     "Vexa kernel initialized",
 ]
 
-# Typed at the monitor prompt, with text that must appear in response, how
-# many seconds to wait for it, and optionally how many times it must appear in
-# the whole log. The repeated "help" makes the console scroll.
+# Typed at the vsh prompt, with text that must appear in response (None: just
+# wait for the prompt to come back), how many seconds to wait for it, and
+# optionally how many times it must appear in the whole log. Typed text is
+# echoed to the log too, which is why some counts are 2. "^C" presses Ctrl-C
+# a second after the rest of the line was typed.
 TYPED_COMMANDS = [
-    ("help", "reboot", 10),
-    ("help", "reboot", 10),
-    ("help", "reboot", 10),
-    ("hello", "hi :)\r\nVexa 0.", 10),
-    ("cpux\b", "vendor", 10),  # Backspace erases the typo, so this runs "cpu".
-    ("uptime", "up ", 10),
-    ("mem", "heap ", 10),
-    ("memtest", "memtest: passed", 180),
-    ("programs", "hello-world", 10),
-    # Files: the root file system unpacked from the initramfs, and /dev.
+    ("help", "run in the background", 10),
+    ("hello", "hi :)", 10),
+    ("uptime", "MiB memory free", 10),
     ("ls /", "README.txt", 10),
-    ("mount", "devfs", 10),
-    ("write /tmp/note.txt hello from the monitor", "vexa> write", 10),
-    ("cat /tmp/note.txt", "hello from the monitor", 10, 2),
-    ("run fs-test", "fs-test: passed", 60),
+    ("ls /bin", "vsh", 10, 2),
+    ("cat /etc/motd", "Welcome to Vexa", 10, 2),
+    # Pipes, redirection and variables.
+    ("echo one two | cat | cat", "one two", 10, 2),
+    ("export WHAT=pipes", None, 10),
+    ("echo $WHAT-work", "pipes-work", 10),
+    ("echo redirected > /tmp/r.txt", None, 10),
+    ("echo appended >> /tmp/r.txt", None, 10),
+    ("cat < /tmp/r.txt | cat", "redirected\r\nappended", 10),
+    # Files and directories.
+    ("mkdir -p /tmp/a/b", None, 10),
+    ("cp /etc/motd /tmp/a/b/copy", None, 10),
+    ("mv /tmp/a/b/copy /tmp/a/moved", None, 10),
+    ("ls -l /tmp/a", "moved", 10, 2),
+    ("cd /tmp/a", "vexa:/tmp/a> ", 10),
+    ("pwd", "/tmp/a\r\n", 10),
+    ("cd ..", None, 10),
+    ("rm -r a ; ls", "r.txt", 10),
+    ("cd /", None, 10),
+    ("fs-test", "fs-test: passed", 60),
     # The Phase 3 milestone: a native program in user mode.
-    ("run hello-world", "running in user mode.", 30),
-    ("run hello-world", "exited with code 0", 30, 2),
+    ("hello-world", "running in user mode.", 30),
     # A program that misbehaves is stopped, and the system carries on.
-    ("run crash", "kernel pointer rejected", 30),
-    ("hello", "killed: Page Fault", 30),
+    ("crash", "kernel pointer rejected", 30),
+    ("echo exit code $?", "exit code 139", 10),
+    # Ctrl-C stops the foreground program, not the shell.
+    ("sleep 30^C", None, 10),
+    ("echo interrupted: $?", "interrupted: 130", 10),
+    ("sleep 0.2 ; echo slept", "slept", 10, 2),
     # Three programs at once, each checking its vector registers survive.
-    ("spawn fpu-stress", "started fpu-stress", 10),
-    ("spawn fpu-stress", "started fpu-stress", 10, 2),
-    ("run fpu-stress", "): passed, 20 rounds", 300, 3),
-    ("threads", "monitor", 10),
-    ("Hello Vexa", "unknown command: Hello", 10),
+    ("fpu-stress &", "started in the background", 10),
+    ("fpu-stress &", "started in the background", 10, 2),
+    ("fpu-stress", "): passed, 20 rounds", 300, 3),
+    ("ps", "vinit", 10),
+    # The kernel monitor's commands, through `sys`.
+    ("sys mem", "heap ", 10),
+    ("sys threads", "idle", 10),
+    ("sys memtest", "memtest: passed", 180),
+    ("Hello Vexa", "Hello: command not found", 10),
 ]
 
 # With --disks: one ext2 file system on each kind of disk.
 DISK_COMMANDS = [
-    ("disks", "nvme0n1", 10),
-    ("mount", "/mnt/nvme0n1", 10),
+    ("sys disks", "nvme0n1", 10),
+    ("sys mount", "/mnt/nvme0n1", 10),
     ("cat /mnt/vda1/hello.txt", "Hello from an ext2 disk!", 10),
     ("cat /mnt/sda1/docs/notes.txt", "lives on a test disk", 10),
-    ("run /mnt/nvme0n1/hello-world", "Hello, world!", 30, 3),
-    ("run fs-test", "on the disk at /mnt/vda1", 120, 2),
-    ("write /mnt/sda1/from-vexa.txt written on sata", "vexa> write /mnt/sda1", 10),
+    ("/mnt/nvme0n1/hello-world", "Hello, world!", 30, 2),
+    ("fs-test", "on the disk at /mnt/vda1", 120, 2),
+    ("echo written on sata > /mnt/sda1/from-vexa.txt", None, 10),
     ("cat /mnt/sda1/from-vexa.txt", "written on sata", 10, 2),
-    ("mkdir /mnt/nvme0n1/made-by-vexa", "vexa> mkdir", 10),
-    ("write /mnt/nvme0n1/made-by-vexa/note.txt written on nvme", "vexa> write /mnt/nvme0n1", 10),
+    ("mkdir /mnt/nvme0n1/made-by-vexa", None, 10),
+    ("echo written on nvme > /mnt/nvme0n1/made-by-vexa/note.txt", None, 10),
     ("cat /mnt/nvme0n1/made-by-vexa/note.txt", "written on nvme", 10, 2),
+    ("mv /mnt/nvme0n1/made-by-vexa/note.txt /mnt/nvme0n1/moved.txt", None, 10),
+    ("cat /mnt/nvme0n1/moved.txt", "written on nvme", 10, 3),
+    ("rm -r /mnt/nvme0n1/made-by-vexa", None, 10),
 ]
 
 # (file name in the disks directory, QEMU arguments, where the ext2 starts)
@@ -115,7 +136,9 @@ def check_filesystem(image, offset, tmp):
 
 # QEMU `sendkey` names for characters that aren't plain lowercase letters or digits.
 KEY_NAMES = {" ": "spc", "\n": "ret", "\b": "backspace", "-": "minus", ".": "dot", "/": "slash",
-             ":": "shift-semicolon", "_": "shift-minus"}
+             ":": "shift-semicolon", "_": "shift-minus", ";": "semicolon", "=": "equal",
+             "|": "shift-backslash", ">": "shift-dot", "<": "shift-comma", "$": "shift-4",
+             "?": "shift-slash", "&": "shift-7", "\"": "shift-apostrophe", "'": "apostrophe"}
 
 
 def keys_for(text):
@@ -238,9 +261,15 @@ def main():
                 if not wait_for(log_path, PROMPT, 300, typed + 1):
                     failures.append(f"no prompt before typing {command!r}")
                     break
-                for key in keys_for(command + "\n"):
+                line, interrupt = command, command.endswith("^C")
+                if interrupt:
+                    line = command[:-2]
+                for key in keys_for(line + "\n"):
                     monitor.command("sendkey " + key)
-                if not wait_for(log_path, expected, timeout, *count):
+                if interrupt:
+                    time.sleep(1)
+                    monitor.command("sendkey ctrl-c")
+                if expected is not None and not wait_for(log_path, expected, timeout, *count):
                     failures.append(f"typed {command!r}: missing {expected!r}")
 
         if args.screenshot:

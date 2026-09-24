@@ -55,3 +55,8 @@ int strcmp(const char *s1, const char *s2) {
     }
     return (unsigned char)*s1 - (unsigned char)*s2;
 }
+
+char *strcpy(char *dest, const char *src) {
+    memcpy(dest, src, strlen(src) + 1);
+    return dest;
+}

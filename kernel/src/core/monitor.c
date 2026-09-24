@@ -18,6 +18,7 @@
 #include <vexa/sched.h>
 #include <vexa/string.h>
 #include <vexa/uaccess.h>
+#include <vexa/tty.h>
 #include <vexa/version.h>
 #include <vexa/vfs.h>
 
@@ -52,6 +53,7 @@ static void cmd_mount(const char *args);
 static void cmd_disks(const char *args);
 static void cmd_pci(const char *args);
 static void cmd_reboot(const char *args);
+static void run_line(char *line);
 
 static const struct command commands[] = {
     {"help", "", "list commands", cmd_help},
@@ -353,48 +355,84 @@ static void cmd_programs(const char *args) {
     list_directory("/bin");
 }
 
-static bool strchr_simple(const char *s, char c) {
+static bool contains_slash(const char *s) {
     for (; *s; s++) {
-        if (*s == c) {
+        if (*s == '/') {
             return true;
         }
     }
     return false;
 }
 
-static struct process *start_program(const char *name, bool detached) {
+/* The terminal, as a file, for the standard handles of programs we start. */
+static struct object *console_object(void) {
+    static struct file *console;
+    if (!console && vfs_open("/dev/console", 12, VX_OPEN_READ | VX_OPEN_WRITE, &console)) {
+        return NULL;
+    }
+    return console ? &console->object : NULL;
+}
+
+static struct process *start_program(const char *name, bool background) {
     if (!*name) {
         kprintf("which program? (try 'programs')\n");
         return NULL;
     }
     /* A bare name means /bin/<name>. */
     char path[128] = "/bin/";
-    if (strchr_simple(name, '/')) {
-        return process_spawn(name, detached);
-    }
     size_t n = strlen(name);
-    if (n > sizeof(path) - 6) {
+    if (contains_slash(name)) {
+        if (n >= sizeof(path)) {
+            return NULL;
+        }
+        memcpy(path, name, n + 1);
+    } else if (n > sizeof(path) - 6) {
         kprintf("program name too long\n");
         return NULL;
+    } else {
+        memcpy(path + 5, name, n + 1);
     }
-    memcpy(path + 5, name, n + 1);
-    return process_spawn(path, detached);
+    char *argv[] = {path};
+    char *envp[] = {"PATH=/bin"};
+    struct spawn_request request = {
+        .path = path, .argv = argv, .argc = 1, .envp = envp, .envc = 1,
+        .new_group = true,
+    };
+    struct object *console = console_object();
+    for (int i = 0; i < 3; i++) {
+        request.handles[i] = console;
+        request.rights[i] = HANDLE_RIGHT_READ | HANDLE_RIGHT_WRITE;
+    }
+    int error;
+    const char *reason;
+    struct process *process = process_spawn(&request, &error, &reason);
+    if (!process) {
+        kprintf("[proc] cannot start %s: %s\n", path, reason);
+        return NULL;
+    }
+    if (background) {
+        object_put(&process->object); /* It collects itself when it exits. */
+        return process;
+    }
+    return process;
 }
 
 static void cmd_run(const char *args) {
     struct process *process = start_program(args, false);
     if (process) {
-        uint32_t id = process->id;
-        char name[sizeof(process->name)];
-        memcpy(name, process->name, sizeof(name));
-        int code = process_wait(process);
-        kprintf("[proc] %s (process %u) exited with code %d\n", name, id, code);
+        uint32_t previous = tty_foreground();
+        tty_set_foreground(process->group); /* Ctrl+C goes to the program. */
+        process_wait_exit(process, false);
+        tty_set_foreground(previous);
+        kprintf("[proc] %s (process %u) exited with code %d\n", process->name, process->id,
+                process->exit_code);
+        process_reap(process);
+        object_put(&process->object);
     }
 }
 
 static void cmd_spawn(const char *args) {
-    struct process *process = start_program(args, true);
-    if (process) {
+    if (start_program(args, true)) {
         kprintf("[proc] started %s in the background\n", args);
     }
 }
@@ -439,6 +477,17 @@ static void cmd_reboot(const char *args) {
     } empty_idt = {0, 0};
     __asm__ volatile("lidt %0; int3" : : "m"(empty_idt));
     cpu_halt_forever();
+}
+
+void monitor_command(const char *text) {
+    char line[128];
+    size_t n = strlen(text);
+    if (n >= sizeof(line)) {
+        n = sizeof(line) - 1;
+    }
+    memcpy(line, text, n);
+    line[n] = '\0';
+    run_line(line);
 }
 
 static void run_line(char *line) {

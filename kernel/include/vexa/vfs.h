@@ -28,6 +28,10 @@ struct vnode_ops {
     int (*create)(struct vnode *dir, const char *name, size_t length, uint32_t type,
                   struct vnode **out);
     int (*remove)(struct vnode *dir, const char *name, size_t length);
+    /* Moves an entry, replacing any file (or empty directory) at the target.
+     * Both directories are on this file system. */
+    int (*rename)(struct vnode *old_dir, const char *old_name, size_t old_length,
+                  struct vnode *new_dir, const char *new_name, size_t new_length);
     /* Fills *entry and returns 1, or returns 0 at the end. *cookie starts at 0. */
     int (*read_dir)(struct vnode *dir, uint64_t *cookie, struct vx_dir_entry *entry);
     /* Files and devices. Return bytes transferred or a negative VX_E* error. */
@@ -97,6 +101,7 @@ int vfs_open(const char *path, size_t length, uint32_t flags, struct file **out)
 int vfs_stat(const char *path, size_t length, struct vx_stat *stat);
 int vfs_mkdir(const char *path, size_t length);
 int vfs_remove(const char *path, size_t length);
+int vfs_rename(const char *from, size_t from_length, const char *to, size_t to_length);
 
 /* Operations on open files. Buffers are kernel memory. */
 int64_t vfs_read(struct file *file, void *buffer, size_t size);

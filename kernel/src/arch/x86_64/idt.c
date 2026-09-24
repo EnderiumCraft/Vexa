@@ -3,6 +3,7 @@
 #include <vexa/kprintf.h>
 #include <vexa/mm.h>
 #include <vexa/process.h>
+#include <vexa/signal.h>
 
 struct __attribute__((packed)) idt_entry {
     uint16_t offset_low;
@@ -104,11 +105,29 @@ void interrupt_dispatch(struct interrupt_frame *frame) {
     }
 
     if (frame->cs & 3) {
-        /* A user program faulted: end it, not the whole system. */
+        struct process *process = process_current();
+        /* Most page faults are just memory being used for the first time, or
+         * a write to a page shared since fork. */
+        bool present = frame->error_code & 1, write = frame->error_code & 2;
+        bool reserved = frame->error_code & 8;
+        /* Only a missing page, or a write to a present one, can be fixed up;
+         * reading or running a present page that faulted is a real fault. */
+        if (frame->vector == 14 && !reserved && (!present || write) &&
+            vm_handle_fault(process->address_space, cr2, write)) {
+            signal_deliver(frame);
+            return;
+        }
+        /* A real fault: the program gets a signal, which usually ends it. */
+        int signal = frame->vector == 14 || frame->vector == 13 ? VX_SIGSEGV
+                     : frame->vector == 0 || frame->vector == 16 || frame->vector == 19 ? VX_SIGFPE
+                     : frame->vector == 3 || frame->vector == 1 ? VX_SIGTRAP
+                                                                : VX_SIGILL;
         kprintf("[proc] %s at rip=%p, address %p\n",
                 frame->vector == 14 ? detail : exception_names[frame->vector & 31],
                 (void *)frame->rip, (void *)cr2);
-        process_kill_current(exception_names[frame->vector & 31]);
+        signal_fault(frame, signal, exception_names[frame->vector & 31]);
+        signal_deliver(frame);
+        return;
     }
 
     panic("CPU exception %lu (%s)\n%s\n"

@@ -7,16 +7,18 @@ Vexa has its own kernel design, its own system call interface and its own C libr
 Linux programs such as Firefox run through a separate, optional compatibility subsystem
 that sits on top of the Vexa kernel. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-![The Vexa kernel monitor running in QEMU](docs/screenshot.png)
+![Vexa running in QEMU](docs/screenshot.png)
 
 ## Status
 
 Phases 1 to 4 are complete: boot and CPU basics, memory management, processes and
-user mode, and files and storage. The kernel:
+user mode, and files and storage. Phase 5 is under way: Vexa now boots into its own
+shell, `vsh`, with pipes and a set of core programs. The kernel:
 
 - boots through the [Limine](https://github.com/limine-bootloader/limine) bootloader (BIOS and UEFI)
 - runs in 64-bit long mode as a higher-half kernel
-- shows a text console on the screen and mirrors it to the COM1 serial port
+- shows a text console on the screen (with ANSI colors and cursor movement) and mirrors
+  it to the COM1 serial port
 - loads its own GDT and IDT and reports CPU exceptions with a register dump
 - reads the ACPI tables and sets up the local APIC and I/O APIC, falling back to
   the legacy 8259 PIC on machines without them
@@ -24,37 +26,43 @@ user mode, and files and storage. The kernel:
   itself
 - manages memory with a buddy page allocator, its own page tables (read-only code,
   no-execute data) and a slab-based kernel heap (`kmalloc`/`kfree`)
+- gives programs memory on demand, and shares pages copy-on-write
 - runs on kernel stacks with guard pages, and reports stack overflows and other faults
   in plain words
 - reads the PS/2 keyboard (US layout, Shift, Caps Lock, Ctrl)
+- has a terminal with line editing, Ctrl-C (or Ctrl-\\) to stop programs and Ctrl-D for
+  end of input
 - runs threads with a preemptive scheduler, on every CPU core it finds
 - runs programs in user mode, each in its own address space, and stops a program
   that misbehaves without taking the system down
+- has processes with parents and children, process groups, pipes and signals
 - saves and restores each program's floating point and vector registers (SSE, AVX)
 - has its own system call interface and C library, `libvexa`
 - has a file system tree with a root in memory (unpacked from an initramfs), `/dev`,
   and disks mounted under `/mnt`
 - drives disks through virtio-blk (virtual machines), AHCI (SATA) and NVMe, reads GPT
   and MBR partition tables, and reads and writes ext2 file systems
-- ends in a small built-in command line, the kernel monitor, until Vexa has a real
-  shell
 
-Some things to try at the `vexa>` prompt:
+At boot, `vinit` (the first program) starts `vsh`, the Vexa shell. Some things to try at
+the `vexa:/>` prompt:
 
 | Command | What it does |
 | --- | --- |
 | `hello` | says hi, and which version of Vexa is running |
-| `help` | lists every command |
-| `ls /`, `cat /etc/motd` | look around the file system |
-| `write /tmp/note.txt hi`, `mkdir`, `rm` | make and remove files and directories |
-| `programs` | lists the programs you can run (everything in `/bin`) |
-| `run hello-world` | runs the first Vexa program, in user mode |
-| `run crash` | runs a program that misbehaves on purpose, to show it gets stopped |
-| `run fs-test` | checks the file system calls from a user program |
-| `disks`, `mount`, `pci` | disks and partitions, mounted file systems, PCI devices |
-| `spawn fpu-stress` | starts a program in the background (try it three times, then `threads`) |
-| `threads`, `ps` | list threads and processes |
-| `cpu`, `mem`, `memtest` | processor and memory information, and a memory stress test |
+| `help` | how to use the shell; `ls /bin` lists the programs |
+| `ls /`, `cat /etc/motd`, `cd /tmp`, `pwd` | look around the file system |
+| `echo hi > note.txt`, `mkdir`, `cp`, `mv`, `rm -r` | make, copy, move and remove files |
+| `ls /bin \| cat`, `cat < note.txt`, `echo more >> note.txt` | pipes and redirection |
+| `hello-world` | the first Vexa program |
+| `crash` | a program that misbehaves on purpose, to show it gets stopped |
+| `fs-test` | checks the file system calls |
+| `fpu-stress &` | runs a program in the background (try it three times, then `ps`) |
+| `sleep 30`, then Ctrl-C | stops the program in front |
+| `ps`, `kill`, `uptime` | processes and how long the system has been up |
+| `sys` | the kernel's own commands: `sys disks`, `sys mount`, `sys pci`, `sys cpu`, `sys mem`, `sys memtest`, `sys threads` |
+
+The kernel's built-in command line (the kernel monitor) is still there for when
+something is broken: pick it in the boot menu, and Vexa starts it instead of `vinit`.
 
 If Vexa has trouble on a machine, pick **safe mode** in the boot menu. It ignores ACPI
 and uses only the oldest, most widely supported interrupt and timer hardware. The
@@ -78,8 +86,7 @@ ext4 disks are refused (Vexa doesn't support their extra features yet), and ext2
 journal, so pulling the plug mid-write can leave the disk needing a check with
 `e2fsck` on Linux.
 
-Next up is Phase 5: a Vexa userland (shell and tools), and the start of the Linux
-subsystem. See [docs/ROADMAP.md](docs/ROADMAP.md) for the full
+Next in Phase 5: the Linux subsystem, starting with BusyBox. See [docs/ROADMAP.md](docs/ROADMAP.md) for the full
 plan from here to Firefox.
 
 ## Download
@@ -133,17 +140,18 @@ kernel/
   src/kmain.c        kernel entry point and boot sequence
   src/arch/x86_64/   per-CPU setup, interrupts, APIC and 8259 PIC, timer, FPU state,
                      system call entry, context switch, starting other CPUs
-  src/core/          memory (pmm, vmm, heap), scheduler, processes, handles, VFS,
+  src/core/          memory (pmm, vmm, address spaces, heap), scheduler, processes,
+                     signals, pipes, handles, VFS,
                      block cache and partitions, ELF loader, ACPI, init, kernel monitor
   src/personality/vexa/  the native Vexa system calls
-  src/dev/           serial, framebuffer, text console, font, PS/2 keyboard, clock,
+  src/dev/           serial, framebuffer, text console, terminal, font, PS/2 keyboard, clock,
                      PCI, virtio-blk, AHCI, NVMe
   src/lib/           string functions, kprintf, panic
   src/fs/            ext2, tmpfs, devfs, initramfs unpacking
 abi/vexa/abi.h       system call numbers and error codes, shared by kernel and libvexa
 rootfs/              files for the root file system (packed into initramfs.tar)
 libvexa/             Vexa's C library: program startup, system calls, printf, strings
-userland/            Vexa programs, one directory each (hello-world, fs-test, ...)
+userland/            Vexa programs, one directory each: vinit, vsh, ls, cat, ...
 tests/disk-content/  files put on the test disks
 tools/
   bdf2c.py           converts a BDF bitmap font into the console font table
@@ -155,7 +163,8 @@ docs/
 ```
 
 To add a program, create `userland/<name>/main.c`: the Makefile builds every
-directory there with libvexa and puts it in `/bin`, and `run <name>` starts it.
+directory there with libvexa and puts it in `/bin`, and typing `<name>` in the shell
+starts it.
 
 The console font is [Spleen](https://github.com/fcambus/spleen) 8x16 by Frederic Cambus
 (BSD 2-Clause license, reproduced in `kernel/src/dev/font.c`).

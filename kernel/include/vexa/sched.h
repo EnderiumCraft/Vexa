@@ -28,6 +28,10 @@ struct thread {
     uint32_t cpu;            /* CPU it last ran on. */
     struct thread *next;     /* Run queue, sleep list or wait queue link. */
     struct thread *all_next; /* List of every thread. */
+    struct wait_queue *waiting_on; /* While THREAD_BLOCKED. */
+    bool interruptible;            /* A signal may end the wait early. */
+    uint64_t blocked_signals;      /* Signals this thread doesn't take yet. */
+    uint64_t fs_base;              /* User thread-local storage pointer. */
 };
 
 /* Threads waiting for something. Wake-ups can't be lost: wait_queue_wait()
@@ -58,6 +62,16 @@ void thread_sleep_ms(uint64_t ms);
 __attribute__((noreturn)) void thread_exit(void);
 
 void wait_queue_wait(struct wait_queue *queue, bool (*ready)(void *), void *arg);
+/* Like wait_queue_wait, but gives up with -VX_EINTR if a signal arrives for
+ * the thread. Use it for waits that could last indefinitely. */
+int wait_queue_wait_interruptible(struct wait_queue *queue, bool (*ready)(void *), void *arg);
+/* Sleeps; returns -VX_EINTR if a signal cuts it short. */
+int thread_sleep_ms_interruptible(uint64_t ms);
+/* Wakes a thread from an interruptible wait (a signal arrived for it). */
+void sched_interrupt(struct thread *thread);
+void sched_interrupt_locked(struct thread *thread); /* With the scheduler lock held. */
+/* Interrupts a process's thread if it has a signal to take. */
+void sched_interrupt_process(struct process *process);
 void wait_queue_wake_all(struct wait_queue *queue);
 /* The same, for callers that already hold the scheduler lock. */
 void wait_queue_wake_all_locked(struct wait_queue *queue);

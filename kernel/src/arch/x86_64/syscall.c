@@ -2,6 +2,7 @@
 #include <vexa/cpu.h>
 #include <vexa/kprintf.h>
 #include <vexa/process.h>
+#include <vexa/signal.h>
 
 #define IA32_EFER_MSR 0xc0000080
 #define IA32_STAR_MSR 0xc0000081
@@ -30,6 +31,7 @@ void syscall_dispatch(struct interrupt_frame *frame) {
         panic("system call from a thread without a process");
     }
     process->personality->syscall(frame);
+    signal_deliver(frame);
 }
 
 void enter_user_mode(uint64_t entry, uint64_t stack) {
