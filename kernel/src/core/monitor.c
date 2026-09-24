@@ -13,11 +13,12 @@
 #include <vexa/mm.h>
 #include <vexa/monitor.h>
 #include <vexa/process.h>
-#include <vexa/programs.h>
+#include <vexa/block.h>
 #include <vexa/sched.h>
 #include <vexa/string.h>
 #include <vexa/uaccess.h>
 #include <vexa/version.h>
+#include <vexa/vfs.h>
 
 #define LINE_MAX 128
 
@@ -41,6 +42,13 @@ static void cmd_run(const char *args);
 static void cmd_spawn(const char *args);
 static void cmd_threads(const char *args);
 static void cmd_ps(const char *args);
+static void cmd_ls(const char *args);
+static void cmd_cat(const char *args);
+static void cmd_write(const char *args);
+static void cmd_mkdir(const char *args);
+static void cmd_rm(const char *args);
+static void cmd_mount(const char *args);
+static void cmd_disks(const char *args);
 static void cmd_reboot(const char *args);
 
 static const struct command commands[] = {
@@ -52,7 +60,14 @@ static const struct command commands[] = {
     {"mem", "", "memory usage", cmd_mem},
     {"memmap", "", "physical memory map from the firmware", cmd_memmap},
     {"memtest", "", "stress-test the memory allocators", cmd_memtest},
-    {"programs", "", "list programs you can run", cmd_programs},
+    {"ls", "[path]", "list a directory", cmd_ls},
+    {"cat", "<file>", "show a file", cmd_cat},
+    {"write", "<file> <text>", "write text to a file", cmd_write},
+    {"mkdir", "<path>", "make a directory", cmd_mkdir},
+    {"rm", "<path>", "remove a file or empty directory", cmd_rm},
+    {"mount", "", "list mounted file systems", cmd_mount},
+    {"disks", "", "list disks and partitions", cmd_disks},
+    {"programs", "", "list programs in /bin", cmd_programs},
     {"run", "<program>", "run a program and wait for it", cmd_run},
     {"spawn", "<program>", "start a program in the background", cmd_spawn},
     {"threads", "", "list threads", cmd_threads},
@@ -72,7 +87,7 @@ static void cmd_help(const char *args) {
     (void)args;
     for (size_t i = 0; i < COMMAND_COUNT; i++) {
         kprintf("  %s %s", commands[i].name, commands[i].usage);
-        pad_to(strlen(commands[i].name) + 1 + strlen(commands[i].usage), 19);
+        pad_to(strlen(commands[i].name) + 1 + strlen(commands[i].usage), 22);
         kprintf("%s\n", commands[i].help);
     }
 }
@@ -169,14 +184,171 @@ static void cmd_memtest(const char *args) {
     memtest_run(5000000);
 }
 
+static const char *type_name(uint32_t type) {
+    switch (type) {
+    case VX_TYPE_DIRECTORY: return "dir";
+    case VX_TYPE_CHAR_DEVICE: return "char";
+    case VX_TYPE_BLOCK_DEVICE: return "block";
+    case VX_TYPE_SYMLINK: return "link";
+    default: return "";
+    }
+}
+
+static void print_size(uint64_t bytes) {
+    if (bytes < 10 * 1024) {
+        kprintf("%lu B", bytes);
+    } else if (bytes < 10 * 1024 * 1024) {
+        kprintf("%lu KiB", bytes / 1024);
+    } else {
+        kprintf("%lu MiB", bytes / (1024 * 1024));
+    }
+}
+
+/* Lists a directory. Entries come in the order the file system keeps them. */
+static void list_directory(const char *path) {
+    struct file *dir;
+    int error = vfs_open(path, strlen(path), VX_OPEN_READ, &dir);
+    if (error) {
+        kprintf("ls: %s: %s\n", path, vfs_error_name(error));
+        return;
+    }
+    struct vx_dir_entry *entry = kmalloc(sizeof(*entry));
+    char *child = kmalloc(VX_PATH_MAX);
+    size_t path_length = strlen(path);
+    while (entry && child && vfs_read_dir(dir, entry) == 1) {
+        if (strcmp(entry->name, ".") == 0 || strcmp(entry->name, "..") == 0) {
+            continue;
+        }
+        kprintf("  %s", entry->name);
+        pad_to(entry->name_length, 20);
+        struct vx_stat stat;
+        memcpy(child, path, path_length);
+        size_t n = path_length;
+        if (n == 0 || child[n - 1] != '/') {
+            child[n++] = '/';
+        }
+        memcpy(child + n, entry->name, entry->name_length + 1);
+        if (entry->type == VX_TYPE_FILE && vfs_stat(child, n + entry->name_length, &stat) == 0) {
+            print_size(stat.size);
+        } else {
+            kprintf("%s", type_name(entry->type));
+        }
+        kprintf("\n");
+    }
+    kfree(entry);
+    kfree(child);
+    vfs_close(dir);
+}
+
+static void cmd_ls(const char *args) {
+    list_directory(*args ? args : "/");
+}
+
+static void cmd_cat(const char *args) {
+    struct file *file;
+    int error = vfs_open(args, strlen(args), VX_OPEN_READ, &file);
+    if (error) {
+        kprintf("cat: %s: %s\n", args, vfs_error_name(error));
+        return;
+    }
+    char buffer[512];
+    int64_t n;
+    bool ends_with_newline = true;
+    while ((n = vfs_read(file, buffer, sizeof(buffer))) > 0) {
+        kwrite(buffer, n);
+        ends_with_newline = buffer[n - 1] == '\n';
+    }
+    if (n < 0) {
+        kprintf("cat: %s: %s\n", args, vfs_error_name((int)n));
+    } else if (!ends_with_newline) {
+        kprintf("\n");
+    }
+    vfs_close(file);
+}
+
+static void cmd_write(const char *args) {
+    const char *text = args;
+    while (*text && *text != ' ') {
+        text++;
+    }
+    size_t path_length = text - args;
+    while (*text == ' ') {
+        text++;
+    }
+    if (!path_length) {
+        kprintf("usage: write <file> <text>\n");
+        return;
+    }
+    struct file *file;
+    int error = vfs_open(args, path_length, VX_OPEN_WRITE | VX_OPEN_CREATE | VX_OPEN_TRUNCATE,
+                         &file);
+    if (error) {
+        kprintf("write: %s\n", vfs_error_name(error));
+        return;
+    }
+    int64_t n = vfs_write(file, text, strlen(text));
+    if (n >= 0) {
+        n = vfs_write(file, "\n", 1);
+    }
+    if (n < 0) {
+        kprintf("write: %s\n", vfs_error_name((int)n));
+    }
+    vfs_close(file);
+}
+
+static void cmd_mkdir(const char *args) {
+    int error = vfs_mkdir(args, strlen(args));
+    if (error) {
+        kprintf("mkdir: %s: %s\n", args, vfs_error_name(error));
+    }
+}
+
+static void cmd_rm(const char *args) {
+    int error = vfs_remove(args, strlen(args));
+    if (error) {
+        kprintf("rm: %s: %s\n", args, vfs_error_name(error));
+    }
+}
+
+static void cmd_mount(const char *args) {
+    (void)args;
+    vfs_lock();
+    for (struct mount *mount = vfs_mounts(); mount; mount = mount->next) {
+        kprintf("  %s", mount->path);
+        pad_to(strlen(mount->path), 16);
+        kprintf("%s", mount->fs_name);
+        pad_to(strlen(mount->fs_name), 8);
+        kprintf("%s%s\n", mount->source, mount->read_only ? " (read-only)" : "");
+    }
+    vfs_unlock();
+}
+
+static void cmd_disks(const char *args) {
+    (void)args;
+    struct block_device *device = block_first();
+    if (!device) {
+        kprintf("no disks found\n");
+    }
+    for (; device; device = device->next) {
+        kprintf("  %s", device->name);
+        pad_to(strlen(device->name), 12);
+        print_size(block_size_bytes(device));
+        kprintf("%s\n", device->parent ? "  (partition)" : "");
+    }
+}
+
 static void cmd_programs(const char *args) {
     (void)args;
-    const struct boot_program *program;
-    for (size_t i = 0; (program = programs_get(i)); i++) {
-        kprintf("  %s", program->name);
-        pad_to(strlen(program->name), 16);
-        kprintf("%lu KiB\n", (program->size + 1023) / 1024);
+    list_directory("/bin");
+}
+
+static bool strchr_simple(const char *s, char c) {
+    for (; *s; s++) {
+        if (*s == c) {
+            return true;
+        }
     }
+    return false;
 }
 
 static struct process *start_program(const char *name, bool detached) {
@@ -184,13 +356,18 @@ static struct process *start_program(const char *name, bool detached) {
         kprintf("which program? (try 'programs')\n");
         return NULL;
     }
-    const struct boot_program *program = programs_find(name);
-    if (!program) {
-        kprintf("no program called %s (try 'programs')\n", name);
+    /* A bare name means /bin/<name>. */
+    char path[128] = "/bin/";
+    if (strchr_simple(name, '/')) {
+        return process_spawn(name, detached);
+    }
+    size_t n = strlen(name);
+    if (n > sizeof(path) - 6) {
+        kprintf("program name too long\n");
         return NULL;
     }
-    int error;
-    return process_spawn(program->name, program->data, program->size, detached, &error);
+    memcpy(path + 5, name, n + 1);
+    return process_spawn(path, detached);
 }
 
 static void cmd_run(const char *args) {

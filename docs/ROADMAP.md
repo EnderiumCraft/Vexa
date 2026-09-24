@@ -87,10 +87,11 @@ registers survive being interrupted.
 
 ## Phase 4: Files and storage
 
-- [ ] Handle table: one kernel object model for files, pipes, processes and more
-- [ ] VFS layer (inodes, directory entries, mount points)
-- [ ] initramfs loaded as a Limine module (tar)
-- [ ] tmpfs and a device file system (`/dev/null`, `/dev/console`, `/dev/fb0`...)
+- [x] Handle table: one kernel object model (files now; pipes, processes and more later)
+- [x] VFS layer (vnodes, path lookup, mount points) and file system calls: `vx_open`,
+      `vx_read`, `vx_write`, `vx_seek`, `vx_stat`, `vx_read_dir`, `vx_mkdir`, `vx_remove`
+- [x] initramfs loaded as a Limine module (tar), unpacked into the root file system
+- [x] tmpfs and a device file system (`/dev/null`, `/dev/zero`, `/dev/console`, disks)
 - [ ] PCI enumeration; virtio-blk driver (QEMU), then AHCI and NVMe for real hardware
 - [ ] ext2 read/write (ext4 later), so disks can be shared with other systems
 

@@ -51,6 +51,12 @@ TYPED_COMMANDS = [
     ("mem", "heap ", 10),
     ("memtest", "memtest: passed", 180),
     ("programs", "hello-world", 10),
+    # Files: the root file system unpacked from the initramfs, and /dev.
+    ("ls /", "README.txt", 10),
+    ("mount", "devfs", 10),
+    ("write /tmp/note.txt hello from the monitor", "vexa> write", 10),
+    ("cat /tmp/note.txt", "hello from the monitor", 10, 2),
+    ("run fs-test", "fs-test: passed", 60),
     # The Phase 3 milestone: a native program in user mode.
     ("run hello-world", "running in user mode.", 30),
     ("run hello-world", "exited with code 0", 30, 2),
@@ -66,7 +72,8 @@ TYPED_COMMANDS = [
 ]
 
 # QEMU `sendkey` names for characters that aren't plain lowercase letters or digits.
-KEY_NAMES = {" ": "spc", "\n": "ret", "\b": "backspace", "-": "minus", ".": "dot", "/": "slash"}
+KEY_NAMES = {" ": "spc", "\n": "ret", "\b": "backspace", "-": "minus", ".": "dot", "/": "slash",
+             ":": "shift-semicolon", "_": "shift-minus"}
 
 
 def keys_for(text):

@@ -7,6 +7,7 @@
 #include <vexa/sched.h>
 
 struct address_space;
+struct handle_table;
 struct interrupt_frame;
 
 /* A personality turns a process's system calls into core kernel operations
@@ -31,6 +32,7 @@ struct process {
     bool detached; /* Nobody will wait for it: free it as soon as it exits. */
     const struct personality *personality;
     struct address_space *address_space;
+    struct handle_table *handles;
     struct thread *main_thread;
     uint64_t entry;      /* Where user mode starts. */
     uint64_t stack_top;
@@ -38,12 +40,10 @@ struct process {
     struct process *next;
 };
 
-/* Loads an ELF executable into a new process and starts it. With `detached`,
- * the process cleans up after itself; otherwise call process_wait(). Returns
- * NULL and sets *error (a negative VX_E* value, or -1 with a message printed)
- * on failure. */
-struct process *process_spawn(const char *name, const void *elf, size_t size, bool detached,
-                              int *error);
+/* Starts the program at `path` in a new process. With `detached`, the process
+ * cleans up after itself; otherwise call process_wait(). Returns NULL on
+ * failure, after printing why. */
+struct process *process_spawn(const char *path, bool detached);
 /* Waits for a process started without `detached`, frees it, and returns its exit code. */
 int process_wait(struct process *process);
 

@@ -41,9 +41,12 @@ Some things to try at the `vexa>` prompt:
 | --- | --- |
 | `hello` | says hi, and which version of Vexa is running |
 | `help` | lists every command |
-| `programs` | lists the programs you can run |
+| `ls /`, `cat /etc/motd` | look around the file system |
+| `write /tmp/note.txt hi`, `mkdir`, `rm` | make and remove files and directories |
+| `programs` | lists the programs you can run (everything in `/bin`) |
 | `run hello-world` | runs the first Vexa program, in user mode |
 | `run crash` | runs a program that misbehaves on purpose, to show it gets stopped |
+| `run fs-test` | checks the file system calls from a user program |
 | `spawn fpu-stress` | starts a program in the background (try it three times, then `threads`) |
 | `threads`, `ps` | list threads and processes |
 | `cpu`, `mem`, `memtest` | processor and memory information, and a memory stress test |
@@ -109,7 +112,9 @@ kernel/
   src/personality/vexa/  the native Vexa system calls
   src/dev/           serial, framebuffer, text console, font, PS/2 keyboard
   src/lib/           string functions, kprintf, panic
+  src/fs/            tmpfs, devfs, initramfs unpacking
 abi/vexa/abi.h       system call numbers and error codes, shared by kernel and libvexa
+rootfs/              files for the root file system (packed into initramfs.tar)
 libvexa/             Vexa's C library: program startup, system calls, printf, strings
 userland/            Vexa programs, one directory each (hello-world, fpu-stress, crash)
 tools/
@@ -121,7 +126,7 @@ docs/
 ```
 
 To add a program, create `userland/<name>/main.c`: the Makefile builds every
-directory there with libvexa and adds it to the boot menu, and `run <name>` starts it.
+directory there with libvexa and puts it in `/bin`, and `run <name>` starts it.
 
 The console font is [Spleen](https://github.com/fcambus/spleen) 8x16 by Frederic Cambus
 (BSD 2-Clause license, reproduced in `kernel/src/dev/font.c`).

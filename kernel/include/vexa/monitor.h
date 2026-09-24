@@ -5,4 +5,7 @@
  * shell (Phase 5 replaces it with vsh). Runs as a kernel thread. */
 void monitor_thread(void *unused);
 
+/* Mounts file systems and starts devices, then the monitor (core/init.c). */
+void init_thread(void *unused);
+
 #endif

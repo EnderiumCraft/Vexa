@@ -12,7 +12,8 @@
 #include <vexa/kprintf.h>
 #include <vexa/mm.h>
 #include <vexa/monitor.h>
-#include <vexa/programs.h>
+#include <vexa/fs.h>
+#include <vexa/modules.h>
 #include <vexa/sched.h>
 #include <vexa/serial.h>
 #include <vexa/smp.h>
@@ -146,13 +147,13 @@ __attribute__((noreturn)) static void kmain_on_kernel_stack(void) {
     /* Other CPUs start on bootloader stacks and page tables, so start them
      * before reclaiming that memory. */
     smp_start(mp_request.response);
-    programs_init(module_request.response);
+    modules_init(module_request.response);
     pmm_reclaim_bootloader_memory();
 
+    rtc_init();
     keyboard_init();
-    kprintf("\nVexa kernel initialized.\n");
-    if (!thread_create("monitor", monitor_thread, NULL)) {
-        panic("could not start the monitor");
+    if (!thread_create("init", init_thread, NULL)) {
+        panic("could not start the init thread");
     }
     for (;;) {
         __asm__ volatile("sti; hlt");
