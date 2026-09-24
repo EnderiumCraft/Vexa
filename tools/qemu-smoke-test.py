@@ -23,6 +23,7 @@ import time
 import zlib
 
 BOOT_TIMEOUT = 60
+PROMPT = "vexa> "
 OVMF = os.environ.get("OVMF", "/usr/share/qemu/OVMF.fd")
 
 # Messages the kernel must print while booting, normally and in safe mode. Safe
@@ -83,7 +84,7 @@ DISK_COMMANDS = [
     ("cat /mnt/vda1/hello.txt", "Hello from an ext2 disk!", 10),
     ("cat /mnt/sda1/docs/notes.txt", "lives on a test disk", 10),
     ("run /mnt/nvme0n1/hello-world", "Hello, world!", 30, 3),
-    ("run fs-test", "on the disk at /mnt/vda1", 120),
+    ("run fs-test", "on the disk at /mnt/vda1", 120, 2),
     ("write /mnt/sda1/from-vexa.txt written on sata", "vexa> write /mnt/sda1", 10),
     ("cat /mnt/sda1/from-vexa.txt", "written on sata", 10, 2),
     ("mkdir /mnt/nvme0n1/made-by-vexa", "vexa> mkdir", 10),
@@ -231,7 +232,12 @@ def main():
                 break
 
         if not failures:
-            for command, expected, timeout, *count in commands:
+            for typed, (command, expected, timeout, *count) in enumerate(commands):
+                # Type only once the previous command is finished and the
+                # prompt is back, so slow machines don't mix commands up.
+                if not wait_for(log_path, PROMPT, 300, typed + 1):
+                    failures.append(f"no prompt before typing {command!r}")
+                    break
                 for key in keys_for(command + "\n"):
                     monitor.command("sendkey " + key)
                 if not wait_for(log_path, expected, timeout, *count):
