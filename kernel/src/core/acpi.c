@@ -1,6 +1,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <vexa/acpi.h>
+#include <vexa/cmdline.h>
 #include <vexa/kprintf.h>
 #include <vexa/mm.h>
 #include <vexa/string.h>
@@ -49,8 +50,13 @@ static const struct acpi_sdt_header *root_entry(size_t i) {
 }
 
 void acpi_init(uint64_t rsdp_phys) {
+    if (cmdline_has("acpi=off")) {
+        kprintf("[acpi] disabled by acpi=off\n");
+        return;
+    }
     if (!rsdp_phys) {
-        panic("ACPI: no RSDP from the bootloader; this machine is not supported yet");
+        kprintf("[acpi] no ACPI tables found\n");
+        return;
     }
     const struct acpi_rsdp *rsdp = map_phys(rsdp_phys, sizeof(*rsdp), MAP_WRITEBACK);
     if (memcmp(rsdp->signature, "RSD PTR ", 8) != 0 || !checksum_ok(rsdp, 20)) {
@@ -78,6 +84,9 @@ void acpi_init(uint64_t rsdp_phys) {
 }
 
 const struct acpi_sdt_header *acpi_find_table(const char *signature) {
+    if (!root_table) {
+        return NULL;
+    }
     for (size_t i = 0; i < root_entry_count(); i++) {
         const struct acpi_sdt_header *table = root_entry(i);
         if (memcmp(table->signature, signature, 4) == 0) {

@@ -2,9 +2,10 @@
 #include <vexa/arch.h>
 #include <vexa/io.h>
 #include <vexa/kprintf.h>
-#include "lapic.h"
+#include "irqchip.h"
 
 #define PIT_FREQUENCY 1193182
+#define PIT_CHANNEL0 0x40
 #define PIT_CHANNEL2 0x42
 #define PIT_COMMAND 0x43
 #define PIT_GATE_PORT 0x61
@@ -44,7 +45,17 @@ static void lapic_timer_start_calibration(void) {
     lapic_write(LAPIC_TIMER_INITIAL, 0xffffffff);
 }
 
-void timer_init(void) {
+/* Without an APIC, the PIT itself generates the ticks on ISA IRQ 0. */
+static void pit_timer_init(void) {
+    uint16_t divisor = PIT_FREQUENCY / 1000;
+    outb(PIT_COMMAND, 0x34); /* Channel 0, low then high byte, rate generator. */
+    outb(PIT_CHANNEL0, divisor & 0xff);
+    outb(PIT_CHANNEL0, divisor >> 8);
+    isa_irq_enable(0, timer_tick);
+    kprintf("[timer] PIT at 1000 Hz\n");
+}
+
+static void lapic_timer_init(void) {
     lapic_write(LAPIC_TIMER_DIVIDE, 0x3); /* Divide the bus clock by 16. */
     lapic_write(LAPIC_LVT_TIMER, LAPIC_LVT_MASKED);
 
@@ -58,11 +69,19 @@ void timer_init(void) {
         panic("timer: local APIC timer did not count during calibration");
     }
 
-    irq_register(VECTOR_TIMER, timer_tick);
-    lapic_write(LAPIC_LVT_TIMER, VECTOR_TIMER | LAPIC_TIMER_PERIODIC);
+    irq_register(VECTOR_APIC_TIMER, timer_tick);
+    lapic_write(LAPIC_LVT_TIMER, VECTOR_APIC_TIMER | LAPIC_TIMER_PERIODIC);
     lapic_write(LAPIC_TIMER_INITIAL, per_ms);
     kprintf("[timer] local APIC timer: %u ticks/ms (bus ~%u MHz), 1000 Hz\n",
             per_ms, per_ms * 16 / 1000);
+}
+
+void timer_init(void) {
+    if (interrupt_controller_is_apic()) {
+        lapic_timer_init();
+    } else {
+        pit_timer_init();
+    }
 }
 
 uint64_t timer_ms(void) {

@@ -196,8 +196,7 @@ bool keyboard_init(void) {
         inb(PS2_DATA); /* The keyboard's acknowledgement. */
     }
 
-    irq_register(VECTOR_KEYBOARD, keyboard_irq);
-    ioapic_route_isa_irq(1, VECTOR_KEYBOARD);
+    isa_irq_enable(1, keyboard_irq);
     kprintf("[kbd] PS/2 keyboard ready\n");
     return true;
 }

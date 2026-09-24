@@ -2,7 +2,8 @@
 #   make          build build/vexa.iso
 #   make run      boot the ISO in QEMU (window + serial log in the terminal)
 #   make run-nographic   boot headless; serial log only (Ctrl-A X to quit)
-#   make test     boot in QEMU (BIOS, then UEFI with 4 CPUs) and check it responds
+#   make test     boot in QEMU (BIOS, UEFI with 4 CPUs, and without ACPI) and
+#                 check it responds at the keyboard
 #   make clean
 
 CC      ?= cc
@@ -70,6 +71,7 @@ run-nographic: $(ISO)
 test: $(ISO)
 	tools/qemu-smoke-test.py
 	tools/qemu-smoke-test.py --uefi --smp 4
+	tools/qemu-smoke-test.py --safe-mode
 
 clean:
 	rm -rf $(BUILD)

@@ -78,7 +78,7 @@ static void cmd_cpu(void) {
         name++;
     }
     kprintf("  vendor   %s\n  model    %s\n  cpus     %u\n  display  %lux%lu\n",
-            vendor, name, apic_cpu_count(), fb_width(), fb_height());
+            vendor, name, arch_cpu_count(), fb_width(), fb_height());
 }
 
 static void cmd_reboot(void) {

@@ -1,10 +1,10 @@
 #include <stdbool.h>
 #include <vexa/acpi.h>
 #include <vexa/arch.h>
-#include <vexa/io.h>
+#include <vexa/cmdline.h>
 #include <vexa/kprintf.h>
 #include <vexa/mm.h>
-#include "lapic.h"
+#include "irqchip.h"
 
 #define IA32_APIC_BASE_MSR 0x1b
 #define IA32_APIC_BASE_ENABLE (1ULL << 11)
@@ -98,12 +98,12 @@ void lapic_eoi(void) {
     lapic_write(LAPIC_EOI, 0);
 }
 
-uint32_t lapic_id(void) {
+static uint32_t lapic_id(void) {
     return lapic_read(LAPIC_ID) >> 24;
 }
 
 uint32_t apic_cpu_count(void) {
-    return cpu_count;
+    return cpu_count ? cpu_count : 1;
 }
 
 static uint32_t ioapic_read(struct ioapic *io, uint32_t reg) {
@@ -114,21 +114,6 @@ static uint32_t ioapic_read(struct ioapic *io, uint32_t reg) {
 static void ioapic_write(struct ioapic *io, uint32_t reg, uint32_t value) {
     io->regs[IOAPIC_REGSEL / 4] = reg;
     io->regs[IOAPIC_WINDOW / 4] = value;
-}
-
-/* Remaps the legacy 8259 PICs away from the exception vectors, then masks them.
- * All interrupts go through the APICs instead. */
-static void pic_disable(void) {
-    outb(0x20, 0x11); /* ICW1: initialize, expect ICW4. */
-    outb(0xa0, 0x11);
-    outb(0x21, VECTOR_LEGACY_PIC_BASE); /* ICW2: vector offsets. */
-    outb(0xa1, VECTOR_LEGACY_PIC_BASE + 8);
-    outb(0x21, 0x04); /* ICW3: slave on IRQ 2. */
-    outb(0xa1, 0x02);
-    outb(0x21, 0x01); /* ICW4: 8086 mode. */
-    outb(0xa1, 0x01);
-    outb(0x21, 0xff); /* Mask everything. */
-    outb(0xa1, 0xff);
 }
 
 static void parse_madt(const struct madt *madt, uint64_t *lapic_phys) {
@@ -176,18 +161,22 @@ static void parse_madt(const struct madt *madt, uint64_t *lapic_phys) {
     }
 }
 
-void apic_init(void) {
+bool apic_init(void) {
+    if (cmdline_has("noapic")) {
+        kprintf("[apic] disabled by noapic\n");
+        return false;
+    }
     const struct madt *madt = (const struct madt *)acpi_find_table("APIC");
     if (!madt) {
-        panic("APIC: no MADT in the ACPI tables");
+        kprintf("[apic] no MADT in the ACPI tables\n");
+        return false;
     }
     uint64_t lapic_phys;
     parse_madt(madt, &lapic_phys);
     if (ioapic_count == 0) {
-        panic("APIC: no I/O APIC found");
+        kprintf("[apic] the MADT lists no I/O APIC\n");
+        return false;
     }
-
-    pic_disable();
 
     wrmsr(IA32_APIC_BASE_MSR, rdmsr(IA32_APIC_BASE_MSR) | IA32_APIC_BASE_ENABLE);
     lapic = map_phys(lapic_phys, PAGE_SIZE, MAP_UNCACHED);
@@ -203,6 +192,7 @@ void apic_init(void) {
 
     kprintf("[apic] %u CPU(s), local APIC id %u at %p, %d I/O APIC(s), %d IRQ override(s)\n",
             cpu_count, lapic_id(), (void *)lapic_phys, ioapic_count, override_count);
+    return true;
 }
 
 void ioapic_route_isa_irq(uint8_t irq, uint8_t vector) {

@@ -3,6 +3,7 @@
 #include <limine.h>
 #include <vexa/acpi.h>
 #include <vexa/arch.h>
+#include <vexa/cmdline.h>
 #include <vexa/console.h>
 #include <vexa/fb.h>
 #include <vexa/keyboard.h>
@@ -11,7 +12,7 @@
 #include <vexa/monitor.h>
 #include <vexa/serial.h>
 
-#define VEXA_VERSION "0.1.0"
+#define VEXA_VERSION "0.1.1"
 
 /* Limine boot protocol requests. The bootloader scans for these and fills in
  * the response pointers before jumping to kmain. */
@@ -39,6 +40,12 @@ static volatile struct limine_hhdm_request hhdm_request = {
 __attribute__((used, section(".limine_requests")))
 static volatile struct limine_rsdp_request rsdp_request = {
     .id = LIMINE_RSDP_REQUEST_ID,
+    .revision = 0,
+};
+
+__attribute__((used, section(".limine_requests")))
+static volatile struct limine_executable_cmdline_request cmdline_request = {
+    .id = LIMINE_EXECUTABLE_CMDLINE_REQUEST_ID,
     .revision = 0,
 };
 
@@ -102,6 +109,12 @@ void kmain(void) {
         panic("bootloader does not support Limine base revision 3");
     }
     console_setup();
+    if (cmdline_request.response) {
+        cmdline_init(cmdline_request.response->cmdline);
+    }
+    if (*cmdline_get()) {
+        kprintf("[boot] command line: %s\n", cmdline_get());
+    }
 
     gdt_init();
     idt_init();
@@ -114,7 +127,7 @@ void kmain(void) {
     mm_early_init(memmap_request.response, hhdm_request.response->offset);
 
     acpi_init(rsdp_request.response ? (uint64_t)rsdp_request.response->address : 0);
-    apic_init();
+    interrupt_controller_init();
     timer_init();
     interrupts_enable();
     keyboard_init();

@@ -1,15 +1,15 @@
 #ifndef VEXA_ARCH_H
 #define VEXA_ARCH_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #define GDT_KERNEL_CODE 0x08
 #define GDT_KERNEL_DATA 0x10
 
 /* Interrupt vector layout. */
-#define VECTOR_LEGACY_PIC_BASE 0x20 /* 0x20-0x2f: masked 8259 PIC, spurious only. */
-#define VECTOR_TIMER 0x30
-#define VECTOR_KEYBOARD 0x31
+#define VECTOR_ISA_BASE 0x20 /* ISA IRQ n (timer, keyboard...) arrives on 0x20 + n. */
+#define VECTOR_APIC_TIMER 0x30
 #define VECTOR_SPURIOUS 0xff
 
 /* Register state pushed by the ISR stubs in isr.S. Order must match. */
@@ -24,17 +24,18 @@ typedef void (*irq_handler_t)(struct interrupt_frame *frame);
 
 void gdt_init(void);
 void idt_init(void);
+
+/* Sets up the local APIC and I/O APIC from the ACPI MADT, or falls back to the
+ * legacy 8259 PIC on machines without them. */
+void interrupt_controller_init(void);
+bool interrupt_controller_is_apic(void);
+uint32_t arch_cpu_count(void);
 void irq_register(uint8_t vector, irq_handler_t handler);
+/* Installs `handler` for a legacy ISA IRQ (0-15) and unmasks it. */
+void isa_irq_enable(uint8_t irq, irq_handler_t handler);
 
-/* Local APIC and I/O APIC, configured from the ACPI MADT. */
-void apic_init(void);
-void lapic_eoi(void);
-uint32_t lapic_id(void);
-uint32_t apic_cpu_count(void);
-/* Routes a legacy ISA IRQ (0-15) to `vector` on this CPU. */
-void ioapic_route_isa_irq(uint8_t irq, uint8_t vector);
-
-/* Local APIC timer, calibrated against the PIT. Ticks once per millisecond. */
+/* 1000 Hz system timer: the local APIC timer calibrated against the PIT, or the
+ * PIT itself without an APIC. */
 void timer_init(void);
 uint64_t timer_ms(void);
 void timer_sleep_ms(uint64_t ms);

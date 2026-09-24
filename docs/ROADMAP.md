@@ -35,7 +35,8 @@ graphics), so work on one moves the other forward.
 - [x] GDT and IDT with CPU exception reporting
 - [x] Read the memory map and framebuffer from the bootloader
 - [x] Text console on the framebuffer (bitmap font, scrolling)
-- [x] Parse ACPI tables (MADT) and set up the Local APIC and I/O APIC
+- [x] Parse ACPI tables (MADT) and set up the Local APIC and I/O APIC, with a legacy
+      8259 PIC fallback for machines without a MADT
 - [x] Timer (APIC timer calibrated against the PIT; HPET fallback later)
 - [x] PS/2 keyboard driver
 

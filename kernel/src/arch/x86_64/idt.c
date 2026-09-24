@@ -22,7 +22,7 @@ static struct idt_entry idt[256];
 /* Defined in isr.S: one entry stub per vector. */
 extern uint64_t isr_stub_table[256];
 
-static irq_handler_t irq_handlers[256];
+void irq_dispatch(struct interrupt_frame *frame); /* irq.c */
 
 static const char *exception_names[32] = {
     "Divide Error", "Debug", "NMI", "Breakpoint", "Overflow", "BOUND Range Exceeded",
@@ -56,30 +56,10 @@ void idt_init(void) {
     __asm__ volatile("lidt %0" : : "m"(idtr) : "memory");
 }
 
-void irq_register(uint8_t vector, irq_handler_t handler) {
-    irq_handlers[vector] = handler;
-}
-
-static void handle_irq(struct interrupt_frame *frame) {
-    uint64_t vector = frame->vector;
-    if (vector == VECTOR_SPURIOUS) {
-        return; /* Spurious APIC interrupts must not be acknowledged. */
-    }
-    if (vector >= VECTOR_LEGACY_PIC_BASE && vector < VECTOR_LEGACY_PIC_BASE + 16) {
-        return; /* The 8259 PIC is masked; anything from it is spurious. */
-    }
-    if (irq_handlers[vector]) {
-        irq_handlers[vector](frame);
-    } else {
-        kprintf("[idt] unexpected interrupt on vector %lu\n", vector);
-    }
-    lapic_eoi();
-}
-
 /* Called from isr_common in isr.S. */
 void interrupt_dispatch(struct interrupt_frame *frame) {
     if (frame->vector >= 32) {
-        handle_irq(frame);
+        irq_dispatch(frame);
         return;
     }
     if (frame->vector == 3) {
