@@ -17,6 +17,9 @@ bool apic_init(void); /* Returns false if the MADT or an I/O APIC is missing. */
 uint32_t apic_cpu_count(void);
 void ioapic_route_isa_irq(uint8_t irq, uint8_t vector);
 void lapic_eoi(void);
+uint32_t lapic_id(void);
+void lapic_init_ap(void);
+void lapic_send_ipi_all_but_self(uint8_t vector);
 uint32_t lapic_read(uint32_t reg);
 void lapic_write(uint32_t reg, uint32_t value);
 

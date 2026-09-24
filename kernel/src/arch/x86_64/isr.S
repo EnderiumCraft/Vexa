@@ -21,6 +21,12 @@ isr_stub_\vector:
 
 .text
 isr_common:
+    /* Coming from user mode (CS has RPL 3): switch GS to this CPU's data. The
+     * saved CS sits above the vector and error code. */
+    testb $3, 24(%rsp)
+    jz 1f
+    swapgs
+1:
     pushq %rax
     pushq %rbx
     pushq %rcx
@@ -43,6 +49,11 @@ isr_common:
     andq $-16, %rsp
     call interrupt_dispatch
     movq %rbx, %rsp
+
+/* Restores a struct interrupt_frame at rsp and returns from the interrupt.
+ * System calls and the first entry to user mode leave through here too. */
+.globl isr_return
+isr_return:
     popq %r15
     popq %r14
     popq %r13
@@ -58,6 +69,10 @@ isr_common:
     popq %rcx
     popq %rbx
     popq %rax
+    testb $3, 24(%rsp) /* Going back to user mode: give it its GS back. */
+    jz 2f
+    swapgs
+2:
     addq $16, %rsp /* Drop vector and error code. */
     iretq
 

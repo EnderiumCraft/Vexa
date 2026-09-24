@@ -14,5 +14,7 @@ bool keyboard_init(void);
 
 /* Returns the next key (ASCII or KEY_*), or -1 if none is waiting. */
 int keyboard_read(void);
+/* Waits (sleeping, not spinning) for the next key. */
+int keyboard_read_blocking(void);
 
 #endif

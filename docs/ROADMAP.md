@@ -60,19 +60,30 @@ ends in a small built-in command line (the kernel monitor) that stays until `vsh
 the `memtest` command runs 5 million random allocator operations (over a million heap
 allocations) and checks every byte and page comes back.
 
-## Phase 3: Processes, threads and user mode
+## Phase 3: Processes, threads and user mode *(done)*
 
-- [ ] Kernel threads and a preemptive scheduler driven by the timer
-- [ ] TSS, ring 3 segments, jumping to user mode
-- [ ] One `syscall`/`sysret` entry point that hands each call to the calling process's
+- [x] Kernel threads and a preemptive round-robin scheduler driven by the timer, with
+      sleeping, wait queues and an idle thread per CPU
+- [x] TSS, ring 3 segments, jumping to user mode; a separate address space per process
+- [x] One `syscall` entry point that hands each call to the calling process's
       personality (see [ARCHITECTURE.md](ARCHITECTURE.md))
-- [ ] The first native Vexa system calls: `vx_log`, `vx_exit`
-- [ ] ELF64 loader that picks the personality from the executable's `.note.vexa` note
-- [ ] Save/restore FPU, SSE and AVX state (`XSAVE`). Firefox will crash in odd ways
-      without this
-- [ ] SMP: start the other CPU cores and make the scheduler multi-core safe
+- [x] The first native Vexa system calls: `vx_exit`, `vx_log`, `vx_yield`, `vx_sleep`,
+      `vx_process_id`, `vx_uptime`
+- [x] ELF64 loader that picks the personality from the executable's `.note.vexa` note
+- [x] Save/restore FPU, SSE and AVX state (`XSAVE`, or `FXSAVE` on older CPUs)
+- [x] SMP: start the other CPU cores (up to 64), with locks in the allocators and
+      scheduler, x2APIC support, and a panic that halts every core
+- [x] SMEP and SMAP where the CPU has them, so the kernel can't be tricked into running
+      or reading user memory
+- [x] `libvexa` begins: program startup, system call wrappers, `printf`, string functions
+- [ ] Moved to later phases: per-CPU run queues and priorities (once there are
+      workloads to measure), TLB shootdowns between CPUs (needed with multi-threaded
+      processes and `munmap`, Phases 5-6)
 
-**Milestone:** a native Vexa "hello world" runs in user mode.
+**Milestone:** a native Vexa "hello world" runs in user mode. Reached: `run hello-world`.
+`make test` also runs `crash` (a program that must be stopped without harming the
+system) and three `fpu-stress` programs at once, which check that every program's vector
+registers survive being interrupted.
 
 ## Phase 4: Files and storage
 

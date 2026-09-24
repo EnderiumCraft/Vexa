@@ -2,6 +2,7 @@
 #include <limine.h>
 #include <vexa/kprintf.h>
 #include <vexa/mm.h>
+#include <vexa/spinlock.h>
 #include <vexa/string.h>
 
 /*
@@ -10,8 +11,7 @@
  * its "buddy" (the neighbouring block of the same size) whenever that is free
  * too, so large contiguous blocks come back over time.
  *
- * Not yet safe to call from interrupt handlers or from several CPUs at once;
- * locking comes with SMP in Phase 3.
+ * pmm_lock makes it safe from any CPU and from interrupt handlers.
  */
 
 #define PAGE_NOT_FREE 0xff
@@ -25,6 +25,7 @@ struct free_block {
 };
 
 /* Circular lists with a sentinel head per order. */
+static struct spinlock pmm_lock = SPINLOCK_INIT;
 static struct free_block free_lists[PMM_MAX_ORDER + 1];
 /* For each page: the order of the free block starting there, or PAGE_NOT_FREE. */
 static uint8_t *page_state;
@@ -147,11 +148,13 @@ void pmm_init(const struct mem_range *ranges, size_t count) {
 }
 
 void pmm_reclaim_bootloader_memory(void) {
+    uint64_t flags = spin_lock_irqsave(&pmm_lock);
     uint64_t before = free_pages;
     for (size_t i = 0; i < reclaimable_count; i++) {
         add_range(reclaimable[i].base, reclaimable[i].base + reclaimable[i].length);
     }
     reclaimable_count = 0;
+    spin_unlock_irqrestore(&pmm_lock, flags);
     kprintf("[pmm] reclaimed %lu KiB from the bootloader\n",
             (free_pages - before) * PAGE_SIZE / 1024);
 }
@@ -160,11 +163,13 @@ uint64_t pmm_alloc(unsigned order) {
     if (order > PMM_MAX_ORDER) {
         return 0;
     }
+    uint64_t flags = spin_lock_irqsave(&pmm_lock);
     unsigned found = order;
     while (found <= PMM_MAX_ORDER && free_lists[found].next == &free_lists[found]) {
         found++;
     }
     if (found > PMM_MAX_ORDER) {
+        spin_unlock_irqrestore(&pmm_lock, flags);
         return 0;
     }
     uint64_t page = virt_to_phys(free_lists[found].next) >> PAGE_SHIFT;
@@ -175,6 +180,7 @@ uint64_t pmm_alloc(unsigned order) {
         list_push(found, page + (1ULL << found));
     }
     free_pages -= 1ULL << order;
+    spin_unlock_irqrestore(&pmm_lock, flags);
     return page << PAGE_SHIFT;
 }
 
@@ -184,10 +190,12 @@ void pmm_free(uint64_t phys, unsigned order) {
         (page & ((1ULL << order) - 1)) || phys < LOW_MEMORY_LIMIT) {
         panic("pmm_free: bad block %p (order %u)", (void *)phys, order);
     }
+    uint64_t flags = spin_lock_irqsave(&pmm_lock);
     if (page_state[page] != PAGE_NOT_FREE) {
         panic("pmm_free: double free of %p", (void *)phys);
     }
     free_block(page, order);
+    spin_unlock_irqrestore(&pmm_lock, flags);
 }
 
 uint64_t pmm_alloc_zeroed_page(void) {

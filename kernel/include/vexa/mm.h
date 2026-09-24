@@ -63,6 +63,25 @@ void vmm_init(const struct mem_range *ranges, size_t count, uint64_t kernel_phys
 /* Makes [phys, phys + size) reachable at phys_to_virt(phys). RAM is already
  * mapped there; device registers and some ACPI tables need this first. */
 void *map_phys(uint64_t phys, size_t size, enum map_cache cache);
+/* A process's page tables: its own lower half, the kernel's upper half. */
+struct address_space {
+    uint64_t *pml4;
+    uint64_t pml4_phys;
+};
+
+struct address_space *vmm_create_address_space(void);
+/* Frees every user page and page table. It must not be active on any CPU. */
+void vmm_destroy_address_space(struct address_space *as);
+/* Loads `as`, or the kernel-only tables for NULL. */
+void vmm_activate(struct address_space *as);
+/* Maps a zeroed page at user address `virt` (flags: VMM_WRITE, VMM_EXEC). If a
+ * page is already there, adds the flags to it. Returns the page's physical
+ * address, or 0 if out of memory or `virt` is not a user address. */
+uint64_t vmm_map_user_page(struct address_space *as, uint64_t virt, unsigned flags);
+/* True if [virt, virt + size) is mapped, user-accessible memory in the active
+ * address space (and writable, if `write`). */
+bool vmm_user_range_mapped(uint64_t virt, uint64_t size, bool write);
+
 /* Allocates a kernel stack with an unmapped guard page below it. Returns its top. */
 uint64_t vmm_alloc_kernel_stack(size_t size);
 /* True if `virt` falls in a kernel stack guard page (i.e. a stack overflowed). */

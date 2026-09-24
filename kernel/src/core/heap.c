@@ -1,6 +1,7 @@
 #include <stdbool.h>
 #include <vexa/kprintf.h>
 #include <vexa/mm.h>
+#include <vexa/spinlock.h>
 #include <vexa/string.h>
 
 /*
@@ -14,7 +15,7 @@
  * Larger allocations take whole pages from the buddy allocator, with a small
  * header in front so kfree() knows how many.
  *
- * Like the page allocator, not yet safe from interrupt handlers or several CPUs.
+ * heap_lock makes it safe from any CPU and from interrupt handlers.
  */
 
 #define SLAB_MAGIC 0x51ab51ab
@@ -52,6 +53,7 @@ struct large_header {
 _Static_assert(sizeof(struct slab) <= SLAB_HEADER_SIZE, "slab header too big");
 _Static_assert(sizeof(struct large_header) == 16, "large header must keep 16-byte alignment");
 
+static struct spinlock heap_lock = SPINLOCK_INIT;
 static struct slab_cache caches[CACHE_COUNT];
 static uint64_t slab_pages, large_pages, live_allocations;
 
@@ -169,6 +171,7 @@ void *kmalloc(size_t size) {
         size = 1;
     }
     void *ptr;
+    uint64_t flags = spin_lock_irqsave(&heap_lock);
     if (size <= (1U << MAX_SHIFT)) {
         unsigned shift = MIN_SHIFT;
         while ((1UL << shift) < size) {
@@ -183,6 +186,7 @@ void *kmalloc(size_t size) {
     if (ptr) {
         live_allocations++;
     }
+    spin_unlock_irqrestore(&heap_lock, flags);
     return ptr;
 }
 
@@ -199,6 +203,7 @@ void kfree(void *ptr) {
         return;
     }
     void *page = (void *)((uint64_t)ptr & ~(PAGE_SIZE - 1));
+    uint64_t flags = spin_lock_irqsave(&heap_lock);
     uint32_t magic = *(uint32_t *)page;
     if (magic == SLAB_MAGIC) {
         slab_free(page, ptr);
@@ -211,19 +216,24 @@ void kfree(void *ptr) {
         panic("kfree: %p did not come from kmalloc", ptr);
     }
     live_allocations--;
+    spin_unlock_irqrestore(&heap_lock, flags);
 }
 
 void heap_trim(void) {
+    uint64_t flags = spin_lock_irqsave(&heap_lock);
     for (int i = 0; i < CACHE_COUNT; i++) {
         if (caches[i].empty) {
             slab_destroy(caches[i].empty);
             caches[i].empty = NULL;
         }
     }
+    spin_unlock_irqrestore(&heap_lock, flags);
 }
 
 void heap_get_stats(struct heap_stats *stats) {
+    uint64_t flags = spin_lock_irqsave(&heap_lock);
     stats->slab_pages = slab_pages;
     stats->large_pages = large_pages;
     stats->allocations = live_allocations;
+    spin_unlock_irqrestore(&heap_lock, flags);
 }

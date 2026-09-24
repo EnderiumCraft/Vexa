@@ -4,6 +4,12 @@
 #include <vexa/io.h>
 #include <vexa/kprintf.h>
 #include <vexa/serial.h>
+#include <vexa/spinlock.h>
+
+/* Keeps messages from different CPUs from interleaving mid-line. */
+static struct spinlock output_lock = SPINLOCK_INIT;
+
+void smp_stop_other_cpus(void); /* smp.c */
 
 /* Every kernel message goes to both the serial port and the screen. */
 static void kputc(char c) {
@@ -91,13 +97,27 @@ void kvprintf(const char *fmt, va_list args) {
 void kprintf(const char *fmt, ...) {
     va_list args;
     va_start(args, fmt);
+    uint64_t flags = spin_lock_irqsave(&output_lock);
     kvprintf(fmt, args);
+    spin_unlock_irqrestore(&output_lock, flags);
     va_end(args);
+}
+
+void kwrite(const char *text, size_t length) {
+    uint64_t flags = spin_lock_irqsave(&output_lock);
+    for (size_t i = 0; i < length; i++) {
+        kputc(text[i]);
+    }
+    spin_unlock_irqrestore(&output_lock, flags);
 }
 
 void panic(const char *fmt, ...) {
     va_list args;
     va_start(args, fmt);
+    __asm__ volatile("cli");
+    smp_stop_other_cpus();
+    /* Whoever held the output lock is stopped now; take it over. */
+    spin_unlock(&output_lock);
     console_set_color(CONSOLE_COLOR_ERROR);
     kputs("\n*** VEXA KERNEL PANIC ***\n");
     kvprintf(fmt, args);

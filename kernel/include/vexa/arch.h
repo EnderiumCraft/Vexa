@@ -18,7 +18,10 @@
 /* Interrupt vector layout. */
 #define VECTOR_ISA_BASE 0x20 /* ISA IRQ n (timer, keyboard...) arrives on 0x20 + n. */
 #define VECTOR_APIC_TIMER 0x30
+#define VECTOR_HALT 0xfe /* Sent to other CPUs when the kernel panics. */
 #define VECTOR_SPURIOUS 0xff
+
+#define RFLAGS_INTERRUPTS_ON 0x202 /* IF set, plus the always-one bit 1. */
 
 /* Register state pushed by the ISR stubs in isr.S. Order must match. */
 struct interrupt_frame {
@@ -30,7 +33,8 @@ struct interrupt_frame {
 
 typedef void (*irq_handler_t)(struct interrupt_frame *frame);
 
-void gdt_init(void);
+/* Builds the interrupt descriptor table (shared by all CPUs; each loads it in
+ * cpu_init_bsp()/cpu_init_ap()). */
 void idt_init(void);
 
 /* Sets up the local APIC and I/O APIC from the ACPI MADT, or falls back to the
@@ -45,6 +49,8 @@ void isa_irq_enable(uint8_t irq, irq_handler_t handler);
 /* 1000 Hz system timer: the local APIC timer calibrated against the PIT, or the
  * PIT itself without an APIC. */
 void timer_init(void);
+/* Starts the timer on an application processor, reusing timer_init()'s calibration. */
+void timer_init_ap(void);
 uint64_t timer_ms(void);
 void timer_sleep_ms(uint64_t ms);
 

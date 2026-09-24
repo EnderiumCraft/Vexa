@@ -8,6 +8,13 @@
 
 #define IA32_APIC_BASE_MSR 0x1b
 #define IA32_APIC_BASE_ENABLE (1ULL << 11)
+#define IA32_APIC_BASE_X2APIC (1ULL << 10)
+#define X2APIC_MSR_BASE 0x800
+
+#define LAPIC_ICR_LOW 0x300
+#define LAPIC_ICR_HIGH 0x310
+#define ICR_DELIVERY_PENDING (1U << 12)
+#define ICR_ALL_BUT_SELF (3U << 18)
 
 
 #define IOAPIC_REGSEL 0x00
@@ -80,6 +87,9 @@ struct source_override {
 };
 
 static volatile uint32_t *lapic;
+/* Firmware may hand over the local APIC in x2APIC mode, where its registers
+ * are MSRs instead of memory. */
+static bool x2apic;
 static struct ioapic ioapics[MAX_IOAPICS];
 static int ioapic_count;
 static struct source_override overrides[MAX_OVERRIDES];
@@ -87,19 +97,46 @@ static int override_count;
 static uint32_t cpu_count;
 
 uint32_t lapic_read(uint32_t reg) {
-    return lapic[reg / 4];
+    return x2apic ? (uint32_t)rdmsr(X2APIC_MSR_BASE + reg / 16) : lapic[reg / 4];
 }
 
 void lapic_write(uint32_t reg, uint32_t value) {
-    lapic[reg / 4] = value;
+    if (x2apic) {
+        wrmsr(X2APIC_MSR_BASE + reg / 16, value);
+    } else {
+        lapic[reg / 4] = value;
+    }
+}
+
+void lapic_send_ipi_all_but_self(uint8_t vector) {
+    uint32_t low = vector | ICR_ALL_BUT_SELF;
+    if (x2apic) {
+        wrmsr(X2APIC_MSR_BASE + LAPIC_ICR_LOW / 16, low);
+        return;
+    }
+    lapic_write(LAPIC_ICR_HIGH, 0);
+    lapic_write(LAPIC_ICR_LOW, low);
+    while (lapic_read(LAPIC_ICR_LOW) & ICR_DELIVERY_PENDING) {
+        __asm__ volatile("pause");
+    }
+}
+
+static void lapic_enable_this_cpu(void) {
+    wrmsr(IA32_APIC_BASE_MSR, rdmsr(IA32_APIC_BASE_MSR) | IA32_APIC_BASE_ENABLE);
+    lapic_write(LAPIC_TPR, 0);                       /* Accept all priorities. */
+    lapic_write(LAPIC_SVR, 0x100 | VECTOR_SPURIOUS); /* Software-enable the APIC. */
+}
+
+void lapic_init_ap(void) {
+    lapic_enable_this_cpu();
 }
 
 void lapic_eoi(void) {
     lapic_write(LAPIC_EOI, 0);
 }
 
-static uint32_t lapic_id(void) {
-    return lapic_read(LAPIC_ID) >> 24;
+uint32_t lapic_id(void) {
+    return x2apic ? lapic_read(LAPIC_ID) : lapic_read(LAPIC_ID) >> 24;
 }
 
 uint32_t apic_cpu_count(void) {
@@ -178,10 +215,11 @@ bool apic_init(void) {
         return false;
     }
 
-    wrmsr(IA32_APIC_BASE_MSR, rdmsr(IA32_APIC_BASE_MSR) | IA32_APIC_BASE_ENABLE);
-    lapic = map_phys(lapic_phys, PAGE_SIZE, MAP_UNCACHED);
-    lapic_write(LAPIC_TPR, 0);                        /* Accept all priorities. */
-    lapic_write(LAPIC_SVR, 0x100 | VECTOR_SPURIOUS);  /* Software-enable the APIC. */
+    x2apic = rdmsr(IA32_APIC_BASE_MSR) & IA32_APIC_BASE_X2APIC;
+    if (!x2apic) {
+        lapic = map_phys(lapic_phys, PAGE_SIZE, MAP_UNCACHED);
+    }
+    lapic_enable_this_cpu();
 
     for (int i = 0; i < ioapic_count; i++) {
         for (uint32_t n = 0; n < ioapics[i].gsi_count; n++) {
@@ -190,8 +228,8 @@ bool apic_init(void) {
         }
     }
 
-    kprintf("[apic] %u CPU(s), local APIC id %u at %p, %d I/O APIC(s), %d IRQ override(s)\n",
-            cpu_count, lapic_id(), (void *)lapic_phys, ioapic_count, override_count);
+    kprintf("[apic] %u CPU(s), local APIC id %u (%s), %d I/O APIC(s), %d IRQ override(s)\n",
+            cpu_count, lapic_id(), x2apic ? "x2APIC" : "xAPIC", ioapic_count, override_count);
     return true;
 }
 

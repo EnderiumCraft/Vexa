@@ -1,5 +1,7 @@
 #include <stdbool.h>
 #include <vexa/arch.h>
+#include <vexa/cpu.h>
+#include <vexa/sched.h>
 #include <vexa/io.h>
 #include <vexa/kprintf.h>
 #include "irqchip.h"
@@ -12,10 +14,15 @@
 #define CALIBRATION_MS 10
 
 static volatile uint64_t ticks;
+static uint32_t lapic_ticks_per_ms;
 
+/* Runs on every CPU's timer. Only the bootstrap CPU keeps the time. */
 static void timer_tick(struct interrupt_frame *frame) {
     (void)frame;
-    ticks++;
+    if (cpu_current()->id == 0) {
+        ticks++;
+    }
+    sched_tick();
 }
 
 /* Counts down PIT channel 2 for `ms` milliseconds, busy-waiting until it ends.
@@ -69,6 +76,7 @@ static void lapic_timer_init(void) {
         panic("timer: local APIC timer did not count during calibration");
     }
 
+    lapic_ticks_per_ms = per_ms;
     irq_register(VECTOR_APIC_TIMER, timer_tick);
     lapic_write(LAPIC_LVT_TIMER, VECTOR_APIC_TIMER | LAPIC_TIMER_PERIODIC);
     lapic_write(LAPIC_TIMER_INITIAL, per_ms);
@@ -84,11 +92,23 @@ void timer_init(void) {
     }
 }
 
+void timer_init_ap(void) {
+    /* Every core's bus clock matches the bootstrap CPU's, so reuse its calibration. */
+    lapic_write(LAPIC_TIMER_DIVIDE, 0x3);
+    lapic_write(LAPIC_LVT_TIMER, VECTOR_APIC_TIMER | LAPIC_TIMER_PERIODIC);
+    lapic_write(LAPIC_TIMER_INITIAL, lapic_ticks_per_ms);
+}
+
 uint64_t timer_ms(void) {
     return ticks;
 }
 
 void timer_sleep_ms(uint64_t ms) {
+    struct thread *thread = thread_current();
+    if (thread && thread != cpu_current()->idle) {
+        thread_sleep_ms(ms);
+        return;
+    }
     uint64_t until = ticks + ms;
     while (ticks < until) {
         cpu_wait_for_interrupt();

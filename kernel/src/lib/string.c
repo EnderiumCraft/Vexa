@@ -3,35 +3,29 @@
 
 /* The compiler may emit calls to these even in freestanding code. */
 
+/* rep movsb/stosb instead of byte loops: an optimizing compiler may turn such a
+ * loop back into a call to memcpy/memset, which here would recurse forever. */
+
 void *memcpy(void *restrict dest, const void *restrict src, size_t n) {
-    uint8_t *d = dest;
-    const uint8_t *s = src;
-    for (size_t i = 0; i < n; i++) {
-        d[i] = s[i];
-    }
+    void *d = dest;
+    __asm__ volatile("rep movsb" : "+D"(d), "+S"(src), "+c"(n) : : "memory");
     return dest;
 }
 
 void *memset(void *s, int c, size_t n) {
-    uint8_t *p = s;
-    for (size_t i = 0; i < n; i++) {
-        p[i] = (uint8_t)c;
-    }
+    void *d = s;
+    __asm__ volatile("rep stosb" : "+D"(d), "+c"(n) : "a"(c) : "memory");
     return s;
 }
 
 void *memmove(void *dest, const void *src, size_t n) {
-    uint8_t *d = dest;
-    const uint8_t *s = src;
-    if (s > d) {
-        for (size_t i = 0; i < n; i++) {
-            d[i] = s[i];
-        }
-    } else if (s < d) {
-        for (size_t i = n; i > 0; i--) {
-            d[i - 1] = s[i - 1];
-        }
+    if (dest <= src || (const uint8_t *)src + n <= (uint8_t *)dest) {
+        return memcpy(dest, src, n);
     }
+    /* Overlapping with dest above src: copy backwards. */
+    void *d = (uint8_t *)dest + n - 1;
+    const void *s = (const uint8_t *)src + n - 1;
+    __asm__ volatile("std; rep movsb; cld" : "+D"(d), "+S"(s), "+c"(n) : : "memory");
     return dest;
 }
 

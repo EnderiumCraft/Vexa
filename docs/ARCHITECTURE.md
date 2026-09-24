@@ -89,7 +89,7 @@ with `LINUX_COMPAT=0`.
 5. **Vexa must work without Linux.** CI builds and boots a `LINUX_COMPAT=0` kernel,
    and the native userland must never depend on Linux binaries.
 
-## Planned source layout
+## Source layout
 
 ```
 kernel/src/
@@ -99,9 +99,24 @@ kernel/src/
   lib/                    kernel support code (strings, kprintf)
   personality/vexa/       native system calls
   personality/linux/      Linux subsystem (LINUX_COMPAT)
+abi/vexa/                 the native interface's numbers and constants, shared by
+                          the kernel and libvexa
 libvexa/                  Vexa's C library
 userland/                 native programs: vinit, vsh, utilities, compositor
 ```
 
-Today `arch/`, `core/`, `dev/` and `lib/` exist. The other directories appear as the
-[roadmap](ROADMAP.md) reaches them.
+Everything but `personality/linux/` exists today. Handles, the VFS, IPC and networking
+arrive in later phases of the [roadmap](ROADMAP.md), as do `vinit` and `vsh`.
+
+## How a system call works today
+
+1. A program calls a `libvexa` function such as `vx_log(text, length)`, which puts the
+   call number in `rax` and the arguments in `rdi`, `rsi`, ... and runs `syscall`.
+2. `syscall_entry` (`arch/x86_64/syscall.S`) switches to the thread's kernel stack and
+   saves the registers in the same frame layout interrupts use.
+3. `syscall_dispatch` hands the frame to the process's personality, chosen by the ELF
+   loader from the program's `.note.vexa` note. For Vexa programs that is
+   `personality/vexa/syscalls.c`.
+4. The handler checks every user pointer (`copy_from_user`), does the work through
+   core functions, and stores the result in `rax`.
+5. The frame is restored and `iretq` returns to the program.

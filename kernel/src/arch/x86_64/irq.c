@@ -1,6 +1,7 @@
 #include <stdbool.h>
 #include <vexa/arch.h>
 #include <vexa/kprintf.h>
+#include <vexa/sched.h>
 #include "irqchip.h"
 
 static irq_handler_t irq_handlers[256];
@@ -60,4 +61,6 @@ void irq_dispatch(struct interrupt_frame *frame) {
     } else if (isa) {
         pic_eoi(irq);
     }
+    /* After the acknowledgement: this may switch to another thread. */
+    sched_preempt_if_needed();
 }

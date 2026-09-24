@@ -4,16 +4,21 @@
 #include <vexa/acpi.h>
 #include <vexa/arch.h>
 #include <vexa/cmdline.h>
+#include <vexa/cpu.h>
 #include <vexa/console.h>
 #include <vexa/fb.h>
+#include <vexa/fpu.h>
 #include <vexa/keyboard.h>
 #include <vexa/kprintf.h>
 #include <vexa/mm.h>
 #include <vexa/monitor.h>
+#include <vexa/programs.h>
+#include <vexa/sched.h>
 #include <vexa/serial.h>
+#include <vexa/smp.h>
 #include <vexa/string.h>
+#include <vexa/version.h>
 
-#define VEXA_VERSION "0.2.0"
 
 /* Limine boot protocol requests. The bootloader scans for these and fills in
  * the response pointers before jumping to kmain. */
@@ -54,6 +59,19 @@ __attribute__((used, section(".limine_requests")))
 static volatile struct limine_executable_address_request executable_address_request = {
     .id = LIMINE_EXECUTABLE_ADDRESS_REQUEST_ID,
     .revision = 0,
+};
+
+__attribute__((used, section(".limine_requests")))
+static volatile struct limine_module_request module_request = {
+    .id = LIMINE_MODULE_REQUEST_ID,
+    .revision = 0,
+};
+
+__attribute__((used, section(".limine_requests")))
+static volatile struct limine_mp_request mp_request = {
+    .id = LIMINE_MP_REQUEST_ID,
+    .revision = 0,
+    .flags = 0, /* Leave the local APICs in xAPIC mode where possible. */
 };
 
 __attribute__((used, section(".limine_requests_start")))
@@ -115,18 +133,30 @@ static void copy_boot_info(void) {
     }
 }
 
-/* The rest of boot, running on a kernel stack with a guard page. */
+/* The rest of boot, running on a kernel stack with a guard page. It ends as
+ * the bootstrap CPU's idle thread. */
 __attribute__((noreturn)) static void kmain_on_kernel_stack(void) {
-    pmm_reclaim_bootloader_memory();
-
     acpi_init(rsdp_phys);
     interrupt_controller_init();
     timer_init();
+    sched_init_cpu(&cpus[0]);
     interrupts_enable();
-    keyboard_init();
+    kprintf("[cpu] vector registers: %s\n", fpu_describe());
 
+    /* Other CPUs start on bootloader stacks and page tables, so start them
+     * before reclaiming that memory. */
+    smp_start(mp_request.response);
+    programs_init(module_request.response);
+    pmm_reclaim_bootloader_memory();
+
+    keyboard_init();
     kprintf("\nVexa kernel initialized.\n");
-    monitor_run();
+    if (!thread_create("monitor", monitor_thread, NULL)) {
+        panic("could not start the monitor");
+    }
+    for (;;) {
+        __asm__ volatile("sti; hlt");
+    }
 }
 
 void kmain(void) {
@@ -142,9 +172,9 @@ void kmain(void) {
         kprintf("[boot] command line: %s\n", cmdline_get());
     }
 
-    gdt_init();
     idt_init();
-    kprintf("[cpu] GDT, TSS and IDT loaded\n");
+    cpu_init_bsp();
+    kprintf("[cpu] descriptor tables and CPU features set up\n");
 
     pmm_init(memory_ranges, memory_range_count);
     vmm_init(memory_ranges, memory_range_count,

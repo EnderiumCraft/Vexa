@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Boot build/vexa.iso in QEMU, type into the PS/2 keyboard, and check the serial log.
 
-Usage: tools/qemu-smoke-test.py [--iso PATH] [--uefi] [--smp N] [--memory SIZE] [--safe-mode]
+Usage: tools/qemu-smoke-test.py [--iso PATH] [--uefi] [--smp N] [--memory SIZE] [--cpu MODEL]
+                                [--safe-mode]
                                 [--screenshot out.png] [--keep-log]
 
 Exits non-zero if an expected message is missing or the kernel panics.
@@ -37,17 +38,31 @@ EXPECTED_BOOT_LEGACY = [
     "Vexa kernel initialized",
 ]
 
-# Typed at the monitor prompt, with text that must appear in response and how
-# many seconds to wait for it. The repeated "help" makes the console scroll.
+# Typed at the monitor prompt, with text that must appear in response, how
+# many seconds to wait for it, and optionally how many times it must appear in
+# the whole log. The repeated "help" makes the console scroll.
 TYPED_COMMANDS = [
     ("help", "reboot", 10),
     ("help", "reboot", 10),
     ("help", "reboot", 10),
+    ("hello", "hi :)\r\nVexa 0.", 10),
     ("cpux\b", "vendor", 10),  # Backspace erases the typo, so this runs "cpu".
     ("uptime", "up ", 10),
     ("mem", "heap ", 10),
     ("memtest", "memtest: passed", 180),
-    ("Hello Vexa", "unknown command: Hello Vexa", 10),
+    ("programs", "hello-world", 10),
+    # The Phase 3 milestone: a native program in user mode.
+    ("run hello-world", "running in user mode.", 30),
+    ("run hello-world", "exited with code 0", 30, 2),
+    # A program that misbehaves is stopped, and the system carries on.
+    ("run crash", "kernel pointer rejected", 30),
+    ("hello", "killed: Page Fault", 30),
+    # Three programs at once, each checking its vector registers survive.
+    ("spawn fpu-stress", "started fpu-stress", 10),
+    ("spawn fpu-stress", "started fpu-stress", 10, 2),
+    ("run fpu-stress", "): passed, 20 rounds", 300, 3),
+    ("threads", "monitor", 10),
+    ("Hello Vexa", "unknown command: Hello", 10),
 ]
 
 # QEMU `sendkey` names for characters that aren't plain lowercase letters or digits.
@@ -86,13 +101,13 @@ class Monitor:
         self._drain()
 
 
-def wait_for(log_path, text, timeout):
+def wait_for(log_path, text, timeout, count=1):
     deadline = time.time() + timeout
     while time.time() < deadline:
         log = read_log(log_path)
         if "VEXA KERNEL PANIC" in log:
             return False
-        if text in log:
+        if log.count(text) >= count:
             return True
         time.sleep(0.2)
     return False
@@ -128,6 +143,7 @@ def main():
     parser.add_argument("--uefi", action="store_true", help="boot with UEFI firmware (OVMF)")
     parser.add_argument("--smp", type=int, default=1, help="number of CPUs")
     parser.add_argument("--memory", default="512M", help="RAM size, e.g. 512M or 6G")
+    parser.add_argument("--cpu", help="QEMU CPU model, e.g. max (adds AVX, SMEP, SMAP)")
     parser.add_argument("--iso", default="build/vexa.iso", help="ISO image to boot")
     parser.add_argument("--safe-mode", action="store_true",
                         help="expect a safe mode boot (use with the ISO from "
@@ -145,6 +161,8 @@ def main():
     ]
     if args.uefi:
         command += ["-bios", OVMF]
+    if args.cpu:
+        command += ["-cpu", args.cpu]
     qemu = subprocess.Popen(command)
     failures = []
     try:
@@ -155,10 +173,10 @@ def main():
                 break
 
         if not failures:
-            for command, expected, timeout in TYPED_COMMANDS:
+            for command, expected, timeout, *count in TYPED_COMMANDS:
                 for key in keys_for(command + "\n"):
                     monitor.command("sendkey " + key)
-                if not wait_for(log_path, expected, timeout):
+                if not wait_for(log_path, expected, timeout, *count):
                     failures.append(f"typed {command!r}: missing {expected!r}")
 
         if args.screenshot:
@@ -176,6 +194,8 @@ def main():
     log = read_log(log_path)
     if "VEXA KERNEL PANIC" in log:
         failures.append("kernel panicked")
+    if "FAILED" in log:
+        failures.append("a self-test reported FAILED")
     if args.keep_log or failures:
         print(log)
     for failure in failures:

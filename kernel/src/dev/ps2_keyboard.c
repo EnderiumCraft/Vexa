@@ -3,6 +3,7 @@
 #include <vexa/io.h>
 #include <vexa/keyboard.h>
 #include <vexa/kprintf.h>
+#include <vexa/sched.h>
 
 #define PS2_DATA 0x60
 #define PS2_STATUS 0x64
@@ -54,6 +55,7 @@ static volatile int buffer[BUFFER_SIZE];
 static volatile uint32_t buffer_head, buffer_tail;
 
 static bool shift_left, shift_right, ctrl, caps_lock, extended;
+static struct wait_queue key_waiters = WAIT_QUEUE_INIT;
 
 static bool wait_input_empty(void) {
     for (int i = 0; i < TIMEOUT; i++) {
@@ -164,6 +166,9 @@ static void keyboard_irq(struct interrupt_frame *frame) {
     while (inb(PS2_STATUS) & STATUS_OUTPUT_FULL) {
         handle_scancode(inb(PS2_DATA));
     }
+    if (buffer_head != buffer_tail) {
+        wait_queue_wake_all(&key_waiters);
+    }
 }
 
 bool keyboard_init(void) {
@@ -199,6 +204,21 @@ bool keyboard_init(void) {
     isa_irq_enable(1, keyboard_irq);
     kprintf("[kbd] PS/2 keyboard ready\n");
     return true;
+}
+
+static bool key_waiting(void *unused) {
+    (void)unused;
+    return buffer_head != buffer_tail;
+}
+
+int keyboard_read_blocking(void) {
+    for (;;) {
+        int key = keyboard_read();
+        if (key >= 0) {
+            return key;
+        }
+        wait_queue_wait(&key_waiters, key_waiting, NULL);
+    }
 }
 
 int keyboard_read(void) {

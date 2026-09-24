@@ -11,7 +11,8 @@ that sits on top of the Vexa kernel. See [docs/ARCHITECTURE.md](docs/ARCHITECTUR
 
 ## Status
 
-Phases 1 (boot and CPU basics) and 2 (memory management) are complete. The kernel:
+Phases 1 to 3 are complete: boot and CPU basics, memory management, and processes,
+threads and user mode. The kernel:
 
 - boots through the [Limine](https://github.com/limine-bootloader/limine) bootloader (BIOS and UEFI)
 - runs in 64-bit long mode as a higher-half kernel
@@ -26,14 +27,33 @@ Phases 1 (boot and CPU basics) and 2 (memory management) are complete. The kerne
 - runs on kernel stacks with guard pages, and reports stack overflows and other faults
   in plain words
 - reads the PS/2 keyboard (US layout, Shift, Caps Lock, Ctrl)
-- ends in a small built-in command line, the kernel monitor (`help`, `cpu`, `mem`,
-  `memmap`, `memtest`, `uptime`, `clear`, `reboot`), until it can run real programs
+- runs threads with a preemptive scheduler, on every CPU core it finds
+- runs programs in user mode, each in its own address space, and stops a program
+  that misbehaves without taking the system down
+- saves and restores each program's floating point and vector registers (SSE, AVX)
+- has its own system call interface and C library, `libvexa`
+- ends in a small built-in command line, the kernel monitor, until Vexa has a real
+  shell
+
+Some things to try at the `vexa>` prompt:
+
+| Command | What it does |
+| --- | --- |
+| `hello` | says hi, and which version of Vexa is running |
+| `help` | lists every command |
+| `programs` | lists the programs you can run |
+| `run hello-world` | runs the first Vexa program, in user mode |
+| `run crash` | runs a program that misbehaves on purpose, to show it gets stopped |
+| `spawn fpu-stress` | starts a program in the background (try it three times, then `threads`) |
+| `threads`, `ps` | list threads and processes |
+| `cpu`, `mem`, `memtest` | processor and memory information, and a memory stress test |
 
 If Vexa has trouble on a machine, pick **safe mode** in the boot menu. It ignores ACPI
 and uses only the oldest, most widely supported interrupt and timer hardware. The
-kernel options behind it (`acpi=off`, `noapic`) can also be set in `limine.conf`.
+kernel options behind it (`acpi=off`, `noapic`) can also be set in `limine.conf`, as can
+`nosmp` to use only the first CPU core.
 
-Next up is Phase 3: processes, threads and user mode. See [docs/ROADMAP.md](docs/ROADMAP.md) for the full
+Next up is Phase 4: files and storage. See [docs/ROADMAP.md](docs/ROADMAP.md) for the full
 plan from here to Firefox.
 
 ## Download
@@ -82,10 +102,16 @@ kernel/
   include/limine.h   Limine boot protocol header (0BSD, vendored)
   include/vexa/      kernel headers
   src/kmain.c        kernel entry point and boot sequence
-  src/arch/x86_64/   GDT and TSS, IDT, interrupt entry, APIC and 8259 PIC, timer
-  src/core/          memory (pmm, vmm, heap, memtest), ACPI, command line, monitor
+  src/arch/x86_64/   per-CPU setup, interrupts, APIC and 8259 PIC, timer, FPU state,
+                     system call entry, context switch, starting other CPUs
+  src/core/          memory (pmm, vmm, heap), scheduler, processes, ELF loader, ACPI,
+                     command line, kernel monitor
+  src/personality/vexa/  the native Vexa system calls
   src/dev/           serial, framebuffer, text console, font, PS/2 keyboard
   src/lib/           string functions, kprintf, panic
+abi/vexa/abi.h       system call numbers and error codes, shared by kernel and libvexa
+libvexa/             Vexa's C library: program startup, system calls, printf, strings
+userland/            Vexa programs, one directory each (hello-world, fpu-stress, crash)
 tools/
   bdf2c.py           converts a BDF bitmap font into the console font table
   qemu-smoke-test.py boot test used by `make test`
@@ -93,6 +119,9 @@ docs/
   ARCHITECTURE.md    how the kernel, native interface and Linux subsystem fit together
   ROADMAP.md         the plan, phase by phase
 ```
+
+To add a program, create `userland/<name>/main.c`: the Makefile builds every
+directory there with libvexa and adds it to the boot menu, and `run <name>` starts it.
 
 The console font is [Spleen](https://github.com/fcambus/spleen) 8x16 by Frederic Cambus
 (BSD 2-Clause license, reproduced in `kernel/src/dev/font.c`).
