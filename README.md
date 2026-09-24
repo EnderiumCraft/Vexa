@@ -3,6 +3,10 @@
 Vexa is a hobby operating system for x86_64, written from scratch in C.
 The long-term goal is to run **Mozilla Firefox**.
 
+Vexa has its own kernel design, its own system call interface and its own C library.
+Linux programs such as Firefox run through a separate, optional compatibility subsystem
+that sits on top of the Vexa kernel. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
 ![Vexa booting in QEMU](docs/boot-splash.png)
 
 ## Status
@@ -50,5 +54,6 @@ kernel/
   src/arch/x86_64/   GDT, IDT, exception entry stubs
   src/dev/           serial port and framebuffer drivers
   src/lib/           string functions, kprintf, panic
+docs/ARCHITECTURE.md how the kernel, native interface and Linux subsystem fit together
 docs/ROADMAP.md      the plan, phase by phase
 ```
