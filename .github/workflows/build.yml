@@ -2,6 +2,7 @@
 # On the default branch, a passing build is published to GitHub Releases:
 #   - "Latest build" (tag `latest-build`): replaced on every push
 #   - "Vexa X.Y.Z" (tag `vX.Y.Z`): created once whenever VEXA_VERSION changes
+#     (kernel/include/vexa/version.h)
 name: Build and release
 
 on:
@@ -35,7 +36,11 @@ jobs:
       - name: Read version
         id: version
         run: |
-          version=$(sed -n 's/^#define VEXA_VERSION "\(.*\)"/\1/p' kernel/src/kmain.c)
+          version=$(sed -n 's/^#define VEXA_VERSION "\(.*\)"/\1/p' kernel/include/vexa/version.h)
+          if ! echo "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Could not read VEXA_VERSION from kernel/include/vexa/version.h (got '$version')"
+            exit 1
+          fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           cp build/vexa.iso "vexa-$version.iso"
           sha256sum "vexa-$version.iso" > "vexa-$version.iso.sha256"
@@ -90,7 +95,7 @@ jobs:
       - name: Create versioned release if VEXA_VERSION is new
         run: |
           if gh release view "v${VERSION}" >/dev/null 2>&1; then
-            echo "Release v${VERSION} already exists; bump VEXA_VERSION in kernel/src/kmain.c to cut a new one."
+            echo "Release v${VERSION} already exists; bump VEXA_VERSION in kernel/include/vexa/version.h to cut a new one."
             exit 0
           fi
           gh release create "v${VERSION}" --target "$GITHUB_SHA" \
