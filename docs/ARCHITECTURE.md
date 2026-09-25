@@ -195,6 +195,15 @@ reads partition tables, and calls the drivers (`dev/virtio_blk.c`, `dev/ahci.c`,
   the parts of the screen that changed into memory and copies them to the display.
   Programs use `<vexa/gui.h>`: `vx_window_create`, draw into `window->surface`,
   `vx_window_present`, and `vx_gui_wait` for key, pointer and close events.
+- **X** runs as Linux programs. Xvexa (`third_party/xvexa`) is a kdrive X server
+  built into X.Org's source tree: it opens a desktop window, uses the window's
+  shared buffer as its framebuffer, presents what X damaged, and turns the
+  desktop's key and pointer events into X input (Linux key codes, the `evdev` XKB
+  rules). It talks the desktop protocol itself, so the Linux subsystem needs nothing
+  graphics-specific for it: local sockets, shared file mappings and `poll`.
+  `/linux/usr/bin/xsession` (Ctrl+Alt+X) starts it with an `xterm`. A process's
+  controlling terminal is what `/dev/tty` opens: a pty becomes one when a group
+  leader opens it or claims it with `TIOCSCTTY`, and children inherit it.
 
 ## Networking today
 

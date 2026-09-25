@@ -136,6 +136,8 @@ TYPED_COMMANDS = [
 # The Linux subsystem: BusyBox (built from source with musl) from vsh, then
 # its shell, with fork, exec, pipes, Ctrl-C and signal handlers. Typed before
 # "ps" unless --no-linux (for kernels built with LINUX_COMPAT=0).
+TYPE_ATTEMPTS = 3  # For "@type" lines (see main).
+
 LINUX_COMMANDS = [
     ("busybox echo hello from linux", "hello from linux", 20, 2),
     ("busybox uname -sr", "Vexa 6.1.0-vexa", 20),
@@ -167,6 +169,14 @@ LINUX_COMMANDS = [
     # Linux threads (musl's pthreads): clone, futex, thread-local storage, tgkill.
     ("pthread-test", "pthread-test: passed", 60),
     ("pthread-test exit", "exiting while threads spin", 30),
+    # X: the desktop, then Xvexa (an X server in a desktop window) with an
+    # xterm (Ctrl+Alt+X), whose shell gets what's typed into it once the
+    # pointer is over it (X without a window manager: focus follows the mouse).
+    ("desktop", 'desktop: window 1 "Terminal"', 30),
+    ("@sendkey ctrl-alt-x", 'desktop: window 2 "X (:0)"', 60),
+    ("@mouse_move -440 -200", "xterm: cannot load font", 60),
+    ("@type echo typed-in-xterm > /dev/console", "typed-in-xterm", 20),
+    ("@sendkey ctrl-alt-q", "desktop: back to the console", 30),
     # Networking: BSD sockets (with SCM_RIGHTS), wget, ifconfig, ping and
     # Python's urllib, asyncio and multiprocessing pipes.
     ("bsd-socket-test", "bsd-socket-test: passed", 60),
@@ -386,10 +396,17 @@ def main():
                     # "@mouse_move 10 5".
                     time.sleep(0.5)
                     if command.startswith("@type "):
-                        for key in keys_for(command[6:] + "\n"):
-                            monitor.command("sendkey " + key)
-                    else:
-                        monitor.command(command[1:])
+                        # A window may still be starting up and drop what's
+                        # typed; if nothing happens, type the line again.
+                        for attempt in range(TYPE_ATTEMPTS):
+                            for key in keys_for(command[6:] + "\n"):
+                                monitor.command("sendkey " + key)
+                            if expected is None or wait_for(log_path, expected, timeout, *count):
+                                break
+                        else:
+                            failures.append(f"{command!r}: missing {expected!r}")
+                        continue
+                    monitor.command(command[1:])
                     if expected is not None and not wait_for(log_path, expected, timeout, *count):
                         failures.append(f"{command!r}: missing {expected!r}")
                     continue

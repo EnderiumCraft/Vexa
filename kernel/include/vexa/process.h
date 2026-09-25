@@ -66,6 +66,7 @@ struct process {
     bool exiting;            /* exit_group: every thread is on its way out. */
     struct wait_queue threads_changed;
     char *cwd;               /* Absolute, normalized. */
+    struct vnode *terminal;  /* What /dev/tty opens (a referenced pty), or NULL: the console. */
     uint32_t umask;          /* Permission bits new files don't get (kept across exec). */
     uint64_t pending_signals;
     uint8_t signal_actions[VX_SIGNAL_COUNT]; /* enum signal_action */

@@ -122,6 +122,12 @@ PYTHON_BUILD := $(BUILD)/Python-$(PYTHON_VERSION)
 PYTHON_ROOT := $(BUILD)/python-root
 PYTHON := $(PYTHON_ROOT)/.done
 
+# X: the libraries, Xvexa (an X server in a Vexa desktop window), xkbcomp and
+# the keyboard data, and xterm, all built with musl (tools/build-x11.sh).
+X11_SYSROOT := $(BUILD)/x11
+X11 := $(X11_SYSROOT)/.done
+X11_SOURCES := third_party/x11-sources.txt
+
 # Everything under /linux: the Linux programs and what they need.
 LINUX_ROOT := $(BUILD)/linux-root
 ifeq ($(LINUX_COMPAT),1)
@@ -139,7 +145,7 @@ USER_OBJS := $(LIBVEXA_OBJS) \
 	$(patsubst %,$(BUILD)/%.o,$(wildcard $(addsuffix /*.c,$(addprefix userland/,$(PROGRAMS)))))
 
 .PHONY: all kernel programs iso run run-disk run-nographic test test-disks clean distclean \
-	busybox busybox-source bash coreutils python test-native
+	busybox busybox-source bash coreutils python x11 test-native
 
 all: iso
 kernel: $(KERNEL)
@@ -349,11 +355,18 @@ $(BUILD)/linux-tests/%: tests/linux/%.c
 	@mkdir -p $(dir $@)
 	$(MUSL_CC) -O2 -Wall -Wextra -Werror -pthread $< -o $@
 
-$(LINUX_ROOT)/.done: $(BUSYBOX) $(BASH) $(COREUTILS) $(PYTHON) $(MUSL_LIBC) $(LINUX_TESTS) \
-		tools/make-linux-root.sh
+$(X11): $(X11_SOURCES) tools/build-x11.sh $(wildcard third_party/xvexa/*) | $(BUILD)/linux-headers
+	tools/build-x11.sh $(X11_SOURCES) third_party/x11 $(BUILD)/x11-work $(X11_SYSROOT) \
+		$(BUILD)/linux-headers
+	touch $@
+
+x11: $(X11)
+
+$(LINUX_ROOT)/.done: $(BUSYBOX) $(BASH) $(COREUTILS) $(PYTHON) $(X11) $(MUSL_LIBC) $(LINUX_TESTS) \
+		tools/make-linux-root.sh $(wildcard tools/linux-files/*)
 	tools/make-linux-root.sh $(LINUX_ROOT) $(MUSL_LIBC) $(BUSYBOX) \
 		$(BUSYBOX_BUILD)/busybox.links $(BASH) $(COREUTILS) $(COREUTILS_BUILD)/programs.txt \
-		$(PYTHON_ROOT) $(LINUX_TESTS)
+		$(PYTHON_ROOT) $(X11_SYSROOT) $(LINUX_TESTS)
 	touch $@
 
 $(BUILD)/disk-content: $(DISK_CONTENT_FILES) $(BUILD)/programs/hello-world

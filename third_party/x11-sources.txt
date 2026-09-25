@@ -1,0 +1,26 @@
+# The X Window System sources tools/build-x11.sh builds, with their SHA-256.
+# All from Ubuntu's archive (the original upstream tarballs, *.orig.tar.*).
+4f6b9b4faf91e5df8265b71843a91fc73dc895be6210c84117a996545df296ce https://archive.ubuntu.com/ubuntu/pool/main/x/xorgproto/xorgproto_2024.1.orig.tar.gz
+3a321aaceb803577a4776a5efe78836eb095a9e44bbc7a465d29463e1a14f189 https://archive.ubuntu.com/ubuntu/pool/main/libx/libxau/libxau_1.0.11.orig.tar.gz
+1bd6aa42275313af3141c7cf2e5b964e8b1fd488025caf2f971f43b00776b332 https://archive.ubuntu.com/ubuntu/pool/main/libm/libmd/libmd_1.1.0.orig.tar.xz
+392d3c9690f8c8202a68fdb89c16fd55159ab8d65000a6da213f4a1576e97a16 https://archive.ubuntu.com/ubuntu/pool/universe/x/xcb-proto/xcb-proto_1.17.0.orig.tar.gz
+2c69287424c9e2128cb47ffe92171e10417041ec2963bceafb65cb3fcf8f0b85 https://archive.ubuntu.com/ubuntu/pool/main/libx/libxcb/libxcb_1.17.0.orig.tar.gz
+936b74c60b19c317c3f3cb1b114575032528dbdaf428740483200ea874c2ca0a https://archive.ubuntu.com/ubuntu/pool/main/x/xtrans/xtrans_1.6.0.orig.tar.gz
+acf0e7cd7541110e6330ecb539441a2d53061f386ec7be6906dfde0de2598470 https://archive.ubuntu.com/ubuntu/pool/main/libx/libx11/libx11_1.8.13.orig.tar.gz
+8ef0789f282826661ff40a8eef22430378516ac580167da35cc948be9041aac1 https://archive.ubuntu.com/ubuntu/pool/main/libx/libxext/libxext_1.3.4.orig.tar.gz
+5eea0322c1c21c75cad3b607ac1c43ff5c71e014b8ac4a34300b5e2b80d02e70 https://archive.ubuntu.com/ubuntu/pool/main/z/zlib/zlib_1.3.dfsg.orig.tar.xz
+b55039f70959a1b2f02f4ec8db071e5170528d2c9180b30575dccf7510d7fb9f https://archive.ubuntu.com/ubuntu/pool/main/libf/libfontenc/libfontenc_1.1.8.orig.tar.gz
+a944df7b6837c8fa2067f6a5fc25d89b0acc4011cd0bc085106a03557fb502fc https://archive.ubuntu.com/ubuntu/pool/main/libx/libxfont/libxfont_2.0.6.orig.tar.gz
+89a4c1e1e45e0b23dffe708202cb2eaffde0fe3727d7692b2e1739fec78a7dac https://archive.ubuntu.com/ubuntu/pool/main/p/pixman/pixman_0.44.0.orig.tar.gz
+2a92adda3992aa7cbad758ef0b8dfeaedebb49338b772c64ddf369d78c1c51d3 https://archive.ubuntu.com/ubuntu/pool/main/libx/libxkbfile/libxkbfile_1.1.0.orig.tar.gz
+2f7fee7b72120f32dcad6bf8f49d00994d064cdbe5aaffc93920356a3c84cdd8 https://archive.ubuntu.com/ubuntu/pool/main/x/x11-xkb-utils/x11-xkb-utils_7.7+9build1.tar.xz
+10c58218fb60d08fb1f7b30304deb3ba47613195aa8a08a81f1972775ccc3640 https://archive.ubuntu.com/ubuntu/pool/main/x/xkeyboard-config/xkeyboard-config_2.46.orig.tar.xz
+d01ccd7ba48ec9d6815aeef5fb408d0c307ab6be21d20ff0b54b11f1c2b8a075 https://archive.ubuntu.com/ubuntu/pool/main/x/xorg-server/xorg-server_21.1.24.orig.tar.gz
+04fbd34a11ba08b9df2e3cdb2055c2e3c1c51b3257f683d7fcf42dabcf8e1210 https://archive.ubuntu.com/ubuntu/pool/main/libi/libice/libice_1.1.1.orig.tar.gz
+51464ce1abce323d5b6707ceecf8468617106e1a8a98522f8342db06fd024c15 https://archive.ubuntu.com/ubuntu/pool/main/libs/libsm/libsm_1.2.4.orig.tar.gz
+6da1bfa9dd0ed87430a5ce95b129485086394df308998ebe34d98e378e3dfb33 https://archive.ubuntu.com/ubuntu/pool/main/libx/libxt/libxt_1.2.1.orig.tar.gz
+5bd9d4ed1ceaac9ea023d86bf1c1632cd3b172dce4a193a72a94e1d9df87a62e https://archive.ubuntu.com/ubuntu/pool/main/libx/libxmu/libxmu_1.1.3.orig.tar.gz
+959466c7dfcfcaa8a65055bfc311f74d4c43d9257900f85ab042604d286df0c6 https://archive.ubuntu.com/ubuntu/pool/main/libx/libxpm/libxpm_3.5.17.orig.tar.gz
+012f90adf8739f2f023d63a5fee1528949cf2aba92ef7ac1abcfc2ae9cf28798 https://archive.ubuntu.com/ubuntu/pool/main/libx/libxaw/libxaw_1.0.16.orig.tar.gz
+e280541f4f601b8586bec305976c873fd641607f9bc4254bf661034dcccac4e9 https://archive.ubuntu.com/ubuntu/pool/main/n/ncurses/ncurses_6.6+20251231.orig.tar.gz
+7aeef9f29f6b95e09f481173c8c3053357bf5ffe162585647f690fd1707556df https://archive.ubuntu.com/ubuntu/pool/main/x/xterm/xterm_330.orig.tar.gz

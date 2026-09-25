@@ -1,0 +1,15 @@
+#!/bin/sh
+# xsession: X in a window on the Vexa desktop (Xvexa), with an xterm in it.
+# X programs started later find it through DISPLAY=:0. When the xterm exits,
+# so does X.
+display=${DISPLAY:-:0}
+Xvexa "$display" -retro -title "X ($display)" -screen "${XSESSION_SIZE:-1024x640}" &
+server=$!
+# Wait for the server's socket.
+socket=/tmp/.X11-unix/X${display#:}
+for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+    [ -S "$socket" ] && break
+    sleep 0.5
+done
+DISPLAY=$display xterm -geometry 80x24+10+10 "$@"
+kill "$server" 2>/dev/null

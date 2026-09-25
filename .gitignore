@@ -8,3 +8,4 @@ __pycache__/
 /third_party/bash-*.tar.xz
 /third_party/*.tar.xz
 /third_party/*.tar.gz
+/third_party/x11/

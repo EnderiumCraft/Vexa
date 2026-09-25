@@ -1497,6 +1497,8 @@ static int64_t sys_ioctl(struct interrupt_frame *f, uint64_t fd, uint64_t reques
     if (master) {
         vfs_control((struct file *)object, VX_TTY_PTY_NUMBER, &pty_number, sizeof(pty_number));
     }
+    bool claimed = tty && request == LINUX_TIOCSCTTY &&
+                   pty_make_controlling((struct file *)object);
     object_put(object); /* The tty lives as long as the pty's vnode, which is in use. */
     if (!tty) {
         return -LE_ENOTTY;
@@ -1568,6 +1570,12 @@ static int64_t sys_ioctl(struct interrupt_frame *f, uint64_t fd, uint64_t reques
         return copy_to_user(arg, &ready, sizeof(ready)) ? 0 : -LE_EFAULT;
     }
     case LINUX_TIOCSCTTY:
+        /* The terminal becomes the session's: its foreground is the
+         * caller's group (what job-control shells check before reading). */
+        if (!claimed) {
+            tty_set_foreground(tty, me()->group);
+        }
+        return 0;
     case LINUX_TIOCNOTTY:
     case LINUX_FIONBIO:
     case LINUX_TCFLSH:
@@ -2166,6 +2174,12 @@ static int64_t sys_setpgid(struct interrupt_frame *f, uint64_t pid, uint64_t gro
 static int64_t sys_setsid(struct interrupt_frame *f, uint64_t a0, uint64_t a1, uint64_t a2,
                           uint64_t a3, uint64_t a4, uint64_t a5) {
     me()->group = me()->id;
+    /* A new session starts without a controlling terminal (here: /dev/tty
+     * is the console again until it opens or claims a pty). */
+    struct vnode *old = __atomic_exchange_n(&me()->terminal, NULL, __ATOMIC_ACQ_REL);
+    if (old) {
+        vnode_put(old);
+    }
     return me()->id;
 }
 

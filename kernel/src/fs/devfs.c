@@ -2,6 +2,7 @@
 #include <vexa/fs.h>
 #include <vexa/kprintf.h>
 #include <vexa/mm.h>
+#include <vexa/process.h>
 #include <vexa/string.h>
 #include <vexa/pty.h>
 #include <vexa/tty.h>
@@ -176,6 +177,13 @@ static int devfs_lookup(struct vnode *dir, const char *name, size_t length, stru
         struct vnode *up = here && here->parent ? &here->parent->vnode : &devfs_root;
         vnode_ref(up);
         *out = up;
+        return 0;
+    }
+    /* /dev/tty: the process's controlling terminal, if it has one. */
+    struct process *process = process_current();
+    if (!here && length == 3 && memcmp(name, "tty", 3) == 0 && process && process->terminal) {
+        vnode_ref(process->terminal);
+        *out = process->terminal;
         return 0;
     }
     for (int i = 0; i < device_count; i++) {

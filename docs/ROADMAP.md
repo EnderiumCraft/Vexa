@@ -203,12 +203,16 @@ Native track:
 - [x] A native terminal window (`term`) running `vsh` on a pseudo-terminal (0.12.0)
 
 Linux track:
+- [x] The X Window System built from source with musl: the X libraries, X.Org's
+      server with a Vexa backend (Xvexa, a kdrive server whose screen is a desktop
+      window), xkbcomp and the keyboard data, and `xterm` (0.13.0)
+- [x] Controlling terminals: a pty becomes its session's `/dev/tty` (0.13.0)
 - [ ] Translate the Linux interfaces onto the core: DRM/KMS "dumb buffers",
       evdev devices under `/dev/input`, `memfd_create`, `/dev/shm`, `MAP_SHARED`
-- [ ] Run an X server (Xorg with the modesetting driver), then `xterm`
+- [ ] Xorg with the modesetting driver on those, for X on the whole screen
 
 **Milestone:** a graphical Vexa desktop with windows you can drag around. Reached on the
-native track in 0.12.0; the Linux track (X) is next.
+native track in 0.12.0; in 0.13.0, X and `xterm` run in a window on it.
 
 ## Phase 9: The desktop stack
 

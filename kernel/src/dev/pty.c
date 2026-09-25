@@ -3,6 +3,7 @@
 #include <vexa/kprintf.h>
 #include <vexa/mm.h>
 #include <vexa/object.h>
+#include <vexa/process.h>
 #include <vexa/pty.h>
 #include <vexa/sched.h>
 #include <vexa/spinlock.h>
@@ -212,6 +213,16 @@ static int slave_open(struct file *file) {
     pty->slaves_open++;
     pty->slaves_ever++;
     spin_unlock_irqrestore(&pty->lock, flags);
+    /* As on Linux, the leader of a new session (here: a group leader) that
+     * opens the terminal gets it: it becomes the process's /dev/tty, and its
+     * group the foreground. That's what a terminal emulator's child shell
+     * expects. */
+    struct process *process = process_current();
+    if (process && process->id == process->group) {
+        pty_make_controlling(file);
+    } else if (process && !tty_foreground(pty->tty)) {
+        tty_set_foreground(pty->tty, process->group);
+    }
     return 0;
 }
 
@@ -345,6 +356,20 @@ struct tty *pty_terminal(struct file *file) {
         return ((struct pty *)file->private)->tty;
     }
     return NULL;
+}
+
+bool pty_make_controlling(struct file *file) {
+    struct process *process = process_current();
+    if (file->vnode->ops != &slave_ops || !process) {
+        return false;
+    }
+    vnode_ref(file->vnode);
+    struct vnode *old = __atomic_exchange_n(&process->terminal, file->vnode, __ATOMIC_ACQ_REL);
+    if (old) {
+        vnode_put(old);
+    }
+    tty_set_foreground(pty_of(file->vnode)->tty, process->group);
+    return true;
 }
 
 bool pty_is_master(struct file *file) {

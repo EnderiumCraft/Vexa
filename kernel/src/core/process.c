@@ -57,6 +57,10 @@ static void process_destroy(struct object *object) {
     if (process->personality && process->personality->free_data && process->personality_data) {
         process->personality->free_data(process->personality_data);
     }
+    if (process->terminal) {
+        /* A pty's vnode; its release doesn't need vfs_lock. */
+        vnode_put(process->terminal);
+    }
     kfree(process->cwd);
     kfree(process->cmdline);
     kfree(process->exe);
@@ -411,6 +415,10 @@ struct process *process_spawn(const struct spawn_request *request, int *error,
     strcpy(cwd, request->cwd ? request->cwd : "/");
     process->umask = request->parent ? request->parent->umask : 022;
     process->cwd = cwd;
+    if (request->parent && request->parent->terminal) {
+        process->terminal = request->parent->terminal;
+        vnode_ref(process->terminal);
+    }
     /* The process is named after the last part of its path. */
     const char *name = request->path;
     for (const char *p = request->path; *p; p++) {
@@ -530,6 +538,10 @@ struct process *process_fork(struct interrupt_frame *frame, int *error) {
     memcpy(child->name, parent->name, sizeof(child->name));
     memcpy(child->signal_actions, parent->signal_actions, sizeof(child->signal_actions));
     child->umask = parent->umask;
+    if (parent->terminal) {
+        child->terminal = parent->terminal;
+        vnode_ref(child->terminal);
+    }
     child->personality = parent->personality;
     child->address_space = vm_fork(parent->address_space);
     child->handles = child->address_space ? handle_table_clone(parent->handles) : NULL;

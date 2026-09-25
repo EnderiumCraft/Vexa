@@ -22,9 +22,26 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential xorriso qemu-system-x86 ovmf python3 e2fsprogs \
-            musl-tools linux-libc-dev
+            musl-tools linux-libc-dev ninja-build pkg-config bison
+          # X.Org's packages want a newer Meson than Ubuntu's.
+          pipx install meson==1.12.1
 
-      - name: Build ISO (with BusyBox, bash, coreutils and Python, built from source)
+      # The X Window System takes the longest to build: keep it (and its source
+      # tarballs) between runs, until its sources or build script change.
+      - name: Restore the X build
+        id: x11-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            build/x11
+            third_party/x11
+          key: x11-${{ hashFiles('third_party/x11-sources.txt', 'tools/build-x11.sh', 'tools/musl-cc-wrapper.sh', 'third_party/xvexa/**') }}
+
+      - name: Mark the restored X build as up to date
+        if: steps.x11-cache.outputs.cache-hit == 'true'
+        run: touch build/x11/.done
+
+      - name: Build ISO (with BusyBox, bash, coreutils, Python and X, built from source)
         run: make && make busybox-source
 
       - name: Boot tests (BIOS, UEFI with 4 CPUs, safe mode; with test disks)

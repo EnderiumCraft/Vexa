@@ -3,7 +3,8 @@
  * It takes the screen, the keyboard and the mouse, and draws programs'
  * windows (buffers they share with it) with a title bar you can drag them
  * by. Clicking a window raises it and gives it the keyboard. Ctrl+Alt+T opens
- * a terminal, Ctrl+Alt+Q goes back to the text console.
+ * a terminal, Ctrl+Alt+X starts X (Xvexa) with an xterm, and Ctrl+Alt+Q goes
+ * back to the text console.
  *
  * Programs talk to it over the local socket /run/desktop (see
  * <vexa/desktop.h>; <vexa/gui.h> has the easy way).
@@ -135,7 +136,8 @@ static void compose(struct rect area) {
                               area.height, screen.stride};
     int ox = -area.x, oy = -area.y;
     vx_fill(&view, 0, 0, area.width, area.height, COLOR_BACKGROUND);
-    const char *hint = "Vexa    Ctrl+Alt+T: terminal    Ctrl+Alt+Q: back to the console";
+    const char *hint = "Vexa    Ctrl+Alt+T: terminal    Ctrl+Alt+X: X with an xterm    "
+                       "Ctrl+Alt+Q: back to the console";
     vx_draw_text(&view, ox + 16, oy + screen.height - FONT_HEIGHT - 12, hint,
                  COLOR_BACKGROUND_TEXT, VX_TRANSPARENT);
     for (int i = 0; i < window_count; i++) {
@@ -381,8 +383,13 @@ static void client_message(int client) {
 
 static void launch(const char *path) {
     const char *argv[] = {path};
+    unsigned long envc = 0;
+    while (environ[envc]) {
+        envc++;
+    }
     struct vx_spawn spawn = {
-        .argv = argv, .argc = 1, .handles = {0, 1, 2}, .flags = VX_SPAWN_NEW_GROUP,
+        .argv = argv, .argc = 1, .envp = (const char *const *)environ, .envc = envc,
+        .handles = {0, 1, 2}, .flags = VX_SPAWN_NEW_GROUP,
     };
     int process = vx_spawn(path, &spawn);
     if (process < 0) {
@@ -430,22 +437,28 @@ static int character_of(int key) {
 
 static void key_event(int key, int value) {
     bool down = value != 0;
+    /* Modifiers change what keys type here, and go to the window too (an X
+     * server keeps track of them itself). */
     switch (key) {
     case VX_KEY_LEFTSHIFT:
-    case VX_KEY_RIGHTSHIFT: shift = down; return;
+    case VX_KEY_RIGHTSHIFT: shift = down; break;
     case VX_KEY_LEFTCTRL:
-    case VX_KEY_RIGHTCTRL: ctrl = down; return;
+    case VX_KEY_RIGHTCTRL: ctrl = down; break;
     case VX_KEY_LEFTALT:
-    case VX_KEY_RIGHTALT: alt = down; return;
+    case VX_KEY_RIGHTALT: alt = down; break;
     case VX_KEY_CAPSLOCK:
         if (value == 1) {
             caps_lock = !caps_lock;
         }
-        return;
+        break;
     }
     if (ctrl && alt && value == 1) {
         if (key == 20) { /* T */
             launch("/bin/term");
+            return;
+        }
+        if (key == 45) { /* X: X in a window, if the Linux subsystem is there */
+            launch("/linux/usr/bin/xsession");
             return;
         }
         if (key == 16) { /* Q */

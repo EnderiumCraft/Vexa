@@ -3,10 +3,11 @@
 # /usr/bin... (the Linux subsystem looks there first).
 # Usage: tools/make-linux-root.sh <dir> <musl libc.so> <busybox> <busybox.links> <bash>
 #                                 <coreutils> <coreutils programs.txt> <python root>
-#                                 [test programs for /usr/bin...]
+#                                 <X11 sysroot> [test programs for /usr/bin...]
 set -eu
 root=$1 libc=$2 busybox=$3 links=$4 bash=$5 coreutils=$6 coreutils_programs=$7 python=$8
-shift 8
+x11=$9
+shift 9
 rm -rf "$root"
 mkdir -p "$root/lib" "$root/bin" "$root/sbin" "$root/usr/bin" "$root/usr/sbin" "$root/etc"
 
@@ -41,6 +42,24 @@ done < "$coreutils_programs"
 
 # Python (its /usr/bin/python3 and /usr/lib/python3.x).
 cp -a "$python/usr/." "$root/usr/"
+
+# X (tools/build-x11.sh): the shared libraries, the Xvexa server, xkbcomp and
+# the keyboard descriptions, xterm, and a few terminal descriptions.
+cp -a "$x11"/usr/lib/*.so* "$root/usr/lib/"
+cp -a "$x11/usr/lib/X11" "$root/usr/lib/"
+for program in Xvexa xkbcomp xterm resize tput; do
+    rm -f "$root/usr/bin/$program" # Not through a BusyBox link: that would overwrite BusyBox.
+    cp "$x11/usr/bin/$program" "$root/usr/bin/"
+done
+mkdir -p "$root/usr/share/X11"
+cp -a "$x11/usr/share/X11/locale" "$x11/usr/share/X11/XErrorDB" "$root/usr/share/X11/"
+# A real directory: an absolute link would point outside /linux.
+cp -a "$x11/usr/share/xkeyboard-config-2" "$root/usr/share/X11/xkb"
+cp "$(dirname "$0")/linux-files/xsession" "$root/usr/bin/xsession"
+for entry in x/xterm x/xterm-256color x/xterm-color v/vt100 v/vt220 l/linux d/dumb; do
+    mkdir -p "$root/usr/share/terminfo/$(dirname $entry)"
+    cp -L "$x11/usr/share/terminfo/$entry" "$root/usr/share/terminfo/$entry"
+done
 
 # One user so far: root.
 echo 'root:x:0:0:root:/root:/bin/sh' > "$root/etc/passwd"

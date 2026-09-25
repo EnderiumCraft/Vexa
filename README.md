@@ -17,8 +17,8 @@ Phases 1 to 7 are complete: boot and CPU basics, memory management, processes an
 user mode, files and storage, a userland, threads and dynamic linking, and networking.
 Vexa boots into its own shell, `vsh`, with a set of native programs, and runs Linux
 programs (BusyBox, GNU bash and coreutils, Python 3.12) through the Linux subsystem.
-Phase 8, graphics, is under way: Vexa has its own desktop with terminal windows. The
-kernel:
+Phase 8, graphics, is under way: Vexa has its own desktop with terminal windows, and
+runs an X server with `xterm` in a window on it. The kernel:
 
 - boots through the [Limine](https://github.com/limine-bootloader/limine) bootloader (BIOS and UEFI)
 - runs in 64-bit long mode as a higher-half kernel
@@ -38,6 +38,8 @@ kernel:
   wheel), as input events programs can read
 - has a graphical desktop: a compositor that draws programs' windows (shared buffers)
   on the screen, which you move by their title bars, and a terminal window
+- runs the X Window System through the Linux subsystem: Xvexa, an X server (X.Org's,
+  built with musl) whose screen is a window on the desktop, and `xterm` in it
 - has a terminal with line editing, Ctrl-C (or Ctrl-\\) to stop programs and Ctrl-D for
   end of input
 - runs threads with a preemptive scheduler, on every CPU core it finds; a program can
@@ -82,7 +84,7 @@ the `vexa:/>` prompt:
 | `bash` | GNU bash, a Linux program (`exit` to go back); inside it, `ls`, `vi`, `grep`, `ps`, `top`... are BusyBox's |
 | `sh`, `busybox` | BusyBox's shell; `busybox` alone lists its commands |
 | `ln -s`, `cat /proc/meminfo` | symbolic links; `/proc` |
-| `desktop` | the graphical desktop, with a terminal window; Ctrl+Alt+T opens another, Ctrl+Alt+Q goes back to the text console |
+| `desktop` | the graphical desktop, with a terminal window; Ctrl+Alt+T opens another, Ctrl+Alt+X starts X with an `xterm` (point at it to type into it), Ctrl+Alt+Q goes back to the text console |
 | `input` | the keyboard and mouse; `input watch 1` shows what the mouse reports |
 | `net` | network interfaces and addresses (Linux: `ifconfig`, `route -n`) |
 | `fetch http://example.com/` | downloads a web page (a Vexa program); `wget` is BusyBox's |
@@ -121,9 +123,10 @@ journal, so pulling the plug mid-write can leave the disk needing a check with
 `e2fsck` on Linux.
 
 Phase 8 is under way: Vexa has a graphical desktop of its own (`desktop`), with terminal
-windows you can drag around. Next: the Linux side of graphics (input and display devices
-the Linux way, then an X server and `xterm`). See [docs/ROADMAP.md](docs/ROADMAP.md) for the full
-plan from here to Firefox.
+windows you can drag around, and X runs on it: Ctrl+Alt+X starts Xvexa with an `xterm`.
+Next: the Linux display and input interfaces (DRM "dumb buffers", evdev), so that Linux
+graphics programs can also run without X. See [docs/ROADMAP.md](docs/ROADMAP.md) for the
+full plan from here to Firefox.
 
 ## Download
 
@@ -153,6 +156,7 @@ You need a Linux host (or WSL) with:
 | mke2fs and e2fsck (for test disks) | `e2fsprogs` |
 | musl C compiler and Linux headers (for BusyBox and bash) | `musl-tools`, `linux-libc-dev` |
 | curl (downloads bash's source once) | `curl` |
+| Meson, Ninja and pkg-config (for X) | `meson`, `ninja-build`, `pkg-config` |
 
 ```sh
 make                # builds build/vexa.iso (fetches Limine on first run)
@@ -194,7 +198,8 @@ kernel/
   src/fs/            ext2, tmpfs, devfs, initramfs unpacking
 abi/vexa/abi.h       system call numbers and error codes, shared by kernel and libvexa
 rootfs/              files for the root file system (packed into initramfs.tar)
-third_party/         BusyBox's build configuration; sources are fetched here at build time
+third_party/         BusyBox's build configuration, the X sources list (x11-sources.txt) and
+                     Xvexa, Vexa's X server (xvexa/); sources are fetched here at build time
 libvexa/             Vexa's C library: program startup, system calls, printf, strings,
                      threads, networking, drawing and windows; built as libvexa.so, with
                      the dynamic loader in libvexa/ld/
@@ -206,6 +211,8 @@ tools/
   make-disk.py       builds disk images (GPT, MBR or none) holding an ext2 file system
   configure-busybox.sh  applies third_party/busybox.config to BusyBox's configuration
   make-linux-root.sh builds the /linux tree: musl's loader, BusyBox and its links, bash
+  build-x11.sh       builds the X libraries, Xvexa, xkbcomp and xterm with musl
+  linux-files/       files for the /linux tree (xsession: what Ctrl+Alt+X runs)
 docs/
   ARCHITECTURE.md    how the kernel, native interface and Linux subsystem fit together
   ROADMAP.md         the plan, phase by phase
@@ -227,3 +234,10 @@ and [libffi](https://sourceware.org/libffi/) 3.4.6), also built unmodified. All 
 linked against the [musl](https://musl.libc.org) C library (MIT license), which the ISO
 also includes. Every release on the Releases page carries the matching GPL sources
 (`busybox-1_36_1-source.tar.gz`, `bash-5.2.37.tar.xz`, `coreutils-9.4.tar.xz`).
+
+The X Window System in the ISO (the X.Org server 21.1 with Xvexa, libX11, libxcb and
+the other X libraries, pixman, xkbcomp and xkeyboard-config, xterm 330 and ncurses 6.6)
+is under the MIT license and similar permissive licenses; the exact upstream tarballs
+are listed in `third_party/x11-sources.txt`, and the few changes made while building
+them (adding Xvexa to the server, `openpty` for xterm on musl) are in
+`tools/build-x11.sh`. Xvexa itself is `third_party/xvexa/xvexa.c`.
