@@ -371,7 +371,7 @@ $(X11): $(X11_SOURCES) tools/build-x11.sh $(wildcard third_party/xvexa/*) | $(BU
 x11: $(X11)
 
 $(LINUX_ROOT)/.done: $(BUSYBOX) $(BASH) $(COREUTILS) $(PYTHON) $(X11) $(MUSL_LIBC) $(LINUX_TESTS) \
-		tools/make-linux-root.sh $(wildcard tools/linux-files/*)
+		tools/make-linux-root.sh $(wildcard tools/linux-files/* tools/linux-files/applications/*)
 	tools/make-linux-root.sh $(LINUX_ROOT) $(MUSL_LIBC) $(BUSYBOX) \
 		$(BUSYBOX_BUILD)/busybox.links $(BASH) $(COREUTILS) $(COREUTILS_BUILD)/programs.txt \
 		$(PYTHON_ROOT) $(X11_SYSROOT) $(LINUX_TESTS)

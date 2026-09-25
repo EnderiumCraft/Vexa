@@ -142,12 +142,27 @@ TYPED_COMMANDS = [
     ("@mouse_move -299 -187", None, 5),
     ("@mouse_button 1", "desktop: left button at 31,13", 10),
     ("@mouse_button 0", None, 5),
-    ("@mouse_move 0 101", None, 5),
+    ("@mouse_move 0 125", None, 5),
     ("@mouse_button 1", 'desktop: window 3 "About Vexa"', 20),
     ("@mouse_button 0", None, 5),
-    ("@mouse_move 463 13", None, 5),
+    ("@mouse_move 463 -11", None, 5),
     ("@mouse_button 1", "desktop: asked window 3 to close", 10),
     ("@mouse_button 0", "desktop: closed window 3", 10),
+    # Notifications, and the image viewer (PNG) from the terminal.
+    ("@type notify Test: a notification", 'desktop: notification "Test: a notification"', 20),
+    ("@type view /share/pictures/aurora.png", 'desktop: window 4 "aurora.png - Image Viewer"', 30),
+    # A double click on the Files icon (on the desktop's left edge).
+    ("@mouse_move -454 23", None, 5),
+    ("@double-click", "desktop: starting Files", 10),
+    ("@mouse_move 0 0", 'desktop: window 5 is now called "/ - Files"', 30),
+    # Dragging the terminal by its title bar to the left edge: half the screen.
+    ("@mouse_move 280 -15", None, 5),
+    ("@mouse_move 280 -15", None, 5),
+    ("@mouse_button 1", "desktop: left button at 600,120", 10),
+    ("@mouse_move -300 0", None, 5),
+    ("@mouse_move -300 0", None, 5),
+    ("@mouse_button 0", "desktop: snapped window 1 to the left", 10),
+    ("@mouse_move 1 0", "desktop: window 1 is now 632x744", 20),
     ("@sendkey ctrl-alt-q", "desktop: back to the console", 20),
     ("Hello Vexa", "Hello: command not found", 10),
 ]
@@ -206,10 +221,10 @@ LINUX_COMMANDS = [
     ("@mouse_move -358 -44", None, 5),
     ("@mouse_button 1", "desktop: left button at 31,13", 10),
     ("@mouse_button 0", None, 5),
-    ("@mouse_move 0 77", None, 5),
-    ("@mouse_button 1", "desktop: left button at 31,90", 10),
+    ("@mouse_move 0 182", None, 5),
+    ("@mouse_button 1", "desktop: left button at 31,195", 10),
     ("@mouse_button 0", "desktop: window 3", 300),
-    ("@mouse_move 181 218", None, 10),
+    ("@mouse_move 181 113", None, 10),
     ("@mouse_button 1", "desktop: left button at 212,308", 10),
     ("@mouse_button 0", 'desktop: window 3 is now called "Change Display"', 60),
     ("@sendkey ctrl-alt-q", "desktop: back to the console", 30),
@@ -442,7 +457,12 @@ def main():
                         else:
                             failures.append(f"{command!r}: missing {expected!r}")
                         continue
-                    monitor.command(command[1:])
+                    if command == "@double-click":
+                        # Two left clicks, quicker than one command at a time.
+                        for state in (1, 0, 1, 0):
+                            monitor.command(f"mouse_button {state}")
+                    else:
+                        monitor.command(command[1:])
                     if expected is not None and not wait_for(log_path, expected, timeout, *count):
                         failures.append(f"{command!r}: missing {expected!r}")
                     continue

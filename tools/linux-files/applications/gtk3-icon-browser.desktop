@@ -1,0 +1,5 @@
+[Desktop Entry]
+Type=Application
+Name=GTK 3 Icon Browser
+Comment=The icons of the icon theme
+Exec=gtk3-icon-browser

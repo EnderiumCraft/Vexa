@@ -59,6 +59,9 @@ mkdir -p "$root/usr/share/glib-2.0" "$root/usr/share/icons" "$root/etc/gtk-3.0"
 cp -a "$x11/usr/share/glib-2.0/schemas" "$root/usr/share/glib-2.0/"
 cp -a "$x11/usr/share/icons/hicolor" "$root/usr/share/icons/"
 cp "$(dirname "$0")/linux-files/gtk-settings.ini" "$root/etc/gtk-3.0/settings.ini"
+# The programs the desktop's menu lists (GTK's own entries hide its demos).
+mkdir -p "$root/usr/share/applications"
+cp "$(dirname "$0")"/linux-files/applications/*.desktop "$root/usr/share/applications/"
 # The libraries lose their symbol tables (not needed to run them), which
 # keeps the in-memory file system smaller.
 find "$root/usr/lib" -name '*.so*' -type f -exec strip --strip-unneeded {} + 2>/dev/null || true

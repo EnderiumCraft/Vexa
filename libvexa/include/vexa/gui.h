@@ -80,4 +80,57 @@ int vx_gui_wait(struct vx_gui_event *event, long timeout_ms);
 /* The connection's handle, to vx_poll it along with others. */
 int vx_gui_handle(void);
 
+
+/* ---- A few widgets' worth of drawing (the look of Vexa's own apps) ---- */
+
+#define VX_COLOR_WINDOW 0x1a1030     /* Backgrounds. */
+#define VX_COLOR_VIEW 0x120b22       /* Lists and text areas. */
+#define VX_COLOR_TEXT 0xe4dcf2
+#define VX_COLOR_DIM 0x8a80a3
+#define VX_COLOR_ACCENT 0xb07cff
+#define VX_COLOR_SELECTED 0x5b3a96
+#define VX_COLOR_BUTTON 0x2c1d4a
+#define VX_COLOR_BUTTON_HOT 0x3f2a66
+#define VX_COLOR_LINE 0x3a2a5c
+
+/* A rectangle's outline, one pixel wide, inside it. */
+void vx_draw_outline(struct vx_surface *s, int x, int y, int width, int height, uint32_t color);
+/* Text cut to `width` pixels (ending in "..." when it doesn't fit). */
+void vx_draw_text_fit(struct vx_surface *s, int x, int y, int width, const char *text,
+                      uint32_t fg, uint32_t bg);
+/* A push button with its label centered; `hot`: under the pointer. */
+void vx_draw_button(struct vx_surface *s, int x, int y, int width, int height, const char *label,
+                    bool hot);
+/* A one-line text field: the text (its end, if it's long), and a cursor
+ * after it when `focused`. */
+void vx_draw_field(struct vx_surface *s, int x, int y, int width, const char *text, bool focused);
+/* Editing a field's text (at most size - 1 characters) with a key event:
+ * characters are added, Backspace removes one. True if it changed. */
+bool vx_field_key(char *text, size_t size, const struct vx_gui_event *event);
+/* True if (px, py) is inside the rectangle. */
+bool vx_inside(int px, int py, int x, int y, int width, int height);
+
+/* ---- Images ---- */
+
+struct vx_image {
+    struct vx_surface surface; /* 0xRRGGBB, stride == width. */
+};
+
+/* Reads a PNG (8 bits per channel, not interlaced), BMP (24 or 32 bits) or
+ * PPM (P6) file. Transparent pixels are blended onto `background`. NULL if
+ * the file can't be read or decoded. */
+struct vx_image *vx_image_load(const char *path, uint32_t background);
+struct vx_image *vx_image_decode(const void *data, size_t size, uint32_t background);
+void vx_image_free(struct vx_image *image);
+/* Draws `from` scaled into a rectangle of `to` (nearest pixel). */
+void vx_blit_scaled(struct vx_surface *to, int x, int y, int width, int height,
+                    const struct vx_surface *from);
+
+/* ---- The desktop ---- */
+
+/* A notification on the desktop for a few seconds ("title: text"). */
+void vx_notify(const char *text);
+/* Asks the desktop to read its settings (/etc/desktop.conf) again. */
+void vx_desktop_reload(void);
+
 #endif

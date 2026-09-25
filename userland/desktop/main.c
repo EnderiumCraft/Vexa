@@ -33,11 +33,8 @@
 #define BUTTON_WIDTH 20 /* The title bar's buttons. */
 #define MIN_WIDTH 120
 #define MIN_HEIGHT 60
-#define DOUBLE_CLICK_MS 400
+#define DOUBLE_CLICK_MS 500
 
-#define COLOR_WALLPAPER_TOP 0x2a1850
-#define COLOR_WALLPAPER_BOTTOM 0x0b0613
-#define COLOR_WALLPAPER_TEXT 0x3a2766
 #define COLOR_PANEL 0x140c24
 #define COLOR_PANEL_LINE 0x3a2a5c
 #define COLOR_PANEL_TEXT 0xe4dcf2
@@ -100,6 +97,21 @@ static long last_click_ms;
 static struct window *last_click_window;
 
 static bool menu_open;
+
+/* Notifications: up to three at a time, each for a few seconds. */
+#define MAX_NOTES 3
+#define NOTE_MS 4000
+#define NOTE_WIDTH 320
+#define NOTE_HEIGHT 44
+static struct note {
+    char text[104];
+    long until; /* vx_uptime() */
+} notes[MAX_NOTES];
+static int note_count;
+
+/* Dragging a window to an edge snaps it there (see snap_target). */
+enum snap { SNAP_NONE, SNAP_TOP, SNAP_LEFT, SNAP_RIGHT };
+static enum snap snap;
 static int menu_hot = -1;
 static long shown_minute = -1;
 
@@ -160,20 +172,25 @@ static struct rect work_area(void) {
 
 /* ---- The menu ---- */
 
-enum menu_action { RUN_TERMINAL, RUN_X, RUN_GTK_DEMO, RUN_ABOUT, SEPARATOR, LEAVE };
-
-static const struct {
-    const char *label, *keys;
-    enum menu_action action;
-} menu_items[] = {
-    {"Terminal", "Ctrl+Alt+T", RUN_TERMINAL},
-    {"XTerm", "Ctrl+Alt+X", RUN_X},
-    {"GTK 3 demo", "", RUN_GTK_DEMO},
-    {"About Vexa", "", RUN_ABOUT},
-    {"", "", SEPARATOR},
-    {"Back to the console", "Ctrl+Alt+Q", LEAVE},
+enum menu_action {
+    RUN_TERMINAL, RUN_FILES, RUN_EDITOR, RUN_SETTINGS, RUN_ABOUT, RUN_X,
+    RUN_LINUX_APP, /* An X program from /linux/usr/share/applications, through xrun. */
+    SEPARATOR, LEAVE
 };
-#define MENU_ITEMS (int)(sizeof(menu_items) / sizeof(menu_items[0]))
+
+#define MAX_MENU_ITEMS 24
+#define MAX_ARGS 4
+#define APPLICATIONS "/linux/usr/share/applications"
+
+static struct menu_item {
+    char label[40];
+    const char *keys;
+    enum menu_action action;
+    char args[MAX_ARGS][64]; /* RUN_LINUX_APP: the program and its arguments. */
+    int arg_count;
+} menu_items[MAX_MENU_ITEMS];
+static int menu_item_count;
+#define MENU_ITEMS menu_item_count
 #define MENU_WIDTH 300
 #define MENU_ITEM_HEIGHT 24
 #define MENU_SEPARATOR_HEIGHT 9
@@ -218,6 +235,108 @@ static void set_menu(bool open) {
     }
 }
 
+static struct menu_item *add_menu_item(const char *label, const char *keys,
+                                       enum menu_action action) {
+    if (menu_item_count == MAX_MENU_ITEMS) {
+        return NULL;
+    }
+    struct menu_item *item = &menu_items[menu_item_count++];
+    memset(item, 0, sizeof(*item));
+    strncpy(item->label, label, sizeof(item->label) - 1);
+    item->keys = keys;
+    item->action = action;
+    return item;
+}
+
+/* A Linux program's .desktop file: its name and command, unless it's
+ * hidden or runs in a terminal. */
+static void add_linux_app(const char *path) {
+    int handle = vx_open(path, VX_OPEN_READ);
+    if (handle < 0) {
+        return;
+    }
+    char text[4096];
+    long n = vx_read(handle, text, sizeof(text) - 1);
+    vx_close(handle);
+    text[n > 0 ? n : 0] = '\0';
+    char name[40] = "", exec[256] = "";
+    bool in_entry = false, hidden = false;
+    for (char *line = text, *next; line && *line; line = next) {
+        next = strchr(line, '\n');
+        if (next) {
+            *next++ = '\0';
+        }
+        if (line[0] == '[') {
+            in_entry = !strncmp(line, "[Desktop Entry]", 15);
+        } else if (in_entry && !strncmp(line, "Name=", 5)) {
+            strncpy(name, line + 5, sizeof(name) - 1);
+        } else if (in_entry && !strncmp(line, "Exec=", 5)) {
+            strncpy(exec, line + 5, sizeof(exec) - 1);
+        } else if (in_entry && (!strcmp(line, "NoDisplay=true") || !strcmp(line, "Terminal=true") ||
+                                !strcmp(line, "Hidden=true"))) {
+            hidden = true;
+        }
+    }
+    if (hidden || !name[0] || !exec[0]) {
+        return;
+    }
+    struct menu_item *item = add_menu_item(name, "", RUN_LINUX_APP);
+    if (!item) {
+        return;
+    }
+    /* The command's words, without field codes like %U. */
+    for (char *word = exec, *next; word && *word && item->arg_count < MAX_ARGS; word = next) {
+        next = strchr(word, ' ');
+        if (next) {
+            *next++ = '\0';
+        }
+        if (word[0] && word[0] != '%') {
+            strncpy(item->args[item->arg_count++], word, sizeof(item->args[0]) - 1);
+        }
+    }
+    if (!item->arg_count) {
+        menu_item_count--;
+    }
+}
+
+static int compare_labels(const void *a, const void *b) {
+    return strcmp(((const struct menu_item *)a)->label, ((const struct menu_item *)b)->label);
+}
+
+static void build_menu(void) {
+    menu_item_count = 0;
+    add_menu_item("Terminal", "Ctrl+Alt+T", RUN_TERMINAL);
+    add_menu_item("Files", "Ctrl+Alt+F", RUN_FILES);
+    add_menu_item("Text Editor", "Ctrl+Alt+E", RUN_EDITOR);
+    add_menu_item("Settings", "", RUN_SETTINGS);
+    add_menu_item("About Vexa", "", RUN_ABOUT);
+    add_menu_item("", "", SEPARATOR);
+    add_menu_item("XTerm", "Ctrl+Alt+X", RUN_X);
+    /* Linux programs, by name. */
+    int first = menu_item_count;
+    int handle = vx_open(APPLICATIONS, VX_OPEN_READ);
+    if (handle >= 0) {
+        struct vx_dir_entry entries[16];
+        long n;
+        while ((n = vx_read_dir(handle, entries, 16)) > 0) {
+            for (long i = 0; i < n; i++) {
+                size_t length = strlen(entries[i].name);
+                if (length > 8 && !strcmp(entries[i].name + length - 8, ".desktop") &&
+                    menu_item_count < MAX_MENU_ITEMS - 2) {
+                    char path[320];
+                    snprintf(path, sizeof(path), "%s/%s", APPLICATIONS, entries[i].name);
+                    add_linux_app(path);
+                }
+            }
+        }
+        vx_close(handle);
+    }
+    qsort(menu_items + first, (size_t)(menu_item_count - first), sizeof(menu_items[0]),
+          compare_labels);
+    add_menu_item("", "", SEPARATOR);
+    add_menu_item("Back to the console", "Ctrl+Alt+Q", LEAVE);
+}
+
 /* ---- The panel's window buttons ---- */
 
 /* Windows in the order they were opened (their buttons' order). */
@@ -238,7 +357,7 @@ static int windows_by_id(struct window **out) {
     return n;
 }
 
-#define CLOCK_WIDTH (18 * FONT_WIDTH)
+#define CLOCK_WIDTH (21 * FONT_WIDTH)
 
 static struct rect task_button(int index, int count) {
     int left = MENU_BUTTON_WIDTH + 12;
@@ -321,28 +440,95 @@ static uint32_t mix(uint32_t a, uint32_t b, int num, int den) {
     return out;
 }
 
+/* ---- Settings (DESKTOP_CONFIG) ---- */
+
+static char setting_wallpaper[32] = "dusk";
+static char setting_image[256];
+static int setting_clock = 24;     /* Hours. */
+static int setting_utc_offset;     /* Minutes east of UTC. */
+
+static void read_config(void) {
+    strcpy(setting_wallpaper, "dusk");
+    setting_image[0] = '\0';
+    setting_clock = 24;
+    setting_utc_offset = 0;
+    int handle = vx_open(DESKTOP_CONFIG, VX_OPEN_READ);
+    if (handle < 0) {
+        return;
+    }
+    char text[2048];
+    long n = vx_read(handle, text, sizeof(text) - 1);
+    vx_close(handle);
+    text[n > 0 ? n : 0] = '\0';
+    for (char *line = text, *next; line && *line; line = next) {
+        next = strchr(line, '\n');
+        if (next) {
+            *next++ = '\0';
+        }
+        char *value = strchr(line, '=');
+        if (!value) {
+            continue;
+        }
+        *value++ = '\0';
+        if (!strcmp(line, "wallpaper")) {
+            strncpy(setting_wallpaper, value, sizeof(setting_wallpaper) - 1);
+        } else if (!strcmp(line, "wallpaper_image")) {
+            strncpy(setting_image, value, sizeof(setting_image) - 1);
+        } else if (!strcmp(line, "clock")) {
+            setting_clock = atoi(value) == 12 ? 12 : 24;
+        } else if (!strcmp(line, "utc_offset")) {
+            setting_utc_offset = atoi(value);
+        }
+    }
+}
+
 static void make_wallpaper(void) {
+    /* An image, scaled to cover the screen... */
+    struct vx_image *image = !strcmp(setting_wallpaper, "image") && setting_image[0]
+                                 ? vx_image_load(setting_image, 0)
+                                 : NULL;
+    if (image) {
+        int iw = image->surface.width, ih = image->surface.height;
+        int w = wallpaper.width, h = iw ? ih * wallpaper.width / iw : wallpaper.height;
+        if (h < wallpaper.height) {
+            h = wallpaper.height;
+            w = iw * wallpaper.height / ih;
+        }
+        vx_blit_scaled(&wallpaper, (wallpaper.width - w) / 2, (wallpaper.height - h) / 2, w, h,
+                       &image->surface);
+        vx_image_free(image);
+        return;
+    }
+    /* ... or a gradient. */
+    const struct desktop_wallpaper *choice = &desktop_wallpapers[0];
+    for (int i = 0; i < DESKTOP_WALLPAPER_COUNT; i++) {
+        if (!strcmp(desktop_wallpapers[i].name, setting_wallpaper)) {
+            choice = &desktop_wallpapers[i];
+        }
+    }
     for (int y = 0; y < wallpaper.height; y++) {
-        uint32_t color = mix(COLOR_WALLPAPER_TOP, COLOR_WALLPAPER_BOTTOM, y, wallpaper.height);
+        uint32_t color = mix(choice->top, choice->bottom, y, wallpaper.height);
         uint32_t *row = wallpaper.pixels + (long)y * wallpaper.stride;
         for (int x = 0; x < wallpaper.width; x++) {
             row[x] = color;
         }
     }
-    /* The name, large, in the bottom right corner. */
+    /* The name, large, in the bottom right corner (a little lighter than the
+     * gradient's top). */
+    uint32_t text_color = mix(choice->top, 0xffffff, 1, 8);
     int scale = wallpaper.width >= 1024 ? 8 : 4;
     const char *name = "Vexa";
     int width = (int)strlen(name) * FONT_WIDTH * scale;
     int x = wallpaper.width - width - 48, y = wallpaper.height - FONT_HEIGHT * scale - 40;
     for (int i = 0; name[i]; i++) {
         draw_big_char(&wallpaper, x + i * FONT_WIDTH * scale, y, name[i], scale,
-                      COLOR_WALLPAPER_TEXT);
+                      text_color);
     }
     char version[64];
     struct vx_system_info info;
     snprintf(version, sizeof(version), "version %s",
              vx_system_info(&info) == 0 ? info.version : "?");
-    vx_draw_text(&wallpaper, x + 4, y + FONT_HEIGHT * scale + 4, version, COLOR_WALLPAPER_TEXT,
+    vx_draw_text(&wallpaper, x + 4, y + FONT_HEIGHT * scale + 4, version, text_color,
                  VX_TRANSPARENT);
 }
 
@@ -396,9 +582,10 @@ static void draw_panel(struct vx_surface *view, int ox, int oy) {
                       w->minimized ? COLOR_PANEL_DIM : COLOR_PANEL_TEXT);
     }
 
-    /* The clock (UTC: Vexa doesn't know time zones yet). */
+    /* The clock, in the time zone from the settings. */
     long now = vx_time();
     if (now > 0) {
+        now += setting_utc_offset * 60L;
         static const char *const days[] = {"Thu", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed"};
         static const char *const months[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun",
                                              "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
@@ -409,8 +596,15 @@ static void draw_panel(struct vx_surface *view, int ox, int oy) {
         long doy = doe - (365 * yoe + yoe / 4 - yoe / 100), mp = (5 * doy + 2) / 153;
         long mday = doy - (153 * mp + 2) / 5 + 1, month = mp < 10 ? mp + 3 : mp - 9;
         char text[32];
-        snprintf(text, sizeof(text), "%s %ld %s  %02ld:%02ld", days[day_number % 7], mday,
-                 months[month - 1], seconds / 3600, seconds / 60 % 60);
+        long hour = seconds / 3600;
+        if (setting_clock == 12) {
+            snprintf(text, sizeof(text), "%s %ld %s  %ld:%02ld %s", days[day_number % 7], mday,
+                     months[month - 1], hour % 12 ? hour % 12 : 12, seconds / 60 % 60,
+                     hour < 12 ? "am" : "pm");
+        } else {
+            snprintf(text, sizeof(text), "%s %ld %s  %02ld:%02ld", days[day_number % 7], mday,
+                     months[month - 1], hour, seconds / 60 % 60);
+        }
         int width = (int)strlen(text) * FONT_WIDTH;
         vx_draw_text(view, ox + screen.width - width - 12, oy + 5, text, COLOR_PANEL_TEXT,
                      VX_TRANSPARENT);
@@ -448,6 +642,199 @@ static void draw_outline(struct vx_surface *view, struct rect r, int thickness, 
     vx_fill(view, r.x + r.width - thickness, r.y, thickness, r.height, color);
 }
 
+/* ---- Desktop icons ---- */
+
+enum icon { ICON_TERMINAL, ICON_FILES, ICON_EDITOR, ICON_SETTINGS, ICON_X };
+
+static const struct {
+    const char *label;
+    enum icon icon;
+    enum menu_action action;
+} launchers[] = {
+    {"Terminal", ICON_TERMINAL, RUN_TERMINAL},
+    {"Files", ICON_FILES, RUN_FILES},
+    {"Editor", ICON_EDITOR, RUN_EDITOR},
+    {"Settings", ICON_SETTINGS, RUN_SETTINGS},
+    {"XTerm", ICON_X, RUN_X},
+};
+#define LAUNCHERS (int)(sizeof(launchers) / sizeof(launchers[0]))
+#define LAUNCHER_WIDTH 72
+#define LAUNCHER_HEIGHT 72
+static int selected_launcher = -1;
+
+/* A column along the left edge, left of where windows open. */
+static struct rect launcher_rect(int i) {
+    return (struct rect){4, PANEL_HEIGHT + 12 + i * (LAUNCHER_HEIGHT + 4), LAUNCHER_WIDTH,
+                         LAUNCHER_HEIGHT};
+}
+
+static struct rect launchers_area(void) {
+    return (struct rect){0, PANEL_HEIGHT, LAUNCHER_WIDTH + 8,
+                         12 + LAUNCHERS * (LAUNCHER_HEIGHT + 4)};
+}
+
+/* The icons: 40x40 pictures made of rectangles. */
+static void draw_icon(struct vx_surface *s, int x, int y, enum icon icon) {
+    switch (icon) {
+    case ICON_TERMINAL:
+        vx_fill(s, x, y + 2, 40, 34, 0x3a2a5c);
+        vx_fill(s, x + 2, y + 4, 36, 30, 0x0e0818);
+        vx_draw_text(s, x + 5, y + 10, ">_", 0x7ee787, VX_TRANSPARENT);
+        break;
+    case ICON_FILES:
+        vx_fill(s, x + 2, y + 6, 16, 5, 0xd9ad3c);
+        vx_fill(s, x + 2, y + 10, 36, 26, 0xf2cc60);
+        vx_fill(s, x + 2, y + 16, 36, 1, 0xd9ad3c);
+        break;
+    case ICON_EDITOR:
+        vx_fill(s, x + 6, y + 2, 28, 36, 0xe4dcf2);
+        for (int i = 0; i < 5; i++) {
+            vx_fill(s, x + 10, y + 9 + i * 5, i == 4 ? 12 : 20, 2, 0x8a80a3);
+        }
+        vx_fill(s, x + 28, y + 20, 4, 16, 0xb07cff); /* A pencil. */
+        vx_fill(s, x + 29, y + 36, 2, 2, 0x2c1d4a);
+        break;
+    case ICON_SETTINGS: /* A gear: teeth around a ring. */
+        for (int dy = -14; dy <= 14; dy++) {
+            for (int dx = -14; dx <= 14; dx++) {
+                int r2 = dx * dx + dy * dy;
+                bool ring = r2 <= 12 * 12 && r2 >= 5 * 5;
+                bool tooth = r2 <= 15 * 15 && r2 > 12 * 12 &&
+                             ((dx > -4 && dx < 4) || (dy > -4 && dy < 4) ||
+                              (dx - dy > -5 && dx - dy < 5) || (dx + dy > -5 && dx + dy < 5));
+                if (ring || tooth) {
+                    vx_fill(s, x + 20 + dx, y + 20 + dy, 1, 1, 0x79a8ff);
+                }
+            }
+        }
+        break;
+    case ICON_X:
+        vx_fill(s, x + 2, y + 2, 36, 36, 0x0e0818);
+        for (int i = 0; i < 28; i++) { /* A big X. */
+            vx_fill(s, x + 6 + i, y + 6 + i, 3, 2, 0xe4dcf2);
+            vx_fill(s, x + 32 - i, y + 6 + i, 3, 2, 0xe4dcf2);
+        }
+        break;
+    }
+}
+
+static void draw_launchers(struct vx_surface *view, int ox, int oy) {
+    for (int i = 0; i < LAUNCHERS; i++) {
+        struct rect r = launcher_rect(i);
+        if (i == selected_launcher) {
+            vx_fill(view, ox + r.x, oy + r.y, r.width, r.height, COLOR_BUTTON_HOT);
+        }
+        draw_icon(view, ox + r.x + (r.width - 40) / 2, oy + r.y + 6, launchers[i].icon);
+        int text = (int)strlen(launchers[i].label) * FONT_WIDTH;
+        vx_draw_text(view, ox + r.x + (r.width - text) / 2, oy + r.y + 50, launchers[i].label,
+                     COLOR_PANEL_TEXT, VX_TRANSPARENT);
+    }
+}
+
+/* ---- Notifications ---- */
+
+static struct rect note_rect(int i) {
+    return (struct rect){screen.width - NOTE_WIDTH - 12, PANEL_HEIGHT + 12 + i * (NOTE_HEIGHT + 8),
+                         NOTE_WIDTH, NOTE_HEIGHT};
+}
+
+static struct rect notes_area(void) {
+    return (struct rect){screen.width - NOTE_WIDTH - 12, PANEL_HEIGHT + 12, NOTE_WIDTH,
+                         MAX_NOTES * (NOTE_HEIGHT + 8)};
+}
+
+static void add_note(const char *text) {
+    if (note_count == MAX_NOTES) {
+        memmove(notes, notes + 1, (MAX_NOTES - 1) * sizeof(notes[0]));
+        note_count--;
+    }
+    struct note *note = &notes[note_count++];
+    strncpy(note->text, text, sizeof(note->text) - 1);
+    note->text[sizeof(note->text) - 1] = '\0';
+    note->until = vx_uptime() + NOTE_MS;
+    add_damage(notes_area());
+    printf("desktop: notification \"%s\"\n", note->text);
+}
+
+/* Takes away old notifications; returns how long until the next one goes
+ * (milliseconds), or -1 if there are none. */
+static long expire_notes(void) {
+    long now = vx_uptime(), next = -1;
+    int kept = 0;
+    for (int i = 0; i < note_count; i++) {
+        if (notes[i].until > now) {
+            notes[kept++] = notes[i];
+            if (next < 0 || notes[i].until - now < next) {
+                next = notes[i].until - now;
+            }
+        }
+    }
+    if (kept != note_count) {
+        note_count = kept;
+        add_damage(notes_area());
+    }
+    return next;
+}
+
+static void draw_notes(struct vx_surface *view, int ox, int oy) {
+    int per_line = (NOTE_WIDTH - 20) / FONT_WIDTH;
+    for (int i = 0; i < note_count; i++) {
+        struct rect r = note_rect(i);
+        vx_fill(view, ox + r.x, oy + r.y, r.width, r.height, COLOR_MENU);
+        vx_draw_outline(view, ox + r.x, oy + r.y, r.width, r.height, COLOR_OUTLINE);
+        /* Two lines: "Title: text" puts the title on the first. */
+        char first[128], second[128] = "";
+        const char *colon = strstr(notes[i].text, ": ");
+        size_t length = strlen(notes[i].text);
+        if (colon && colon - notes[i].text < per_line) {
+            size_t n = (size_t)(colon - notes[i].text);
+            memcpy(first, notes[i].text, n);
+            first[n] = '\0';
+            snprintf(second, sizeof(second), "%s", colon + 2);
+        } else if (length > (size_t)per_line) {
+            memcpy(first, notes[i].text, (size_t)per_line);
+            first[per_line] = '\0';
+            snprintf(second, sizeof(second), "%s", notes[i].text + per_line);
+        } else {
+            snprintf(first, sizeof(first), "%s", notes[i].text);
+        }
+        vx_draw_text_fit(view, ox + r.x + 10, oy + r.y + 5, r.width - 20, first, COLOR_OUTLINE,
+                         VX_TRANSPARENT);
+        vx_draw_text_fit(view, ox + r.x + 10, oy + r.y + 23, r.width - 20, second, COLOR_PANEL_TEXT,
+                         VX_TRANSPARENT);
+    }
+}
+
+/* ---- Snapping ---- */
+
+/* Where a window dragged to here would go. */
+static enum snap snap_target(void) {
+    if (!dragged || !dragged->resizable) {
+        return SNAP_NONE;
+    }
+    return pointer_y <= PANEL_HEIGHT + 1 ? SNAP_TOP
+           : pointer_x <= 1                ? SNAP_LEFT
+           : pointer_x >= screen.width - 2 ? SNAP_RIGHT
+                                           : SNAP_NONE;
+}
+
+/* The content rectangle a snapped window gets. */
+static struct rect snap_rect(enum snap where) {
+    struct rect area = work_area();
+    if (where == SNAP_LEFT || where == SNAP_RIGHT) {
+        int half = screen.width / 2;
+        area.width = half - 2 * BORDER;
+        area.x = where == SNAP_LEFT ? BORDER : half + BORDER;
+    }
+    return area;
+}
+
+static struct rect snap_damage(enum snap where) {
+    struct rect r = snap_rect(where);
+    return (struct rect){r.x - BORDER - 2, r.y - TITLE_HEIGHT - BORDER - 2,
+                         r.width + 2 * BORDER + 4, r.height + TITLE_HEIGHT + 2 * BORDER + 4};
+}
+
 /* Draws everything that overlaps `area` into the screen buffer. */
 static void compose(struct rect area) {
     /* A view of the screen buffer clipped to the area; coordinates shift. */
@@ -470,6 +857,7 @@ static void compose(struct rect area) {
                               area.height, screen.stride};
     int ox = -area.x, oy = -area.y;
     vx_blit(&view, 0, 0, &wallpaper, area.x, area.y, area.width, area.height);
+    draw_launchers(&view, ox, oy);
     for (int i = 0; i < window_count; i++) {
         struct window *w = stack[i];
         if (w->minimized) {
@@ -488,6 +876,12 @@ static void compose(struct rect area) {
                          outline.width + 2 * BORDER, outline.height + TITLE_HEIGHT + 2 * BORDER};
         draw_outline(&view, r, 2, COLOR_OUTLINE);
     }
+    if (drag == MOVING && snap != SNAP_NONE) {
+        struct rect s = snap_damage(snap);
+        s.x += ox + 2, s.y += oy + 2, s.width -= 4, s.height -= 4;
+        draw_outline(&view, s, 2, COLOR_OUTLINE);
+    }
+    draw_notes(&view, ox, oy);
     if (area.y < PANEL_HEIGHT) {
         draw_panel(&view, ox, oy);
     }
@@ -861,6 +1255,17 @@ static void client_message(int client) {
             }
         }
         break;
+    case DESKTOP_NOTIFY:
+        m.text[sizeof(m.text) - 1] = '\0';
+        add_note(m.text);
+        break;
+    case DESKTOP_RELOAD:
+        read_config();
+        make_wallpaper();
+        build_menu();
+        add_damage((struct rect){0, 0, screen.width, screen.height});
+        printf("desktop: settings reloaded\n");
+        break;
     case DESKTOP_INFO: {
         struct desktop_message reply = {.type = DESKTOP_INFO_REPLY, .a = screen.width,
                                         .b = screen.height};
@@ -872,15 +1277,15 @@ static void client_message(int client) {
 
 /* ---- Programs ---- */
 
-/* Starts a program, with one argument or none. */
-static void launch_with(const char *path, const char *arg) {
-    const char *argv[] = {path, arg};
+/* Starts a program: argv[0] is its path. */
+static void launch_argv(const char *const *argv, int argc) {
+    const char *path = argv[0];
     unsigned long envc = 0;
     while (environ[envc]) {
         envc++;
     }
     struct vx_spawn spawn = {
-        .argv = argv, .argc = arg ? 2 : 1, .envp = (const char *const *)environ, .envc = envc,
+        .argv = argv, .argc = (unsigned long)argc, .envp = (const char *const *)environ, .envc = envc,
         .handles = {0, 1, 2}, .flags = VX_SPAWN_NEW_GROUP,
     };
     int process = vx_spawn(path, &spawn);
@@ -898,7 +1303,8 @@ static void launch_with(const char *path, const char *arg) {
 }
 
 static void launch(const char *path) {
-    launch_with(path, NULL);
+    const char *argv[] = {path};
+    launch_argv(argv, 1);
 }
 
 static void reap_children(void) {
@@ -913,13 +1319,29 @@ static void reap_children(void) {
 static void run(enum menu_action action) {
     switch (action) {
     case RUN_TERMINAL: launch("/bin/term"); break;
+    case RUN_FILES: launch("/bin/files"); break;
+    case RUN_EDITOR: launch("/bin/edit"); break;
+    case RUN_SETTINGS: launch("/bin/settings"); break;
+    case RUN_ABOUT: launch("/bin/about"); break;
     /* X programs, if the Linux subsystem is there. */
     case RUN_X: launch("/linux/usr/bin/xsession"); break;
-    case RUN_GTK_DEMO: launch_with("/linux/usr/bin/xrun", "gtk3-demo"); break;
-    case RUN_ABOUT: launch("/bin/about"); break;
     case LEAVE: quit = true; break;
+    case RUN_LINUX_APP:
     case SEPARATOR: break;
     }
+}
+
+static void run_menu_item(int index) {
+    struct menu_item *item = &menu_items[index];
+    if (item->action != RUN_LINUX_APP) {
+        run(item->action);
+        return;
+    }
+    const char *argv[MAX_ARGS + 1] = {"/linux/usr/bin/xrun"};
+    for (int i = 0; i < item->arg_count; i++) {
+        argv[i + 1] = item->args[i];
+    }
+    launch_argv(argv, item->arg_count + 1);
 }
 
 /* ---- Input ---- */
@@ -981,6 +1403,14 @@ static void key_event(int key, int value) {
         }
         if (key == 45) { /* X */
             run(RUN_X);
+            return;
+        }
+        if (key == 33) { /* F */
+            run(RUN_FILES);
+            return;
+        }
+        if (key == 18) { /* E */
+            run(RUN_EDITOR);
             return;
         }
         if (key == 16) { /* Q */
@@ -1103,7 +1533,7 @@ static void button_event(int bit, bool down) {
             set_menu(false);
         }
         if (item >= 0) {
-            run(menu_items[item].action);
+            run_menu_item(item);
         }
         return;
     }
@@ -1112,6 +1542,28 @@ static void button_event(int bit, bool down) {
         return;
     }
     struct window *w = window_at(pointer_x, pointer_y);
+    if (left_down && !w) {
+        /* The desktop: its icons are selected, and started by a double click. */
+        int hit = -1;
+        for (int i = 0; i < LAUNCHERS; i++) {
+            if (inside(launcher_rect(i), pointer_x, pointer_y)) {
+                hit = i;
+            }
+        }
+        long now = vx_uptime();
+        if (hit >= 0 && hit == selected_launcher && now - last_click_ms < DOUBLE_CLICK_MS &&
+            last_click_window == NULL) {
+            printf("desktop: starting %s\n", launchers[hit].label);
+            run(launchers[hit].action);
+        }
+        if (hit != selected_launcher) {
+            selected_launcher = hit;
+            add_damage(launchers_area());
+        }
+        last_click_ms = now;
+        last_click_window = NULL;
+        return;
+    }
     if (left_down && w) {
         activate(w);
         bool right, bottom;
@@ -1133,7 +1585,27 @@ static void button_event(int bit, bool down) {
     }
     if (bit == 1 && !down && drag != IDLE) {
         struct window *d = dragged;
-        if (drag == MOVING && d) {
+        if (drag == MOVING && d && snap != SNAP_NONE) {
+            /* Snapped: maximized, or half of the screen. */
+            add_damage(snap_damage(snap));
+            if (snap == SNAP_TOP) {
+                d->maximized = false;
+                toggle_maximized(d);
+            } else {
+                struct rect r = snap_rect(snap);
+                add_damage(frame_rect(d));
+                d->restore = (struct rect){d->x, d->y, d->content.width, d->content.height};
+                d->x = r.x;
+                d->y = r.y;
+                d->maximized = false;
+                configure(d, r.width, r.height);
+                add_damage(frame_rect(d));
+                send_moved(d);
+                printf("desktop: snapped window %d to the %s\n", d->id,
+                       snap == SNAP_LEFT ? "left" : "right");
+            }
+            snap = SNAP_NONE;
+        } else if (drag == MOVING && d) {
             send_moved(d);
             printf("desktop: moved window %d to %d,%d\n", d->id, d->x, d->y);
         } else if (drag == RESIZING && d) {
@@ -1168,6 +1640,16 @@ static void pointer_moved(int dx, int dy, int wheel) {
             }
             dragged->maximized = false;
             add_damage(frame_rect(dragged));
+            enum snap target = snap_target();
+            if (target != snap) {
+                if (snap != SNAP_NONE) {
+                    add_damage(snap_damage(snap));
+                }
+                snap = target;
+                if (snap != SNAP_NONE) {
+                    add_damage(snap_damage(snap));
+                }
+            }
         } else if (drag == RESIZING && dragged) {
             add_damage(outline_damage());
             if (resize_right) {
@@ -1285,7 +1767,9 @@ static bool setup(void) {
         fprintf(stderr, "desktop: out of memory\n");
         return false;
     }
+    read_config();
     make_wallpaper();
+    build_menu();
     keyboard = open_input(VX_INPUT_KEYS);
     mouse = open_input(VX_INPUT_POINTER);
 
@@ -1349,7 +1833,10 @@ int main(int argc, char **argv) {
                 indexes[count++] = i;
             }
         }
-        if (vx_poll(polls, (size_t)count, 500) <= 0) {
+        long wait = expire_notes();
+        wait = wait < 0 || wait > 500 ? 500 : wait + 1;
+        if (vx_poll(polls, (size_t)count, wait) <= 0) {
+            expire_notes();
             reap_children();
             continue;
         }

@@ -37,8 +37,10 @@ runs X programs such as `xterm` in windows of their own on it. The kernel:
 - reads the PS/2 keyboard (US layout, Shift, Caps Lock, Ctrl) and mouse (with a scroll
   wheel), as input events programs can read
 - has a graphical desktop: a compositor that draws programs' windows (shared buffers)
-  on the screen, with a panel (the Vexa menu, a button per window, a clock), windows
-  you move, resize, maximize and minimize, a terminal window and an "About Vexa" window
+  on the screen, with a panel (the Vexa menu, a button per window, a clock), desktop
+  icons, notifications, windows you move, resize, maximize, minimize and snap to an
+  edge, and its own apps: a terminal, Files, a text editor, an image viewer (PNG, BMP,
+  PPM) and Settings (wallpaper, clock, time zone)
 - runs the X Window System through the Linux subsystem: Xvexa, an X server (X.Org's,
   built with musl) that shows each X window as a desktop window of its own, with
   TrueType fonts (FreeType, fontconfig, Xft and DejaVu), `xterm`, and GTK 3 programs
@@ -89,7 +91,9 @@ the `vexa:/>` prompt:
 | `bash` | GNU bash, a Linux program (`exit` to go back); inside it, `ls`, `vi`, `grep`, `ps`, `top`... are BusyBox's |
 | `sh`, `busybox` | BusyBox's shell; `busybox` alone lists its commands |
 | `ln -s`, `cat /proc/meminfo` | symbolic links; `/proc` |
-| `desktop` | the graphical desktop, with a terminal window; the Vexa menu (top left) starts programs, Alt+Tab switches windows, Ctrl+Alt+T opens a terminal, Ctrl+Alt+X opens an `xterm` (an X program), Ctrl+Alt+Q goes back to the text console |
+| `desktop` | the graphical desktop, with a terminal window; the Vexa menu (top left) and the icons on the left start programs, Alt+Tab switches windows, dragging a window to an edge snaps it, Ctrl+Alt+T opens a terminal, Ctrl+Alt+F Files, Ctrl+Alt+E the text editor, Ctrl+Alt+X an `xterm` (an X program), Ctrl+Alt+Q goes back to the text console |
+| `files`, `edit <file>`, `view <image>`, `settings` | the desktop's apps, from its terminal: `view /share/pictures/aurora.png` |
+| `notify <text>` | a notification on the desktop |
 | `input` | the keyboard and mouse; `input watch 1` shows what the mouse reports |
 | `net` | network interfaces and addresses (Linux: `ifconfig`, `route -n`) |
 | `fetch http://example.com/` | downloads a web page (a Vexa program); `wget` is BusyBox's |

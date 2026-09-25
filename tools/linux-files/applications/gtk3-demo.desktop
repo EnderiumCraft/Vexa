@@ -1,0 +1,5 @@
+[Desktop Entry]
+Type=Application
+Name=GTK 3 Demo
+Comment=GTK's widgets, one demo at a time
+Exec=gtk3-demo

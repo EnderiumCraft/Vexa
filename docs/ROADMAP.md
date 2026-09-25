@@ -205,6 +205,10 @@ Native track:
 - [x] A native terminal window (`term`) running `vsh` on a pseudo-terminal (0.12.0)
 - [x] A panel with the Vexa menu, window buttons and a clock; resizing, maximizing and
       minimizing windows; Alt+Tab; a wallpaper; "About Vexa" (0.14.0)
+- [x] Desktop apps: Files, a text editor, an image viewer (libvexa decodes PNG, BMP
+      and PPM) and Settings (wallpaper, clock, time zone); desktop icons,
+      notifications, snapping windows to the edges, Linux programs in the menu from
+      their `.desktop` files (0.15.0)
 
 Linux track:
 - [x] The X Window System built from source with musl: the X libraries, X.Org's

@@ -30,6 +30,8 @@ enum desktop_message_type {
     DESKTOP_BUFFER = 5,  /* window; a = width, b = height, text = the new buffer file */
     DESKTOP_MOVE = 6,    /* window; a, b = where its content goes on the screen */
     DESKTOP_INFO = 7,    /* answered by INFO_REPLY */
+    DESKTOP_NOTIFY = 8,  /* text = a notification to show for a few seconds */
+    DESKTOP_RELOAD = 9,  /* read DESKTOP_CONFIG again */
     /* Desktop to program. */
     DESKTOP_CREATED = 16, /* window (0 if it failed) */
     DESKTOP_KEY = 17,     /* window; a = key, b = value, c = character */
@@ -54,5 +56,31 @@ struct desktop_message {
     int32_t a, b, c, d;
     char text[104]; /* For CREATE: the buffer file's path, a NUL, then the title. */
 };
+
+
+/* ---- Settings (/etc/desktop.conf, "key=value" lines) ----
+ *
+ *     wallpaper=dusk          one of desktop_wallpapers[], or "image"
+ *     wallpaper_image=/path   a PNG, BMP or PPM file (for wallpaper=image)
+ *     clock=24                24 or 12 (hours)
+ *     utc_offset=120          minutes east of UTC
+ *
+ * The settings app writes it and sends DESKTOP_RELOAD.
+ */
+#define DESKTOP_CONFIG "/etc/desktop.conf"
+
+struct desktop_wallpaper {
+    const char *name, *label;
+    uint32_t top, bottom; /* A vertical gradient. */
+};
+
+static const struct desktop_wallpaper desktop_wallpapers[] = {
+    {"dusk", "Dusk", 0x2a1850, 0x0b0613},
+    {"ocean", "Ocean", 0x0f3b5c, 0x05121e},
+    {"forest", "Forest", 0x1d4a2f, 0x06140c},
+    {"sunset", "Sunset", 0x7a2e3b, 0x1a0b16},
+    {"graphite", "Graphite", 0x3a3d45, 0x111216},
+};
+#define DESKTOP_WALLPAPER_COUNT (int)(sizeof(desktop_wallpapers) / sizeof(desktop_wallpapers[0]))
 
 #endif

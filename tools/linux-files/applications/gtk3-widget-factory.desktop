@@ -1,0 +1,5 @@
+[Desktop Entry]
+Type=Application
+Name=GTK 3 Widget Factory
+Comment=Every GTK widget in one window
+Exec=gtk3-widget-factory

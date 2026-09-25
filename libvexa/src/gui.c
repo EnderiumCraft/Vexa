@@ -336,3 +336,20 @@ int vx_gui_wait(struct vx_gui_event *event, long timeout_ms) {
         }
     }
 }
+
+void vx_notify(const char *text) {
+    if (connect_desktop() < 0) {
+        return;
+    }
+    struct desktop_message m = {.type = DESKTOP_NOTIFY};
+    strncpy(m.text, text, sizeof(m.text) - 1);
+    send_message(&m);
+}
+
+void vx_desktop_reload(void) {
+    if (connect_desktop() < 0) {
+        return;
+    }
+    struct desktop_message m = {.type = DESKTOP_RELOAD};
+    send_message(&m);
+}
