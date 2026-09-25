@@ -22,7 +22,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential xorriso qemu-system-x86 ovmf python3 e2fsprogs \
-            musl-tools linux-libc-dev ninja-build pkg-config bison
+            musl-tools linux-libc-dev ninja-build pkg-config bison gperf
           # X.Org's packages want a newer Meson than Ubuntu's.
           pipx install meson==1.12.1
 

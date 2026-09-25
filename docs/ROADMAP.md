@@ -218,7 +218,8 @@ native track in 0.12.0; in 0.13.0, X and `xterm` run in a window on it.
 
 ## Phase 9: The desktop stack
 
-- [ ] Linux: fontconfig and FreeType render text in X clients
+- [x] Linux: fontconfig and FreeType render text in X clients: Xft, DejaVu, and xterm
+      with TrueType fonts (0.14.0)
 - [ ] Linux: the GTK 3 demo (`gtk3-demo`) runs
 - [ ] Linux: Mesa's software renderer (llvmpipe) for OpenGL, since Firefox's WebRender
       can fall back to software rendering anyway

@@ -157,7 +157,7 @@ You need a Linux host (or WSL) with:
 | mke2fs and e2fsck (for test disks) | `e2fsprogs` |
 | musl C compiler and Linux headers (for BusyBox and bash) | `musl-tools`, `linux-libc-dev` |
 | curl (downloads bash's source once) | `curl` |
-| Meson, Ninja and pkg-config (for X) | `meson`, `ninja-build`, `pkg-config` |
+| Meson, Ninja, pkg-config, bison and gperf (for X) | `meson`, `ninja-build`, `pkg-config`, `bison`, `gperf` |
 
 ```sh
 make                # builds build/vexa.iso (fetches Limine on first run)
@@ -237,8 +237,11 @@ also includes. Every release on the Releases page carries the matching GPL sourc
 (`busybox-1_36_1-source.tar.gz`, `bash-5.2.37.tar.xz`, `coreutils-9.4.tar.xz`).
 
 The X Window System in the ISO (the X.Org server 21.1 with Xvexa, libX11, libxcb and
-the other X libraries, pixman, xkbcomp and xkeyboard-config, xterm 330 and ncurses 6.6)
-is under the MIT license and similar permissive licenses; the exact upstream tarballs
-are listed in `third_party/x11-sources.txt`, and the few changes made while building
-them (adding Xvexa to the server, `openpty` for xterm on musl) are in
-`tools/build-x11.sh`. Xvexa itself is `third_party/xvexa/xvexa.c`.
+the other X libraries, pixman, xkbcomp and xkeyboard-config, Xft and fontconfig with
+expat, xterm 330 and ncurses 6.6) is under the MIT license and similar permissive
+licenses; the exact upstream tarballs are listed in `third_party/x11-sources.txt`, and
+the few changes made while building them (adding Xvexa to the server, `openpty` for
+xterm on musl) are in `tools/build-x11.sh`. Xvexa itself is `third_party/xvexa/xvexa.c`.
+Portions of this software are copyright © The FreeType Project (www.freetype.org), used
+under the FreeType License. The DejaVu fonts are under the Bitstream Vera license (their
+`LICENSE` file is installed next to them, in `/linux/usr/share/fonts/dejavu`).

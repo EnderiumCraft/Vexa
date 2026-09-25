@@ -44,10 +44,10 @@ done < "$coreutils_programs"
 cp -a "$python/usr/." "$root/usr/"
 
 # X (tools/build-x11.sh): the shared libraries, the Xvexa server, xkbcomp and
-# the keyboard descriptions, xterm, and a few terminal descriptions.
+# the keyboard descriptions, xterm, fonts, and a few terminal descriptions.
 cp -a "$x11"/usr/lib/*.so* "$root/usr/lib/"
 cp -a "$x11/usr/lib/X11" "$root/usr/lib/"
-for program in Xvexa xkbcomp xterm resize tput; do
+for program in Xvexa xkbcomp xterm resize tput fc-list fc-match fc-cache fc-query; do
     rm -f "$root/usr/bin/$program" # Not through a BusyBox link: that would overwrite BusyBox.
     cp "$x11/usr/bin/$program" "$root/usr/bin/"
 done
@@ -55,6 +55,10 @@ mkdir -p "$root/usr/share/X11"
 cp -a "$x11/usr/share/X11/locale" "$x11/usr/share/X11/XErrorDB" "$root/usr/share/X11/"
 # A real directory: an absolute link would point outside /linux.
 cp -a "$x11/usr/share/xkeyboard-config-2" "$root/usr/share/X11/xkb"
+# Fonts: fontconfig's settings (-L: its conf.d links are absolute), and DejaVu.
+mkdir -p "$root/etc" "$root/usr/share/fonts" "$root/var/cache/fontconfig"
+cp -rL "$x11/etc/fonts" "$root/etc/"
+cp -a "$x11/usr/share/fonts/dejavu" "$root/usr/share/fonts/"
 cp "$(dirname "$0")/linux-files/xsession" "$root/usr/bin/xsession"
 for entry in x/xterm x/xterm-256color x/xterm-color v/vt100 v/vt220 l/linux d/dumb; do
     mkdir -p "$root/usr/share/terminfo/$(dirname $entry)"

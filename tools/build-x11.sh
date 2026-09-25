@@ -2,7 +2,7 @@
 # Builds the X Window System for Vexa's Linux subsystem from source, with musl:
 # the libraries (libX11 and friends), Xvexa (an X server that shows its screen
 # in a window on the Vexa desktop; see third_party/xvexa), xkbcomp and the
-# keyboard data, and xterm.
+# keyboard data, fonts (FreeType, fontconfig, Xft and DejaVu), and xterm.
 #
 # Usage: tools/build-x11.sh <sources list> <tarballs> <work dir> <sysroot> <linux headers>
 #
@@ -205,6 +205,45 @@ build_xserver() {
         -Dxkb_output_dir=/tmp -Ddefault_font_path=built-ins
 }
 
+build_freetype() {
+    unpack freetype_2.13.2+dfsg.orig.tar.xz freetype-2.13.2
+    autotools --with-zlib=yes --with-bzip2=no --with-png=no --with-harfbuzz=no \
+        --with-brotli=no
+}
+
+build_expat() {
+    unpack expat-2.6.1.tar.xz expat-2.6.1
+    autotools --without-docbook --without-examples --without-tests --without-xmlwf
+}
+
+build_fontconfig() {
+    unpack fontconfig_2.15.0.orig.tar.xz fontconfig-2.15.0
+    # Fonts in /usr/share/fonts; the cache in /var/cache/fontconfig (made
+    # when a program first needs it, as the file system starts empty).
+    autotools --disable-docs --disable-nls --disable-cache-build \
+        --with-default-fonts=/usr/share/fonts --with-cache-dir=/var/cache/fontconfig
+}
+
+build_libxrender() {
+    unpack libxrender_0.9.12.orig.tar.gz libXrender-0.9.12
+    autotools
+}
+
+build_libxft() {
+    unpack xft_2.3.6.orig.tar.gz libXft-2.3.6
+    autotools
+}
+
+build_dejavu() {
+    unpack dejavu-fonts-ttf-2.37.tar.bz2 dejavu-fonts-ttf-2.37
+    mkdir -p "$sysroot/usr/share/fonts/dejavu" "$sysroot/etc/fonts/conf.d"
+    cp ttf/DejaVuSans.ttf ttf/DejaVuSans-Bold.ttf ttf/DejaVuSansMono.ttf \
+        ttf/DejaVuSansMono-Bold.ttf ttf/DejaVuSerif.ttf ttf/DejaVuSerif-Bold.ttf \
+        LICENSE "$sysroot/usr/share/fonts/dejavu/"
+    cp fontconfig/57-dejavu-sans.conf fontconfig/57-dejavu-sans-mono.conf \
+        fontconfig/57-dejavu-serif.conf "$sysroot/etc/fonts/conf.d/"
+}
+
 build_libice() {
     unpack libice_1.1.1.orig.tar.gz libICE-1.1.1
     autotools --disable-docs --disable-specs --without-xmlto --without-fop
@@ -263,7 +302,7 @@ build_xterm() {
     # configure runs test programs linked with ncurses' libtinfow, found
     # through an rpath (which means nothing on Vexa, where libraries are in
     # /usr/lib anyway).
-    LDFLAGS="$LDFLAGS -Wl,-rpath,$sysroot/usr/lib" autotools --disable-freetype --without-xinerama --disable-setuid --disable-setgid \
+    LDFLAGS="$LDFLAGS -Wl,-rpath,$sysroot/usr/lib" autotools --enable-freetype --without-xinerama --disable-setuid --disable-setgid \
         --without-utempter --disable-luit --enable-256-color --disable-tek4014 \
         --with-terminal-type=xterm LIBS=-ltinfow
 }
@@ -284,6 +323,12 @@ package libxkbfile
 package xkbcomp
 package xkeyboardconfig
 package xserver
+package freetype
+package expat
+package fontconfig
+package libxrender
+package libxft
+package dejavu
 package libice
 package libsm
 package libxt

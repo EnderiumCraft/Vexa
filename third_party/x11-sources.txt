@@ -1,5 +1,6 @@
 # The X Window System sources tools/build-x11.sh builds, with their SHA-256.
-# All from Ubuntu's archive (the original upstream tarballs, *.orig.tar.*).
+# From Ubuntu's archive (the original upstream tarballs, *.orig.tar.*), and
+# upstream releases where those are git snapshots (expat) or font sources (DejaVu).
 4f6b9b4faf91e5df8265b71843a91fc73dc895be6210c84117a996545df296ce https://archive.ubuntu.com/ubuntu/pool/main/x/xorgproto/xorgproto_2024.1.orig.tar.gz
 3a321aaceb803577a4776a5efe78836eb095a9e44bbc7a465d29463e1a14f189 https://archive.ubuntu.com/ubuntu/pool/main/libx/libxau/libxau_1.0.11.orig.tar.gz
 1bd6aa42275313af3141c7cf2e5b964e8b1fd488025caf2f971f43b00776b332 https://archive.ubuntu.com/ubuntu/pool/main/libm/libmd/libmd_1.1.0.orig.tar.xz
@@ -24,3 +25,9 @@ d01ccd7ba48ec9d6815aeef5fb408d0c307ab6be21d20ff0b54b11f1c2b8a075 https://archive
 012f90adf8739f2f023d63a5fee1528949cf2aba92ef7ac1abcfc2ae9cf28798 https://archive.ubuntu.com/ubuntu/pool/main/libx/libxaw/libxaw_1.0.16.orig.tar.gz
 e280541f4f601b8586bec305976c873fd641607f9bc4254bf661034dcccac4e9 https://archive.ubuntu.com/ubuntu/pool/main/n/ncurses/ncurses_6.6+20251231.orig.tar.gz
 7aeef9f29f6b95e09f481173c8c3053357bf5ffe162585647f690fd1707556df https://archive.ubuntu.com/ubuntu/pool/main/x/xterm/xterm_330.orig.tar.gz
+48c78a4194adfcd15a4d089f3206dab8454c311f5577f3ef7eaef95f777f86e6 https://archive.ubuntu.com/ubuntu/pool/main/f/freetype/freetype_2.13.2+dfsg.orig.tar.xz
+0c00d2760ad12efef6e26efc8b363c8eb28eb8c8de719e46d5bb67b40ba904a3 https://github.com/libexpat/libexpat/releases/download/R_2_6_1/expat-2.6.1.tar.xz
+63a0658d0e06e0fa886106452b58ef04f21f58202ea02a94c39de0d3335d7c0e https://archive.ubuntu.com/ubuntu/pool/main/f/fontconfig/fontconfig_2.15.0.orig.tar.xz
+0fff64125819c02d1102b6236f3d7d861a07b5216d8eea336c3811d31494ecf7 https://archive.ubuntu.com/ubuntu/pool/main/libx/libxrender/libxrender_0.9.12.orig.tar.gz
+b7e59f69e0bbabe9438088775f7e5a7c16a572e58b11f9722519385d38192df5 https://archive.ubuntu.com/ubuntu/pool/main/x/xft/xft_2.3.6.orig.tar.gz
+fa9ca4d13871dd122f61258a80d01751d603b4d3ee14095d65453b4e846e17d7 https://github.com/dejavu-fonts/dejavu-fonts/releases/download/version_2_37/dejavu-fonts-ttf-2.37.tar.bz2

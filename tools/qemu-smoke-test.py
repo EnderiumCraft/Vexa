@@ -193,7 +193,7 @@ LINUX_COMMANDS = [
     # pointer is over it (X without a window manager: focus follows the mouse).
     ("desktop", 'desktop: window 1 "Terminal"', 30),
     ("@sendkey ctrl-alt-x", 'desktop: window 2 "X (:0)"', 60),
-    ("@mouse_move -440 -200", "xterm: cannot load font", 60),
+    ("@mouse_move -440 -200", None, 5),
     ("@type echo typed-in-xterm > /dev/console", "typed-in-xterm", 20),
     ("@sendkey ctrl-alt-q", "desktop: back to the console", 30),
     # Networking: BSD sockets (with SCM_RIGHTS), wget, ifconfig, ping and
