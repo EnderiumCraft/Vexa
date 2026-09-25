@@ -200,9 +200,16 @@ bash: $(BASH)
 
 # ---- /linux ----
 
-$(LINUX_ROOT)/.done: $(BUSYBOX) $(BASH) $(MUSL_LIBC) tools/make-linux-root.sh
+# Linux test programs (tests/linux/), built with musl like the rest of /linux.
+LINUX_TESTS := $(patsubst tests/linux/%.c,$(BUILD)/linux-tests/%,$(wildcard tests/linux/*.c))
+
+$(BUILD)/linux-tests/%: tests/linux/%.c
+	@mkdir -p $(dir $@)
+	$(MUSL_CC) -O2 -Wall -Wextra -Werror -pthread $< -o $@
+
+$(LINUX_ROOT)/.done: $(BUSYBOX) $(BASH) $(MUSL_LIBC) $(LINUX_TESTS) tools/make-linux-root.sh
 	tools/make-linux-root.sh $(LINUX_ROOT) $(MUSL_LIBC) $(BUSYBOX) \
-		$(BUSYBOX_BUILD)/busybox.links $(BASH)
+		$(BUSYBOX_BUILD)/busybox.links $(BASH) $(LINUX_TESTS)
 	touch $@
 
 $(BUILD)/disk-content: $(DISK_CONTENT_FILES) $(BUILD)/programs/hello-world

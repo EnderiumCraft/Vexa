@@ -716,7 +716,7 @@ static int64_t sys_thread_create(uint64_t user_start, uint64_t a1, uint64_t a2, 
         .ss = GDT_USER_DATA | 3,
         .rdi = (uint64_t)start.arg,
     };
-    return process_thread_create(&frame, tls, false, exit_word);
+    return process_thread_create(&frame, tls, false, exit_word, NULL);
 }
 
 static int64_t sys_thread_exit(uint64_t code, uint64_t a1, uint64_t a2, uint64_t a3) {

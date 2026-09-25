@@ -15,7 +15,7 @@ Phases 1 to 5 are complete: boot and CPU basics, memory management, processes an
 user mode, files and storage, and a userland. Vexa boots into its own shell, `vsh`,
 with a set of native programs, and runs dynamically linked Linux programs (BusyBox and
 GNU bash) through the Linux subsystem. Phase 6, threads and dynamic linking, is under
-way. The kernel:
+way: programs on both sides can now use threads. The kernel:
 
 - boots through the [Limine](https://github.com/limine-bootloader/limine) bootloader (BIOS and UEFI)
 - runs in 64-bit long mode as a higher-half kernel
@@ -34,7 +34,8 @@ way. The kernel:
 - reads the PS/2 keyboard (US layout, Shift, Caps Lock, Ctrl)
 - has a terminal with line editing, Ctrl-C (or Ctrl-\\) to stop programs and Ctrl-D for
   end of input
-- runs threads with a preemptive scheduler, on every CPU core it finds
+- runs threads with a preemptive scheduler, on every CPU core it finds; a program can
+  have many threads, which synchronize by waiting on memory addresses (futexes)
 - runs programs in user mode, each in its own address space, and stops a program
   that misbehaves without taking the system down
 - has processes with parents and children, process groups, pipes and signals
@@ -66,6 +67,7 @@ the `vexa:/>` prompt:
 | `fpu-stress &` | runs a program in the background (try it three times, then `ps`) |
 | `sleep 30`, then Ctrl-C | stops the program in front |
 | `ps`, `kill`, `uptime` | processes and how long the system has been up |
+| `thread-test`, `pthread-test` | threads: a Vexa program, and a Linux one using musl's pthreads |
 | `sys` | the kernel's own commands: `sys disks`, `sys mount`, `sys pci`, `sys cpu`, `sys mem`, `sys memtest`, `sys threads` |
 | `bash` | GNU bash, a Linux program (`exit` to go back); inside it, `ls`, `vi`, `grep`, `ps`, `top`... are BusyBox's |
 | `sh`, `busybox` | BusyBox's shell; `busybox` alone lists its commands |
@@ -96,8 +98,8 @@ ext4 disks are refused (Vexa doesn't support their extra features yet), and ext2
 journal, so pulling the plug mid-write can leave the disk needing a check with
 `e2fsck` on Linux.
 
-Next in Phase 6: threads, then shared libraries for native programs and more Linux
-software (coreutils, Python). See [docs/ROADMAP.md](docs/ROADMAP.md) for the full
+Next in Phase 6: shared libraries for native programs, and more Linux software
+(coreutils, Python). See [docs/ROADMAP.md](docs/ROADMAP.md) for the full
 plan from here to Firefox.
 
 ## Download

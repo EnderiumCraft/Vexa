@@ -4,6 +4,7 @@
 #include <vexa/cpu.h>
 #include <vexa/fpu.h>
 #include <vexa/fs.h>
+#include <vexa/futex.h>
 #include <vexa/kprintf.h>
 #include <vexa/mm.h>
 #include <vexa/object.h>
@@ -56,9 +57,14 @@ struct saved_fpu {
     struct saved_fpu *next;
 };
 
+/* Shared by the process's threads (thread->process->personality_data). */
 struct linux_data {
     struct linux_sigaction actions[VX_SIGNAL_COUNT];
     uint32_t umask;
+};
+
+/* Each thread's own (thread->personality_data). */
+struct linux_thread {
     uint64_t last_syscall;
     bool suspend_mask_valid; /* rt_sigsuspend: the mask to restore after the handler. */
     uint64_t suspend_mask;
@@ -88,30 +94,39 @@ static struct linux_data *data(void) {
     return process->personality_data;
 }
 
+static struct linux_thread *tdata(void) {
+    struct thread *thread = thread_current();
+    if (!thread->personality_data) {
+        thread->personality_data = kzalloc(sizeof(struct linux_thread));
+    }
+    return thread->personality_data;
+}
+
 static void free_saved_fpu(struct saved_fpu *saved) {
     fpu_free_state(saved->state);
     kfree(saved);
 }
 
 static void linux_free_data(void *p) {
-    struct linux_data *d = p;
-    while (d->saved_fpu) {
-        struct saved_fpu *next = d->saved_fpu->next;
-        free_saved_fpu(d->saved_fpu);
-        d->saved_fpu = next;
-    }
-    kfree(d);
+    kfree(p);
 }
 
 static void *linux_fork_data(void *p) {
     struct linux_data *copy = kmalloc(sizeof(*copy));
     if (copy) {
         memcpy(copy, p, sizeof(*copy));
-        copy->saved_fpu = NULL; /* The child starts outside any handler's bookkeeping. */
-        copy->saved_fpu_count = 0;
-        copy->suspend_mask_valid = false;
     }
     return copy;
+}
+
+static void linux_free_thread_data(void *p) {
+    struct linux_thread *t = p;
+    while (t->saved_fpu) {
+        struct saved_fpu *next = t->saved_fpu->next;
+        free_saved_fpu(t->saved_fpu);
+        t->saved_fpu = next;
+    }
+    kfree(t);
 }
 
 /* ---- Errors ---- */
@@ -1745,11 +1760,53 @@ static int64_t sys_fork(struct interrupt_frame *f, uint64_t a0, uint64_t a1, uin
 
 static int64_t sys_clone(struct interrupt_frame *f, uint64_t flags, uint64_t stack,
                          uint64_t parent_tid, uint64_t child_tid, uint64_t tls, uint64_t a5) {
-    /* Only the fork-like form so far; threads come in Phase 6. */
-    if (flags & (LINUX_CLONE_VM | LINUX_CLONE_THREAD) || stack) {
-        return -LE_ENOSYS;
+    /* The new thread or process resumes here too, with rax 0 and, if one is
+     * given, its own stack. */
+    struct interrupt_frame start = *f;
+    start.rax = 0;
+    if (stack) {
+        start.rsp = stack;
     }
-    return sys_fork(f, 0, 0, 0, 0, 0, 0);
+    if (flags & LINUX_CLONE_THREAD) {
+        /* A thread: pthread_create. It must share everything that threads share. */
+        const uint64_t shared = LINUX_CLONE_VM | LINUX_CLONE_SIGHAND | LINUX_CLONE_FILES |
+                                LINUX_CLONE_FS;
+        if ((flags & shared) != shared || !stack) {
+            return -LE_EINVAL;
+        }
+        uint64_t fs_base = flags & LINUX_CLONE_SETTLS ? tls : rdmsr(IA32_FS_BASE_MSR);
+        if (fs_base >= USER_END) {
+            return -LE_EPERM;
+        }
+        const uint64_t tid_out[2] = {
+            flags & LINUX_CLONE_PARENT_SETTID ? parent_tid : 0,
+            flags & LINUX_CLONE_CHILD_SETTID ? child_tid : 0,
+        };
+        int tid = process_thread_create(&start, fs_base, true,
+                                        flags & LINUX_CLONE_CHILD_CLEARTID ? child_tid : 0,
+                                        tid_out);
+        return tid < 0 ? lx(tid) : tid;
+    }
+    if (flags & LINUX_CLONE_VM) {
+        /* A process sharing our memory until it execs (CLONE_VM|CLONE_VFORK,
+         * as posix_spawn does). A copy-on-write copy behaves the same for a
+         * child that only sets up and execs. */
+        if (!(flags & LINUX_CLONE_VFORK)) {
+            return -LE_ENOSYS;
+        }
+    }
+    int error;
+    struct process *child = process_fork(&start, &error);
+    if (!child) {
+        return lx(error);
+    }
+    int64_t id = child->id;
+    if (flags & LINUX_CLONE_PARENT_SETTID) {
+        uint32_t value = (uint32_t)id;
+        copy_to_user(parent_tid, &value, sizeof(value));
+    }
+    object_put(&child->object);
+    return id;
 }
 
 static void free_strings(char **strings) {
@@ -1876,14 +1933,31 @@ static int64_t sys_kill(struct interrupt_frame *f, uint64_t pid, uint64_t signal
     return send_signal((int32_t)pid, signal);
 }
 
+/* A signal for one thread: in process `tgid`, or (0) wherever it is. */
+static int64_t signal_thread(uint32_t tgid, uint32_t tid, uint64_t signal) {
+    if ((int32_t)tid <= 0 || signal > VX_SIGNAL_COUNT) {
+        return -LE_EINVAL;
+    }
+    if ((!tgid || tgid == me()->id) && process_signal_thread(me(), tid, (int)signal)) {
+        return 0;
+    }
+    /* Another process: look it up by its id (its first thread has the same). */
+    struct process *target = process_find(tgid ? tgid : tid);
+    bool found = target && process_signal_thread(target, tid, (int)signal);
+    if (target) {
+        object_put(&target->object);
+    }
+    return found ? 0 : -LE_ESRCH;
+}
+
 static int64_t sys_tkill(struct interrupt_frame *f, uint64_t tid, uint64_t signal, uint64_t a2,
                          uint64_t a3, uint64_t a4, uint64_t a5) {
-    return (int32_t)tid <= 0 ? -LE_EINVAL : send_signal((int32_t)tid, signal);
+    return signal_thread(0, (uint32_t)tid, signal);
 }
 
 static int64_t sys_tgkill(struct interrupt_frame *f, uint64_t tgid, uint64_t tid,
                           uint64_t signal, uint64_t a3, uint64_t a4, uint64_t a5) {
-    return (int32_t)tid <= 0 ? -LE_EINVAL : send_signal((int32_t)tid, signal);
+    return (int32_t)tgid <= 0 ? -LE_EINVAL : signal_thread((uint32_t)tgid, (uint32_t)tid, signal);
 }
 
 static int64_t sys_arch_prctl(struct interrupt_frame *f, uint64_t code, uint64_t address,
@@ -1944,21 +2018,56 @@ static int64_t sys_sched_yield(struct interrupt_frame *f, uint64_t a0, uint64_t 
     return 0;
 }
 
-static int64_t sys_futex(struct interrupt_frame *f, uint64_t address, uint64_t op,
-                         uint64_t value, uint64_t a3, uint64_t a4, uint64_t a5) {
-    /* One thread per process until Phase 6: nobody else could wake a waiter. */
-    switch (op & 0x7f) {
-    case LINUX_FUTEX_WAIT:
-    case LINUX_FUTEX_WAIT_BITSET: {
-        uint32_t current;
-        if (!copy_from_user(&current, address, sizeof(current))) {
-            return -LE_EFAULT;
-        }
-        return current != (uint32_t)value ? -LE_EAGAIN : -LE_ETIMEDOUT;
+static void realtime(struct linux_timespec *ts);
+
+/* A futex timeout in milliseconds: relative for FUTEX_WAIT, absolute (on the
+ * monotonic or, with FUTEX_CLOCK_REALTIME, the real-time clock) for
+ * FUTEX_WAIT_BITSET. -1: no timeout. */
+static int64_t futex_timeout(uint64_t user_timespec, bool absolute, bool realtime_clock,
+                             int64_t *ms) {
+    int64_t error = timespec_ms(user_timespec, ms);
+    if (error || *ms < 0 || !absolute) {
+        return error;
     }
+    struct linux_timespec now;
+    if (realtime_clock) {
+        realtime(&now);
+    } else {
+        now.sec = (int64_t)(timer_ms() / 1000);
+        now.nsec = (int64_t)(timer_ms() % 1000) * 1000000;
+    }
+    *ms -= now.sec * 1000 + now.nsec / 1000000;
+    if (*ms < 0) {
+        *ms = 0;
+    }
+    return 0;
+}
+
+static int64_t sys_futex(struct interrupt_frame *f, uint64_t address, uint64_t op,
+                         uint64_t value, uint64_t timeout, uint64_t address2, uint64_t value3) {
+    /* Private or not makes no difference here: waits are per address space. */
+    bool realtime_clock = op & LINUX_FUTEX_CLOCK_REALTIME;
+    int64_t ms;
+    int64_t error;
+    switch (op & ~(uint64_t)(LINUX_FUTEX_PRIVATE_FLAG | LINUX_FUTEX_CLOCK_REALTIME)) {
+    case LINUX_FUTEX_WAIT:
+        error = futex_timeout(timeout, false, false, &ms);
+        return error ? error : lx(futex_wait(address, (uint32_t)value, FUTEX_ANY, ms));
+    case LINUX_FUTEX_WAIT_BITSET:
+        error = futex_timeout(timeout, true, realtime_clock, &ms);
+        return error ? error : lx(futex_wait(address, (uint32_t)value, (uint32_t)value3, ms));
     case LINUX_FUTEX_WAKE:
+        return lx(futex_wake(me()->address_space, address, (int)(value & 0x7fffffff), FUTEX_ANY));
     case LINUX_FUTEX_WAKE_BITSET:
-        return 0;
+        return lx(futex_wake(me()->address_space, address, (int)(value & 0x7fffffff),
+                             (uint32_t)value3));
+    case LINUX_FUTEX_REQUEUE:
+        /* The 4th argument is a count here, not a timeout. */
+        return lx(futex_requeue(address, (int)(value & 0x7fffffff), address2,
+                                (int)(timeout & 0x7fffffff), false, 0));
+    case LINUX_FUTEX_CMP_REQUEUE:
+        return lx(futex_requeue(address, (int)(value & 0x7fffffff), address2,
+                                (int)(timeout & 0x7fffffff), true, (uint32_t)value3));
     default:
         return -LE_ENOSYS;
     }
@@ -1966,7 +2075,19 @@ static int64_t sys_futex(struct interrupt_frame *f, uint64_t address, uint64_t o
 
 static int64_t sys_set_tid_address(struct interrupt_frame *f, uint64_t address, uint64_t a1,
                                    uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5) {
-    return me()->id;
+    struct thread *thread = thread_current();
+    thread->clear_on_exit = address;
+    return thread->tid;
+}
+
+static int64_t sys_gettid(struct interrupt_frame *f, uint64_t a0, uint64_t a1, uint64_t a2,
+                          uint64_t a3, uint64_t a4, uint64_t a5) {
+    return thread_current()->tid;
+}
+
+static int64_t sys_exit_thread(struct interrupt_frame *f, uint64_t code, uint64_t a1,
+                               uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5) {
+    process_thread_exit((int)(code & 0xff));
 }
 
 /* ---- Limits and usage ---- */
@@ -2251,8 +2372,10 @@ static int64_t sys_rt_sigprocmask(struct interrupt_frame *f, uint64_t how, uint6
 
 static int64_t sys_rt_sigpending(struct interrupt_frame *f, uint64_t out, uint64_t size,
                                  uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5) {
-    uint64_t pending = __atomic_load_n(&me()->pending_signals, __ATOMIC_ACQUIRE) &
-                       thread_current()->blocked_signals;
+    struct thread *thread = thread_current();
+    uint64_t pending = (__atomic_load_n(&me()->pending_signals, __ATOMIC_ACQUIRE) |
+                        __atomic_load_n(&thread->pending_signals, __ATOMIC_ACQUIRE)) &
+                       thread->blocked_signals;
     return copy_to_user(out, &pending, sizeof(pending)) ? 0 : -LE_EFAULT;
 }
 
@@ -2260,12 +2383,12 @@ static int64_t sys_rt_sigpending(struct interrupt_frame *f, uint64_t out, uint64
  * handler records the mask from before, so returning restores it. */
 static int64_t suspend_with(uint64_t mask) {
     struct thread *thread = thread_current();
-    struct linux_data *d = data();
-    if (!d) {
+    struct linux_thread *t = tdata();
+    if (!t) {
         return -LE_ENOMEM;
     }
-    d->suspend_mask = thread->blocked_signals;
-    d->suspend_mask_valid = true;
+    t->suspend_mask = thread->blocked_signals;
+    t->suspend_mask_valid = true;
     thread->blocked_signals = mask & ~UNBLOCKABLE;
     while (!thread_signal_pending(thread)) {
         thread_sleep_ms_interruptible(60 * 1000);
@@ -2319,7 +2442,8 @@ static bool restartable(uint64_t number) {
 static bool linux_deliver_signal(struct interrupt_frame *frame, int signal) {
     struct thread *thread = thread_current();
     struct linux_data *d = data();
-    if (!d) {
+    struct linux_thread *t = tdata();
+    if (!d || !t) {
         return false;
     }
     struct linux_sigaction action = d->actions[signal - 1];
@@ -2327,8 +2451,8 @@ static bool linux_deliver_signal(struct interrupt_frame *frame, int signal) {
         return false; /* No way back from the handler: end the process instead. */
     }
     if (frame->vector == SYSCALL_VECTOR && (int64_t)frame->rax == -LE_EINTR &&
-        (action.flags & LINUX_SA_RESTART) && restartable(d->last_syscall)) {
-        frame->rax = d->last_syscall; /* Run the call again once the handler returns. */
+        (action.flags & LINUX_SA_RESTART) && restartable(t->last_syscall)) {
+        frame->rax = t->last_syscall; /* Run the call again once the handler returns. */
         frame->rip -= 2;              /* The length of the syscall instruction. */
     }
 
@@ -2350,8 +2474,8 @@ static bool linux_deliver_signal(struct interrupt_frame *frame, int signal) {
     c->cs = (uint16_t)frame->cs;
     c->trapno = frame->vector == SYSCALL_VECTOR ? 0 : frame->vector;
     c->err = frame->vector == SYSCALL_VECTOR ? 0 : frame->error_code;
-    uc.sigmask = d->suspend_mask_valid ? d->suspend_mask : thread->blocked_signals;
-    d->suspend_mask_valid = false;
+    uc.sigmask = t->suspend_mask_valid ? t->suspend_mask : thread->blocked_signals;
+    t->suspend_mask_valid = false;
 
     struct linux_siginfo info;
     memset(&info, 0, sizeof(info));
@@ -2375,18 +2499,18 @@ static bool linux_deliver_signal(struct interrupt_frame *frame, int signal) {
     fpu_save(state);
     saved->frame = uc_address;
     saved->state = state;
-    saved->next = d->saved_fpu;
-    d->saved_fpu = saved;
-    if (++d->saved_fpu_count > SAVED_FPU_MAX) {
+    saved->next = t->saved_fpu;
+    t->saved_fpu = saved;
+    if (++t->saved_fpu_count > SAVED_FPU_MAX) {
         /* Handlers that never returned (they jumped out with longjmp) leave
          * entries behind; drop the oldest. */
-        struct saved_fpu *s = d->saved_fpu;
+        struct saved_fpu *s = t->saved_fpu;
         while (s->next && s->next->next) {
             s = s->next;
         }
         free_saved_fpu(s->next);
         s->next = NULL;
-        d->saved_fpu_count--;
+        t->saved_fpu_count--;
     }
 
     frame->rdi = (uint64_t)signal;
@@ -2426,11 +2550,11 @@ static int64_t sys_rt_sigreturn(struct interrupt_frame *f, uint64_t a0, uint64_t
     f->vector = 0; /* Not a system call return any more: never restart it. */
     thread_current()->blocked_signals = uc.sigmask & ~UNBLOCKABLE;
 
-    struct linux_data *d = data();
-    while (d && d->saved_fpu) {
-        struct saved_fpu *saved = d->saved_fpu;
-        d->saved_fpu = saved->next;
-        d->saved_fpu_count--;
+    struct linux_thread *t = tdata();
+    while (t && t->saved_fpu) {
+        struct saved_fpu *saved = t->saved_fpu;
+        t->saved_fpu = saved->next;
+        t->saved_fpu_count--;
         bool mine = saved->frame == uc_address;
         if (mine) {
             fpu_restore(saved->state);
@@ -2491,7 +2615,7 @@ static const linux_fn syscalls[] = {
     CALL(fork, sys_fork),
     CALL(vfork, sys_fork),
     CALL(execve, sys_execve),
-    CALL(exit, sys_exit),
+    CALL(exit, sys_exit_thread),
     CALL(wait4, sys_wait4),
     CALL(kill, sys_kill),
     CALL(uname, sys_uname),
@@ -2561,7 +2685,7 @@ static const linux_fn syscalls[] = {
     CALL(umount2, sys_not_permitted),
     CALL(reboot, sys_not_permitted),
     CALL(sethostname, sys_not_permitted),
-    CALL(gettid, sys_getpid),
+    CALL(gettid, sys_gettid),
     CALL(tkill, sys_tkill),
     CALL(time, sys_time),
     CALL(futex, sys_futex),
@@ -2623,9 +2747,9 @@ static void report_unimplemented(struct interrupt_frame *f) {
 
 static void linux_syscall(struct interrupt_frame *frame) {
     uint64_t number = frame->rax;
-    struct linux_data *d = data();
-    if (d) {
-        d->last_syscall = number;
+    struct linux_thread *t = tdata();
+    if (t) {
+        t->last_syscall = number;
     }
     if (number >= SYSCALL_COUNT || !syscalls[number]) {
         report_unimplemented(frame);
@@ -2642,5 +2766,6 @@ const struct personality linux_personality = {
     .deliver_signal = linux_deliver_signal,
     .fork_data = linux_fork_data,
     .free_data = linux_free_data,
+    .free_thread_data = linux_free_thread_data,
     .translate_path = linux_translate_path,
 };

@@ -145,10 +145,13 @@ __attribute__((noreturn)) void process_thread_exit(int code);
 
 /* Starts another thread in the calling process, resuming user mode from
  * `frame` with thread pointer `fs_base`. `copy_vector_registers`: start
- * with the caller's SSE/AVX state instead of a fresh one. Returns the new
+ * with the caller's SSE/AVX state instead of a fresh one. The new thread's
+ * id is stored (as 32 bits) at each nonzero address in `tid_out[2]` before it
+ * starts (Linux's CLONE_PARENT_SETTID/CHILD_SETTID). Returns the new
  * thread's id or a negative VX_E* error. */
 int process_thread_create(const struct interrupt_frame *frame, uint64_t fs_base,
-                          bool copy_vector_registers, uint64_t clear_on_exit);
+                          bool copy_vector_registers, uint64_t clear_on_exit,
+                          const uint64_t tid_out[2]);
 /* The thread of the calling process with this id, for thread-directed
  * signals. Call with no locks held; the result is only a hint (it may exit). */
 bool process_signal_thread(struct process *process, uint32_t tid, int signal);

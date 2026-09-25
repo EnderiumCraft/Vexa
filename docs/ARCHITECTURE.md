@@ -160,6 +160,27 @@ Disks sit behind the block layer (`core/block.c`), which caches them in 4 KiB ch
 reads partition tables, and calls the drivers (`dev/virtio_blk.c`, `dev/ahci.c`,
 `dev/nvme.c`).
 
+## Threads today
+
+A process has a list of threads, all sharing its address space and handle table. Each
+thread has its own kernel stack, saved registers, thread pointer (FS base), blocked
+signal mask and pending signals; the process has pending signals too, which go to
+whichever thread doesn't block them.
+
+- **Ending.** A thread can end alone (`vx_thread_exit`, Linux `exit`), or end the whole
+  process (`vx_exit`, `exit_group`): that marks the process as exiting and interrupts
+  every thread, and each one leaves when it next heads back to user mode. The last
+  thread to leave closes the handles; the process is over when the last one has been
+  freed. `exec` in a threaded process first waits for the other threads to be gone.
+- **Waiting on an address** (`core/futex.c`) is the one synchronization primitive:
+  sleep while a 32-bit word holds a value, with an optional timeout; wake some or all
+  of the sleepers on an address. libvexa's `vx_mutex` and joins, and Linux `futex`
+  (so musl's mutexes, condition variables and `pthread_join`), are built on it.
+- **TLB shootdowns.** Each address space knows which CPUs have it loaded. When a mapping
+  is removed or made read-only, those CPUs get an interrupt and reload their page
+  tables before the old pages can be reused; a CPU waiting for a spinlock answers
+  such requests too, so shootdowns can't deadlock.
+
 ## How a system call works today
 
 1. A program calls a `libvexa` function such as `vx_log(text, length)`, which puts the

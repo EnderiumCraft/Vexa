@@ -138,8 +138,11 @@ Linux track:
 
 ## Phase 6: Dynamic linking and threads
 
-- [ ] Threads, thread-local storage, and a core "wait on address" primitive
-      (native API first; the Linux subsystem builds `futex` on it)
+- [x] Threads, thread-local storage, and a core "wait on address" primitive
+      (native API first: `vx_thread_create`, `vx_wait_address`, `vx_mutex` in libvexa;
+      the Linux subsystem builds `futex` on it). Several threads per process on every
+      CPU, per-thread signals, exit of one thread or all, exec from a threaded process,
+      and TLB shootdowns between CPUs (0.9.0)
 - [ ] Shared libraries for native programs (`libvexa.so` and Vexa's own dynamic loader)
 - [x] Linux: the musl dynamic loader (`PT_INTERP`, `AT_BASE`), and Linux programs'
       files under `/linux` (tried first, like FreeBSD's Linux emulation)
@@ -149,8 +152,9 @@ Linux track:
 - [x] Linux: BusyBox linked dynamically; GNU bash 5.2 built from source
       (0.8.0: Alpine's package servers can't be reached from the build machines, so
       Linux software is built from source for now)
-- [ ] Linux: `clone` for threads, `set_tid_address` clearing, robust futexes;
-      `arch_prctl`, `getrandom`, `sched_getaffinity`, `prctl` and rlimits exist already
+- [x] Linux: `clone` for threads (TLS, parent/child tid), `set_tid_address` clearing,
+      `futex` (wait, wake, bitsets, requeue), `gettid`, `tgkill`: musl's pthreads work
+      (0.9.0); robust futex lists are accepted but not acted on yet
 - [ ] Linux: more software: coreutils, python3
 - [ ] Moved here from Phase 5: timers that send signals (`alarm`), non-blocking I/O,
       file permissions; file-backed memory that's shared rather than copied

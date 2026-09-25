@@ -594,7 +594,8 @@ struct process *process_fork(struct interrupt_frame *frame, int *error) {
 }
 
 int process_thread_create(const struct interrupt_frame *frame, uint64_t fs_base,
-                          bool copy_vector_registers, uint64_t clear_on_exit) {
+                          bool copy_vector_registers, uint64_t clear_on_exit,
+                          const uint64_t tid_out[2]) {
     struct process *process = process_current();
     struct thread *caller = thread_current();
     struct fork_start *start = kmalloc(sizeof(*start));
@@ -626,6 +627,12 @@ int process_thread_create(const struct interrupt_frame *frame, uint64_t fs_base,
         return -VX_EAGAIN;
     }
     int tid = (int)thread->tid;
+    for (int i = 0; tid_out && i < 2; i++) {
+        uint32_t value = (uint32_t)tid;
+        if (tid_out[i]) {
+            copy_to_user(tid_out[i], &value, sizeof(value));
+        }
+    }
     thread_start(thread);
     return tid;
 }

@@ -92,6 +92,9 @@ TYPED_COMMANDS = [
     ("fpu-stress", "): passed, 20 rounds", 300, 3),
     ("ps", "vinit", 10),
     # The kernel monitor's commands, through `sys`.
+    # Threads: four sharing a mutex, then exiting with threads still running.
+    ("thread-test", "thread-test: passed", 60),
+    ("thread-test exit", "exiting with threads still running", 30),
     ("sys mem", "heap ", 10),
     ("sys threads", "idle", 10),
     ("sys memtest", "memtest: passed", 180),
@@ -123,6 +126,9 @@ LINUX_COMMANDS = [
     ("bash -c 'echo bash $BASH_VERSION'", "bash 5.2", 20),
     ("bash -c 'f() { echo fn $1 ; } ; a=(x y z) ; f ${a[2]}'", "fn z", 20),
     ("bash -c 'cat <(echo substituted) | wc -c | sed s/^/count:/'", "count:12", 20),
+    # Linux threads (musl's pthreads): clone, futex, thread-local storage, tgkill.
+    ("pthread-test", "pthread-test: passed", 60),
+    ("pthread-test exit", "exiting while threads spin", 30),
 ]
 
 # With --disks: one ext2 file system on each kind of disk.
