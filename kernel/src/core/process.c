@@ -409,6 +409,7 @@ struct process *process_spawn(const struct spawn_request *request, int *error,
     }
     object_init(&process->object, &process_object_type);
     strcpy(cwd, request->cwd ? request->cwd : "/");
+    process->umask = request->parent ? request->parent->umask : 022;
     process->cwd = cwd;
     /* The process is named after the last part of its path. */
     const char *name = request->path;
@@ -528,6 +529,7 @@ struct process *process_fork(struct interrupt_frame *frame, int *error) {
     child->cwd = cwd;
     memcpy(child->name, parent->name, sizeof(child->name));
     memcpy(child->signal_actions, parent->signal_actions, sizeof(child->signal_actions));
+    child->umask = parent->umask;
     child->personality = parent->personality;
     child->address_space = vm_fork(parent->address_space);
     child->handles = child->address_space ? handle_table_clone(parent->handles) : NULL;
@@ -706,6 +708,7 @@ int process_exec(const char *path, char *const *argv, size_t argc, char *const *
         }
     }
     handle_close_on_exec(process->handles);
+    process_timers_cancel(process, true); /* An alarm survives exec; other timers don't. */
     copy_name(process, path);
 
     struct thread *thread = thread_current();
@@ -930,6 +933,7 @@ void process_thread_reaped(struct thread *thread) {
     if (process->thread_count > 0) {
         return;
     }
+    process_timers_cancel_locked(process, false);
     /* The last thread is gone, so no CPU can be using these tables.
      * (Its handles were closed by the last thread to exit.) */
     spin_lock_irqsave(&process_lock); /* Interrupts are already off. */

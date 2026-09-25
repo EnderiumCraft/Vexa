@@ -25,6 +25,10 @@ void vnode_init(struct vnode *vnode, struct mount *mount, uint32_t type,
     vnode->type = type;
     vnode->refs = 1;
     vnode->links = 1;
+    vnode->mode = type == VX_TYPE_DIRECTORY    ? 0755
+                  : type == VX_TYPE_SYMLINK    ? 0777
+                  : type == VX_TYPE_CHAR_DEVICE ? 0666
+                                               : 0644;
     vnode->ops = ops;
     vnode->mount = mount;
 }
@@ -396,6 +400,7 @@ static void fill_stat(struct vnode *vnode, struct vx_stat *stat) {
     stat->type = vnode->type;
     stat->links = vnode->links;
     stat->modified = vnode->modified;
+    stat->mode = vnode->mode;
 }
 
 static int stat_path(const char *path, size_t length, bool follow, struct vx_stat *stat) {
@@ -669,6 +674,55 @@ void vfs_file_stat(struct file *file, struct vx_stat *stat) {
 
 void vfs_close(struct file *file) {
     object_put(&file->object);
+}
+
+static int set_mode_locked(struct vnode *vnode, uint32_t mode) {
+    if (vnode->mount->read_only) {
+        return -VX_EROFS;
+    }
+    vnode->mode = mode & 07777;
+    return vnode->ops->set_mode ? vnode->ops->set_mode(vnode) : 0;
+}
+
+int vfs_chmod(const char *path, size_t length, uint32_t mode) {
+    vfs_lock();
+    struct walk walk = {0};
+    struct vnode *vnode;
+    int error = resolve(&walk, path, length, false, true, &vnode, NULL, NULL);
+    walk_done(&walk);
+    if (!error) {
+        error = set_mode_locked(vnode, mode);
+        vnode_put(vnode);
+    }
+    vfs_unlock();
+    return error;
+}
+
+int vfs_file_chmod(struct file *file, uint32_t mode) {
+    vfs_lock();
+    int error = set_mode_locked(file->vnode, mode);
+    vfs_unlock();
+    return error;
+}
+
+int vfs_statfs(const char *path, size_t length, uint64_t *total, uint64_t *free,
+               const char **fs_name) {
+    vfs_lock();
+    struct walk walk = {0};
+    struct vnode *vnode;
+    int error = resolve(&walk, path, length, false, true, &vnode, NULL, NULL);
+    walk_done(&walk);
+    if (!error) {
+        struct mount *mount = vnode->mount;
+        *total = *free = 0;
+        if (mount->root->ops->statfs) {
+            mount->root->ops->statfs(mount, total, free);
+        }
+        *fs_name = mount->fs_name;
+        vnode_put(vnode);
+    }
+    vfs_unlock();
+    return error;
 }
 
 int vfs_truncate(struct file *file, uint64_t size) {

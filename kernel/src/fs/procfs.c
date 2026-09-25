@@ -232,6 +232,25 @@ static void gen_maps(struct text *text, struct process *process) {
     kfree(lines.data);
 }
 
+static void gen_mounts(struct text *text);
+
+static void gen_pid_mounts(struct text *text, struct process *process) {
+    (void)process;
+    gen_mounts(text);
+}
+
+static void gen_mountinfo(struct text *text, struct process *process) {
+    (void)process;
+    /* "id parent major:minor root mountpoint options - type source options" */
+    int id = 1;
+    for (struct mount *m = vfs_mounts(); m; m = m->next, id++) {
+        bool device = strcmp(m->fs_name, "ext2") == 0;
+        text_printf(text, "%d %d 0:%d / %s %s - %s %s%s %s\n", id, id == 1 ? 0 : 1, id, m->path,
+                    m->read_only ? "ro" : "rw", m->fs_name, device ? "/dev/" : "", m->source,
+                    m->read_only ? "ro" : "rw");
+    }
+}
+
 struct pid_entry {
     const char *name;
     enum proc_kind kind;
@@ -244,6 +263,8 @@ static const struct pid_entry pid_entries[] = {
     {"cmdline", PROC_PID_FILE, gen_cmdline},
     {"comm", PROC_PID_FILE, gen_comm},
     {"maps", PROC_PID_FILE, gen_maps},
+    {"mounts", PROC_PID_FILE, gen_pid_mounts},
+    {"mountinfo", PROC_PID_FILE, gen_mountinfo},
     {"exe", PROC_PID_LINK, NULL},
     {"cwd", PROC_PID_LINK, NULL},
     {"fd", PROC_FD_DIR, NULL},

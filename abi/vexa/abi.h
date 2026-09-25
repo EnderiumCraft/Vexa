@@ -167,6 +167,8 @@ struct vx_stat {
     unsigned int type; /* VX_TYPE_* */
     unsigned int links;
     long long modified; /* Seconds since 1970, or 0 if unknown. */
+    unsigned int mode;  /* Permission bits, Unix style (e.g. 0755). */
+    unsigned int reserved;
 };
 
 struct vx_dir_entry {

@@ -44,6 +44,29 @@ struct thread {
     void *personality_data;        /* The personality's per-thread state. */
 };
 
+/* Timers that send a process a signal (alarm, setitimer, timer_create). They
+ * live in the process; armed ones are fired by the timer tick. */
+#define PROCESS_TIMERS 8
+struct process_timer {
+    struct process *process;
+    int signal;           /* 0: just counts (no signal). */
+    bool in_use;          /* Allocated (timer_create); slot 0 always is. */
+    bool armed;
+    int clock;            /* Which clock absolute times refer to (Linux clock id). */
+    uint64_t deadline;    /* timer_ms() when it fires next. */
+    uint64_t interval;    /* 0: once. */
+    struct process_timer *next;
+};
+
+/* Arms (value_ms > 0) or disarms (0) a timer. */
+void process_timer_set(struct process_timer *timer, struct process *process, int signal,
+                       uint64_t value_ms, uint64_t interval_ms);
+/* Milliseconds until it fires (0 if disarmed), and its interval. */
+uint64_t process_timer_left(struct process_timer *timer, uint64_t *interval_ms);
+/* Disarms the process's timers (all, or all but slot 0). */
+void process_timers_cancel(struct process *process, bool keep_alarm);
+void process_timers_cancel_locked(struct process *process, bool keep_alarm);
+
 /* Threads waiting for something. Wake-ups can't be lost: wait_queue_wait()
  * rechecks its condition under the scheduler lock, which wake-ups also take. */
 struct wait_queue {

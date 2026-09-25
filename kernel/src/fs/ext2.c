@@ -460,6 +460,7 @@ static int get_node(struct ext2 *fs, uint32_t number, struct vnode **out) {
     node->vnode.inode = number;
     node->vnode.size = inode_size(&node->inode);
     node->vnode.links = node->inode.links_count;
+    node->vnode.mode = node->inode.mode & 07777;
     node->vnode.modified = node->inode.mtime;
     node->vnode.data = fs;
     node->next = fs->open_nodes;
@@ -1012,6 +1013,19 @@ static int ext2_truncate(struct vnode *vnode, uint64_t size) {
     return write_inode(fs, node);
 }
 
+static int ext2_set_mode(struct vnode *vnode) {
+    struct ext2_node *node = node_of(vnode);
+    node->inode.mode = (uint16_t)((node->inode.mode & MODE_TYPE_MASK) | (vnode->mode & 07777));
+    node->inode.ctime = (uint32_t)time_now();
+    return write_inode(fs_of(vnode), node);
+}
+
+static void ext2_statfs(struct mount *mount, uint64_t *total, uint64_t *free) {
+    struct ext2 *fs = mount->data;
+    *total = (uint64_t)fs->sb.blocks_count * fs->block_size;
+    *free = (uint64_t)fs->sb.free_blocks_count * fs->block_size;
+}
+
 static const struct vnode_ops ext2_ops = {
     .lookup = ext2_lookup,
     .create = ext2_create,
@@ -1021,6 +1035,8 @@ static const struct vnode_ops ext2_ops = {
     .read = ext2_read,
     .write = ext2_write,
     .truncate = ext2_truncate,
+    .set_mode = ext2_set_mode,
+    .statfs = ext2_statfs,
     .release = ext2_release,
 };
 

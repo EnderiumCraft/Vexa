@@ -66,6 +66,7 @@ struct process {
     bool exiting;            /* exit_group: every thread is on its way out. */
     struct wait_queue threads_changed;
     char *cwd;               /* Absolute, normalized. */
+    uint32_t umask;          /* Permission bits new files don't get (kept across exec). */
     uint64_t pending_signals;
     uint8_t signal_actions[VX_SIGNAL_COUNT]; /* enum signal_action */
     char *exe;               /* The program's path, and its arguments NUL-separated. */
@@ -74,6 +75,7 @@ struct process {
     uint64_t start_ms;       /* timer_ms() when it started. */
     uint64_t entry;          /* Where user mode starts, and with what stack. */
     uint64_t stack_pointer;
+    struct process_timer timers[PROCESS_TIMERS];
     struct wait_queue exited;           /* Anyone waiting for this process. */
     struct wait_queue children_changed; /* This process, waiting for a child. */
     struct process *next;

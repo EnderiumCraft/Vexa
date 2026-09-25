@@ -41,6 +41,7 @@
 #define LINUX_SYS_dup2 33
 #define LINUX_SYS_pause 34
 #define LINUX_SYS_nanosleep 35
+#define LINUX_SYS_getitimer 36
 #define LINUX_SYS_alarm 37
 #define LINUX_SYS_setitimer 38
 #define LINUX_SYS_getpid 39
@@ -105,6 +106,7 @@
 #define LINUX_SYS_getpgid 121
 #define LINUX_SYS_getsid 124
 #define LINUX_SYS_rt_sigpending 127
+#define LINUX_SYS_rt_sigtimedwait 128
 #define LINUX_SYS_rt_sigsuspend 130
 #define LINUX_SYS_sigaltstack 131
 #define LINUX_SYS_utime 132
@@ -126,6 +128,11 @@
 #define LINUX_SYS_tkill 200
 #define LINUX_SYS_time 201
 #define LINUX_SYS_futex 202
+#define LINUX_SYS_timer_create 222
+#define LINUX_SYS_timer_settime 223
+#define LINUX_SYS_timer_gettime 224
+#define LINUX_SYS_timer_getoverrun 225
+#define LINUX_SYS_timer_delete 226
 #define LINUX_SYS_sched_getaffinity 204
 #define LINUX_SYS_getdents64 217
 #define LINUX_SYS_set_tid_address 218
@@ -158,6 +165,8 @@
 #define LINUX_SYS_renameat2 316
 #define LINUX_SYS_getrandom 318
 #define LINUX_SYS_membarrier 324
+#define LINUX_SYS_fadvise64 221
+#define LINUX_SYS_copy_file_range 326
 #define LINUX_SYS_statx 332
 #define LINUX_SYS_rseq 334
 #define LINUX_SYS_close_range 436
@@ -357,6 +366,10 @@ struct linux_pollfd {
 #define LINUX_CLOCK_THREAD_CPUTIME_ID 3
 #define LINUX_CLOCK_REALTIME_COARSE 5
 #define LINUX_TIMER_ABSTIME 1
+#define LINUX_ITIMER_REAL 0
+#define LINUX_SIGEV_SIGNAL 0
+#define LINUX_SIGEV_NONE 1
+#define LINUX_SIGEV_THREAD_ID 4
 
 struct linux_timespec {
     int64_t sec;

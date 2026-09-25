@@ -60,7 +60,6 @@ struct saved_fpu {
 /* Shared by the process's threads (thread->process->personality_data). */
 struct linux_data {
     struct linux_sigaction actions[VX_SIGNAL_COUNT];
-    uint32_t umask;
 };
 
 /* Each thread's own (thread->personality_data). */
@@ -85,11 +84,7 @@ static bool user_range_ok(uint64_t address, uint64_t size) {
 static struct linux_data *data(void) {
     struct process *process = me();
     if (!process->personality_data) {
-        struct linux_data *d = kzalloc(sizeof(*d));
-        if (d) {
-            d->umask = 022;
-        }
-        process->personality_data = d;
+        process->personality_data = kzalloc(sizeof(struct linux_data));
     }
     return process->personality_data;
 }
@@ -571,7 +566,9 @@ static int own_descriptor(const char *path) {
 
 static int64_t dup_from(int64_t old, int64_t min, bool close_on_exec);
 
-static int64_t do_openat(int64_t dirfd, uint64_t user_path, uint64_t flags) {
+static uint32_t umask_now(void);
+
+static int64_t do_openat(int64_t dirfd, uint64_t user_path, uint64_t flags, uint64_t mode) {
     char *path;
     int64_t error = path_at(dirfd, user_path, &path);
     if (error) {
@@ -608,6 +605,9 @@ static int64_t do_openat(int64_t dirfd, uint64_t user_path, uint64_t flags) {
     if (error) {
         return lx(error);
     }
+    if (exists && (flags & LINUX_O_CREAT)) {
+        vfs_file_chmod(file, (uint32_t)mode & ~umask_now() & 07777); /* A new file. */
+    }
     uint32_t rights = (vx_flags & VX_OPEN_READ ? HANDLE_RIGHT_READ : 0) |
                       (vx_flags & (VX_OPEN_WRITE | VX_OPEN_APPEND) ? HANDLE_RIGHT_WRITE : 0);
     int fd = handle_add(me()->handles, &file->object, rights);
@@ -623,17 +623,17 @@ static int64_t do_openat(int64_t dirfd, uint64_t user_path, uint64_t flags) {
 
 static int64_t sys_open(struct interrupt_frame *f, uint64_t path, uint64_t flags, uint64_t mode,
                         uint64_t a3, uint64_t a4, uint64_t a5) {
-    return do_openat(LINUX_AT_FDCWD, path, flags);
+    return do_openat(LINUX_AT_FDCWD, path, flags, mode);
 }
 
 static int64_t sys_openat(struct interrupt_frame *f, uint64_t dirfd, uint64_t path,
                           uint64_t flags, uint64_t mode, uint64_t a4, uint64_t a5) {
-    return do_openat((int)dirfd, path, flags);
+    return do_openat((int)dirfd, path, flags, mode);
 }
 
 static int64_t sys_creat(struct interrupt_frame *f, uint64_t path, uint64_t mode, uint64_t a2,
                          uint64_t a3, uint64_t a4, uint64_t a5) {
-    return do_openat(LINUX_AT_FDCWD, path, LINUX_O_CREAT | LINUX_O_WRONLY | LINUX_O_TRUNC);
+    return do_openat(LINUX_AT_FDCWD, path, LINUX_O_CREAT | LINUX_O_WRONLY | LINUX_O_TRUNC, mode);
 }
 
 static int64_t sys_close(struct interrupt_frame *f, uint64_t fd, uint64_t a1, uint64_t a2,
@@ -834,13 +834,13 @@ static int64_t sys_pipe2(struct interrupt_frame *f, uint64_t out, uint64_t flags
 
 /* ---- File information ---- */
 
-static uint32_t mode_of(uint32_t type) {
+static uint32_t mode_of(uint32_t type, uint32_t permissions) {
     switch (type) {
-    case VX_TYPE_DIRECTORY: return LINUX_S_IFDIR | 0755;
-    case VX_TYPE_CHAR_DEVICE: return LINUX_S_IFCHR | 0666;
-    case VX_TYPE_BLOCK_DEVICE: return LINUX_S_IFBLK | 0660;
-    case VX_TYPE_SYMLINK: return LINUX_S_IFLNK | 0777;
-    default: return LINUX_S_IFREG | 0755; /* No permissions yet: everything can run. */
+    case VX_TYPE_DIRECTORY: return LINUX_S_IFDIR | permissions;
+    case VX_TYPE_CHAR_DEVICE: return LINUX_S_IFCHR | permissions;
+    case VX_TYPE_BLOCK_DEVICE: return LINUX_S_IFBLK | permissions;
+    case VX_TYPE_SYMLINK: return LINUX_S_IFLNK | permissions;
+    default: return LINUX_S_IFREG | permissions;
     }
 }
 
@@ -849,7 +849,7 @@ static void fill_stat(const struct vx_stat *vx, struct linux_stat *st) {
     st->dev = 1;
     st->ino = vx->inode;
     st->nlink = vx->links ? vx->links : 1;
-    st->mode = mode_of(vx->type);
+    st->mode = mode_of(vx->type, vx->mode);
     st->size = (int64_t)vx->size;
     st->blksize = 4096;
     st->blocks = (int64_t)((vx->size + 511) / 512);
@@ -931,7 +931,9 @@ static int64_t sys_newfstatat(struct interrupt_frame *f, uint64_t dirfd, uint64_
     return stat_path((int)dirfd, path, out, !(flags & LINUX_AT_SYMLINK_NOFOLLOW));
 }
 
-static int64_t access_at(int64_t dirfd, uint64_t user_path) {
+#define LINUX_X_OK 1
+
+static int64_t access_at(int64_t dirfd, uint64_t user_path, uint64_t mode) {
     char *path;
     int64_t error = path_at(dirfd, user_path, &path);
     if (error) {
@@ -940,17 +942,58 @@ static int64_t access_at(int64_t dirfd, uint64_t user_path) {
     struct vx_stat vx;
     error = vfs_stat(path, strlen(path), &vx);
     kfree(path);
-    return lx(error); /* No permissions yet: whatever exists may be used. */
+    if (error) {
+        return lx(error);
+    }
+    /* Everyone is root: reading and writing are always allowed, running
+     * needs an execute bit (or a directory). */
+    if ((mode & LINUX_X_OK) && vx.type != VX_TYPE_DIRECTORY && !(vx.mode & 0111)) {
+        return -LE_EACCES;
+    }
+    return 0;
 }
 
 static int64_t sys_access(struct interrupt_frame *f, uint64_t path, uint64_t mode, uint64_t a2,
                           uint64_t a3, uint64_t a4, uint64_t a5) {
-    return access_at(LINUX_AT_FDCWD, path);
+    return access_at(LINUX_AT_FDCWD, path, mode);
 }
 
 static int64_t sys_faccessat(struct interrupt_frame *f, uint64_t dirfd, uint64_t path,
                              uint64_t mode, uint64_t flags, uint64_t a4, uint64_t a5) {
-    return access_at((int)dirfd, path);
+    return access_at((int)dirfd, path, mode);
+}
+
+static int64_t chmod_at(int64_t dirfd, uint64_t user_path, uint64_t mode) {
+    char *path;
+    int64_t error = path_at(dirfd, user_path, &path);
+    if (error) {
+        return error;
+    }
+    error = lx(vfs_chmod(path, strlen(path), (uint32_t)mode & 07777));
+    kfree(path);
+    return error;
+}
+
+static int64_t sys_chmod(struct interrupt_frame *f, uint64_t path, uint64_t mode, uint64_t a2,
+                         uint64_t a3, uint64_t a4, uint64_t a5) {
+    return chmod_at(LINUX_AT_FDCWD, path, mode);
+}
+
+static int64_t sys_fchmodat(struct interrupt_frame *f, uint64_t dirfd, uint64_t path,
+                            uint64_t mode, uint64_t a3, uint64_t a4, uint64_t a5) {
+    return chmod_at((int)dirfd, path, mode);
+}
+
+static int64_t sys_fchmod(struct interrupt_frame *f, uint64_t fd, uint64_t mode, uint64_t a2,
+                          uint64_t a3, uint64_t a4, uint64_t a5) {
+    int64_t error;
+    struct file *file = get_file(fd, 0, &error);
+    if (!file) {
+        return error == -LE_ESPIPE ? 0 : error; /* Pipes have no mode to keep. */
+    }
+    error = lx(vfs_file_chmod(file, (uint32_t)mode & 07777));
+    vfs_close(file);
+    return error;
 }
 
 static int64_t readlink_at(int64_t dirfd, uint64_t user_path, uint64_t buffer, uint64_t size) {
@@ -1077,36 +1120,77 @@ static int64_t sys_getdents64(struct interrupt_frame *f, uint64_t fd, uint64_t o
     return written;
 }
 
-static int64_t sys_statfs(struct interrupt_frame *f, uint64_t path, uint64_t out, uint64_t a2,
-                          uint64_t a3, uint64_t a4, uint64_t a5) {
+/* struct statfs, from the file system holding `path`. */
+static int64_t statfs_of(const char *path, uint64_t out) {
+    uint64_t total, free;
+    const char *fs;
+    int error = vfs_statfs(path, strlen(path), &total, &free, &fs);
+    if (error) {
+        return lx(error);
+    }
     uint64_t st[15] = {0};
-    st[1] = 4096; /* f_bsize */
-    st[9] = 255;  /* f_namelen */
-    st[10] = 4096; /* f_frsize */
+    st[0] = strcmp(fs, "ext2") == 0    ? 0xef53     /* f_type: Linux's magic numbers */
+            : strcmp(fs, "proc") == 0  ? 0x9fa0
+            : strcmp(fs, "devfs") == 0 ? 0x1373
+                                       : 0x01021994; /* tmpfs */
+    st[1] = 4096;               /* f_bsize */
+    st[2] = total / 4096;       /* f_blocks */
+    st[3] = st[4] = free / 4096; /* f_bfree, f_bavail */
+    st[5] = st[2];              /* f_files: no inode limit to speak of */
+    st[6] = st[3];              /* f_ffree */
+    st[9] = 255;                /* f_namelen */
+    st[10] = 4096;              /* f_frsize */
     return copy_to_user(out, st, sizeof(st)) ? 0 : -LE_EFAULT;
+}
+
+static int64_t sys_statfs(struct interrupt_frame *f, uint64_t user_path, uint64_t out,
+                          uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5) {
+    char *path;
+    int64_t error = path_at(LINUX_AT_FDCWD, user_path, &path);
+    if (error) {
+        return error;
+    }
+    error = statfs_of(path, out);
+    kfree(path);
+    return error;
+}
+
+static int64_t sys_fstatfs(struct interrupt_frame *f, uint64_t fd, uint64_t out, uint64_t a2,
+                           uint64_t a3, uint64_t a4, uint64_t a5) {
+    int64_t error;
+    struct file *file = get_file(fd, 0, &error);
+    if (!file) {
+        return error == -LE_ESPIPE ? statfs_of("/dev", out) : error;
+    }
+    error = file->path ? statfs_of(file->path, out) : -LE_EINVAL;
+    vfs_close(file);
+    return error;
 }
 
 /* ---- Changing files and directories ---- */
 
-static int64_t path_op(int64_t dirfd, uint64_t user_path, int (*fn)(const char *, size_t)) {
+static int64_t mkdir_at(int64_t dirfd, uint64_t user_path, uint64_t mode) {
     char *path;
     int64_t error = path_at(dirfd, user_path, &path);
     if (error) {
         return error;
     }
-    error = fn(path, strlen(path));
+    error = lx(vfs_mkdir(path, strlen(path)));
+    if (!error) {
+        vfs_chmod(path, strlen(path), (uint32_t)mode & ~umask_now() & 07777);
+    }
     kfree(path);
-    return lx(error);
+    return error;
 }
 
 static int64_t sys_mkdir(struct interrupt_frame *f, uint64_t path, uint64_t mode, uint64_t a2,
                          uint64_t a3, uint64_t a4, uint64_t a5) {
-    return path_op(LINUX_AT_FDCWD, path, vfs_mkdir);
+    return mkdir_at(LINUX_AT_FDCWD, path, mode);
 }
 
 static int64_t sys_mkdirat(struct interrupt_frame *f, uint64_t dirfd, uint64_t path,
                            uint64_t mode, uint64_t a3, uint64_t a4, uint64_t a5) {
-    return path_op((int)dirfd, path, vfs_mkdir);
+    return mkdir_at((int)dirfd, path, mode);
 }
 
 /* unlink refuses directories and rmdir refuses files, as on Linux. */
@@ -1271,14 +1355,14 @@ static int64_t sys_getcwd(struct interrupt_frame *f, uint64_t buffer, uint64_t s
     return copy_to_user(buffer, cwd, length) ? (int64_t)length : -LE_EFAULT;
 }
 
+static uint32_t umask_now(void) {
+    return me()->umask;
+}
+
 static int64_t sys_umask(struct interrupt_frame *f, uint64_t mask, uint64_t a1, uint64_t a2,
                          uint64_t a3, uint64_t a4, uint64_t a5) {
-    struct linux_data *d = data();
-    if (!d) {
-        return -LE_ENOMEM;
-    }
-    uint32_t old = d->umask;
-    d->umask = mask & 0777;
+    uint32_t old = me()->umask;
+    me()->umask = mask & 0777;
     return old;
 }
 
@@ -1867,6 +1951,11 @@ static int64_t sys_execve(struct interrupt_frame *f, uint64_t user_path, uint64_
     if (error) {
         return error;
     }
+    struct vx_stat vx;
+    if (vfs_stat(path, strlen(path), &vx) == 0 && vx.type == VX_TYPE_FILE && !(vx.mode & 0111)) {
+        kfree(path);
+        return -LE_EACCES; /* Not marked executable. */
+    }
     size_t budget = MAX_EXEC_BYTES, argc = 0, envc = 0;
     char **args = NULL, **env = NULL;
     error = copy_string_array(argv, &args, &argc, &budget);
@@ -2252,9 +2341,216 @@ static int64_t sys_clock_nanosleep(struct interrupt_frame *f, uint64_t clock, ui
     return sleep_ms(ms, remaining);
 }
 
+/* ---- Timers that send signals ---- */
+
 static int64_t sys_alarm(struct interrupt_frame *f, uint64_t seconds, uint64_t a1, uint64_t a2,
                          uint64_t a3, uint64_t a4, uint64_t a5) {
-    return 0; /* Timers that send signals come later. */
+    struct process_timer *timer = &me()->timers[0];
+    uint64_t left = process_timer_left(timer, NULL);
+    process_timer_set(timer, me(), VX_SIGALRM, (seconds & 0xffffffff) * 1000, 0);
+    return (int64_t)((left + 999) / 1000);
+}
+
+static uint64_t timeval_to_ms(const struct linux_timeval *tv) {
+    return tv->sec < 0 ? 0 : (uint64_t)tv->sec * 1000 + (uint64_t)(tv->usec + 999) / 1000;
+}
+
+static struct linux_timeval ms_to_timeval(uint64_t ms) {
+    return (struct linux_timeval){(int64_t)(ms / 1000), (int64_t)(ms % 1000) * 1000};
+}
+
+static int64_t sys_getitimer(struct interrupt_frame *f, uint64_t which, uint64_t out,
+                             uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5) {
+    struct linux_timeval value[2] = {{0, 0}, {0, 0}}; /* it_interval, it_value */
+    if (which == LINUX_ITIMER_REAL) {
+        uint64_t interval;
+        uint64_t left = process_timer_left(&me()->timers[0], &interval);
+        value[0] = ms_to_timeval(interval);
+        value[1] = ms_to_timeval(left);
+    }
+    return copy_to_user(out, value, sizeof(value)) ? 0 : -LE_EFAULT;
+}
+
+static int64_t sys_setitimer(struct interrupt_frame *f, uint64_t which, uint64_t new_value,
+                             uint64_t old_value, uint64_t a3, uint64_t a4, uint64_t a5) {
+    if (old_value) {
+        int64_t error = sys_getitimer(f, which, old_value, 0, 0, 0, 0);
+        if (error) {
+            return error;
+        }
+    }
+    if (which != LINUX_ITIMER_REAL) {
+        return which <= 2 ? 0 : -LE_EINVAL; /* CPU-time timers aren't kept yet. */
+    }
+    struct linux_timeval value[2];
+    if (!new_value) {
+        return 0;
+    }
+    if (!copy_from_user(value, new_value, sizeof(value))) {
+        return -LE_EFAULT;
+    }
+    process_timer_set(&me()->timers[0], me(), VX_SIGALRM, timeval_to_ms(&value[1]),
+                      timeval_to_ms(&value[0]));
+    return 0;
+}
+
+static int64_t sys_timer_create(struct interrupt_frame *f, uint64_t clock, uint64_t user_event,
+                                uint64_t id_out, uint64_t a3, uint64_t a4, uint64_t a5) {
+    int signal = VX_SIGALRM;
+    if (user_event) {
+        struct {
+            uint64_t value;
+            int32_t signo;
+            int32_t notify;
+        } event;
+        if (!copy_from_user(&event, user_event, sizeof(event))) {
+            return -LE_EFAULT;
+        }
+        if (event.notify == LINUX_SIGEV_NONE) {
+            signal = 0;
+        } else if (event.notify == LINUX_SIGEV_SIGNAL || event.notify == LINUX_SIGEV_THREAD_ID) {
+            if (event.signo < 1 || event.signo > VX_SIGNAL_COUNT) {
+                return -LE_EINVAL;
+            }
+            signal = event.signo;
+        } else {
+            return -LE_EINVAL;
+        }
+    }
+    struct process *process = me();
+    for (int i = 1; i < PROCESS_TIMERS; i++) {
+        struct process_timer *timer = &process->timers[i];
+        if (!__atomic_exchange_n(&timer->in_use, true, __ATOMIC_SEQ_CST)) {
+            timer->signal = signal;
+            timer->clock = (int)clock;
+            timer->process = process;
+            int id = i;
+            if (!copy_to_user(id_out, &id, sizeof(id))) {
+                timer->in_use = false;
+                return -LE_EFAULT;
+            }
+            return 0;
+        }
+    }
+    return -LE_EAGAIN;
+}
+
+static struct process_timer *timer_by_id(uint64_t id) {
+    struct process *process = me();
+    return id >= 1 && id < PROCESS_TIMERS && process->timers[id].in_use ? &process->timers[id]
+                                                                         : NULL;
+}
+
+static int64_t sys_timer_gettime(struct interrupt_frame *f, uint64_t id, uint64_t out,
+                                 uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5) {
+    struct process_timer *timer = timer_by_id(id);
+    if (!timer) {
+        return -LE_EINVAL;
+    }
+    uint64_t interval;
+    uint64_t left = process_timer_left(timer, &interval);
+    struct linux_timespec spec[2] = {
+        {(int64_t)(interval / 1000), (int64_t)(interval % 1000) * 1000000},
+        {(int64_t)(left / 1000), (int64_t)(left % 1000) * 1000000},
+    };
+    return copy_to_user(out, spec, sizeof(spec)) ? 0 : -LE_EFAULT;
+}
+
+static int64_t sys_timer_settime(struct interrupt_frame *f, uint64_t id, uint64_t flags,
+                                 uint64_t new_value, uint64_t old_value, uint64_t a4,
+                                 uint64_t a5) {
+    struct process_timer *timer = timer_by_id(id);
+    if (!timer) {
+        return -LE_EINVAL;
+    }
+    if (old_value) {
+        int64_t error = sys_timer_gettime(f, id, old_value, 0, 0, 0, 0);
+        if (error) {
+            return error;
+        }
+    }
+    struct linux_timespec spec[2];
+    if (!copy_from_user(spec, new_value, sizeof(spec))) {
+        return -LE_EFAULT;
+    }
+    int64_t interval = spec[0].sec * 1000 + (spec[0].nsec + 999999) / 1000000;
+    int64_t value = spec[1].sec * 1000 + (spec[1].nsec + 999999) / 1000000;
+    if ((flags & LINUX_TIMER_ABSTIME) && value > 0) {
+        struct linux_timespec now;
+        if (timer->clock == LINUX_CLOCK_REALTIME) {
+            realtime(&now);
+        } else {
+            now.sec = (int64_t)(timer_ms() / 1000);
+            now.nsec = (int64_t)(timer_ms() % 1000) * 1000000;
+        }
+        value -= now.sec * 1000 + now.nsec / 1000000;
+        if (value <= 0) {
+            value = 1; /* Already due: fire at the next tick. */
+        }
+    }
+    process_timer_set(timer, me(), timer->signal, value > 0 ? (uint64_t)value : 0,
+                      interval > 0 ? (uint64_t)interval : 0);
+    return 0;
+}
+
+static int64_t sys_timer_delete(struct interrupt_frame *f, uint64_t id, uint64_t a1,
+                                uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5) {
+    struct process_timer *timer = timer_by_id(id);
+    if (!timer) {
+        return -LE_EINVAL;
+    }
+    process_timer_set(timer, me(), 0, 0, 0);
+    timer->in_use = false;
+    return 0;
+}
+
+/* Waits for one of the signals in `set` (normally blocked) and takes it
+ * without running a handler. Returns its number. */
+static int64_t sys_rt_sigtimedwait(struct interrupt_frame *f, uint64_t user_set,
+                                   uint64_t user_info, uint64_t user_timeout, uint64_t size,
+                                   uint64_t a4, uint64_t a5) {
+    uint64_t set;
+    if (size != sizeof(uint64_t) || !copy_from_user(&set, user_set, sizeof(set))) {
+        return size != sizeof(uint64_t) ? -LE_EINVAL : -LE_EFAULT;
+    }
+    int64_t timeout_ms;
+    int64_t error = timespec_ms(user_timeout, &timeout_ms);
+    if (error) {
+        return error;
+    }
+    set &= ~UNBLOCKABLE;
+    struct thread *thread = thread_current();
+    struct process *process = me();
+    uint64_t start = timer_ms();
+    for (;;) {
+        /* Take a waited-for signal: the thread's own first, then the process's. */
+        uint64_t *sets[2] = {&thread->pending_signals, &process->pending_signals};
+        for (int i = 0; i < 2; i++) {
+            uint64_t pending = __atomic_load_n(sets[i], __ATOMIC_ACQUIRE) & set;
+            if (pending) {
+                int signal = __builtin_ctzll(pending) + 1;
+                __atomic_and_fetch(sets[i], ~BIT(signal), __ATOMIC_SEQ_CST);
+                if (user_info) {
+                    struct linux_siginfo info;
+                    memset(&info, 0, sizeof(info));
+                    info.signo = signal;
+                    info.code = LINUX_SI_KERNEL;
+                    copy_to_user(user_info, &info, sizeof(info));
+                }
+                return signal;
+            }
+        }
+        if (thread_signal_pending(thread)) {
+            return -LE_EINTR; /* Something else arrived: a handler or an exit. */
+        }
+        uint64_t waited = timer_ms() - start;
+        if (timeout_ms >= 0 && waited >= (uint64_t)timeout_ms) {
+            return -LE_EAGAIN;
+        }
+        thread_sleep_ms_interruptible(timeout_ms >= 0 && (uint64_t)timeout_ms - waited < 10
+                                          ? (uint64_t)timeout_ms - waited
+                                          : 10);
+    }
 }
 
 /* ---- System information ---- */
@@ -2605,7 +2901,14 @@ static const linux_fn syscalls[] = {
     CALL(pause, sys_pause),
     CALL(nanosleep, sys_nanosleep),
     CALL(alarm, sys_alarm),
-    CALL(setitimer, sys_accept_quietly),
+    CALL(setitimer, sys_setitimer),
+    CALL(getitimer, sys_getitimer),
+    CALL(timer_create, sys_timer_create),
+    CALL(timer_settime, sys_timer_settime),
+    CALL(timer_gettime, sys_timer_gettime),
+    CALL(timer_getoverrun, sys_zero),
+    CALL(timer_delete, sys_timer_delete),
+    CALL(rt_sigtimedwait, sys_rt_sigtimedwait),
     CALL(getpid, sys_getpid),
     CALL(sendfile, sys_sendfile),
     CALL(socket, sys_no_such_call_quietly),
@@ -2636,8 +2939,8 @@ static const linux_fn syscalls[] = {
     CALL(unlink, sys_unlink),
     CALL(symlink, sys_symlink),
     CALL(readlink, sys_readlink),
-    CALL(chmod, sys_accept_quietly),
-    CALL(fchmod, sys_accept_quietly),
+    CALL(chmod, sys_chmod),
+    CALL(fchmod, sys_fchmod),
     CALL(chown, sys_accept_quietly),
     CALL(fchown, sys_accept_quietly),
     CALL(lchown, sys_accept_quietly),
@@ -2674,7 +2977,7 @@ static const linux_fn syscalls[] = {
     CALL(mknod, sys_not_permitted),
     CALL(personality, sys_zero),
     CALL(statfs, sys_statfs),
-    CALL(fstatfs, sys_statfs),
+    CALL(fstatfs, sys_fstatfs),
     CALL(getpriority, sys_zero),
     CALL(setpriority, sys_zero),
     CALL(prctl, sys_prctl),
@@ -2709,7 +3012,7 @@ static const linux_fn syscalls[] = {
     CALL(linkat, sys_not_permitted),
     CALL(symlinkat, sys_symlinkat),
     CALL(readlinkat, sys_readlinkat),
-    CALL(fchmodat, sys_accept_quietly),
+    CALL(fchmodat, sys_fchmodat),
     CALL(faccessat, sys_faccessat),
     CALL(pselect6, sys_pselect6),
     CALL(ppoll, sys_ppoll),
@@ -2721,6 +3024,8 @@ static const linux_fn syscalls[] = {
     CALL(renameat2, sys_renameat2),
     CALL(getrandom, sys_getrandom),
     CALL(membarrier, sys_no_such_call_quietly),
+    CALL(fadvise64, sys_accept_quietly),
+    CALL(copy_file_range, sys_no_such_call_quietly),
     CALL(statx, sys_no_such_call_quietly),
     CALL(rseq, sys_no_such_call_quietly),
     CALL(close_range, sys_close_range),

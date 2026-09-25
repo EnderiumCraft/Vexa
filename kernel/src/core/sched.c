@@ -35,6 +35,7 @@ void arch_prepare_switch(struct cpu *cpu, struct thread *prev, struct thread *ne
 static struct spinlock sched_lock = SPINLOCK_INIT;
 static struct thread *run_head, *run_tail;
 static struct thread *sleepers;
+static struct process_timer *armed_timers; /* Under sched_lock. */
 static struct thread *all_threads;
 static uint32_t next_thread_id;
 static volatile bool running;
@@ -487,6 +488,84 @@ void wait_queue_wake_all(struct wait_queue *queue) {
     spin_unlock_irqrestore(&sched_lock, flags);
 }
 
+static void unlink_timer(struct process_timer *timer) {
+    for (struct process_timer **link = &armed_timers; *link; link = &(*link)->next) {
+        if (*link == timer) {
+            *link = timer->next;
+            break;
+        }
+    }
+    timer->armed = false;
+}
+
+void process_timer_set(struct process_timer *timer, struct process *process, int signal,
+                       uint64_t value_ms, uint64_t interval_ms) {
+    uint64_t flags = spin_lock_irqsave(&sched_lock);
+    if (timer->armed) {
+        unlink_timer(timer);
+    }
+    timer->process = process;
+    timer->signal = signal;
+    timer->interval = interval_ms;
+    if (value_ms) {
+        timer->deadline = timer_ms() + value_ms;
+        timer->armed = true;
+        timer->next = armed_timers;
+        armed_timers = timer;
+    }
+    spin_unlock_irqrestore(&sched_lock, flags);
+}
+
+uint64_t process_timer_left(struct process_timer *timer, uint64_t *interval_ms) {
+    uint64_t flags = spin_lock_irqsave(&sched_lock);
+    uint64_t now = timer_ms();
+    uint64_t left = timer->armed ? (timer->deadline > now ? timer->deadline - now : 1) : 0;
+    if (interval_ms) {
+        *interval_ms = timer->interval;
+    }
+    spin_unlock_irqrestore(&sched_lock, flags);
+    return left;
+}
+
+void process_timers_cancel_locked(struct process *process, bool keep_alarm) {
+    for (int i = keep_alarm ? 1 : 0; i < PROCESS_TIMERS; i++) {
+        if (process->timers[i].armed) {
+            unlink_timer(&process->timers[i]);
+        }
+        if (i > 0) {
+            process->timers[i].in_use = false;
+        }
+    }
+}
+
+void process_timers_cancel(struct process *process, bool keep_alarm) {
+    uint64_t flags = spin_lock_irqsave(&sched_lock);
+    process_timers_cancel_locked(process, keep_alarm);
+    spin_unlock_irqrestore(&sched_lock, flags);
+}
+
+static void fire_timers(uint64_t now) {
+    for (struct process_timer **link = &armed_timers; *link;) {
+        struct process_timer *timer = *link;
+        if (timer->deadline > now) {
+            link = &timer->next;
+            continue;
+        }
+        if (timer->signal) {
+            signal_send_locked(timer->process, timer->signal);
+        }
+        if (timer->interval) {
+            while (timer->deadline <= now) {
+                timer->deadline += timer->interval;
+            }
+            link = &timer->next;
+        } else {
+            *link = timer->next;
+            timer->armed = false;
+        }
+    }
+}
+
 void sched_tick(void) {
     if (!running) {
         return;
@@ -501,6 +580,12 @@ void sched_tick(void) {
         cpu->idle_ticks++;
     } else {
         cpu->busy_ticks++;
+    }
+
+    if (cpu->id == 0 && armed_timers) {
+        uint64_t flags = spin_lock_irqsave(&sched_lock);
+        fire_timers(timer_ms());
+        spin_unlock_irqrestore(&sched_lock, flags);
     }
 
     if (cpu->id == 0 && sleepers) {

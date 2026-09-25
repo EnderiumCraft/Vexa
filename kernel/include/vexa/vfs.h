@@ -38,6 +38,11 @@ struct vnode_ops {
     int64_t (*read)(struct vnode *vnode, void *buffer, size_t size, uint64_t offset);
     int64_t (*write)(struct vnode *vnode, const void *buffer, size_t size, uint64_t offset);
     int (*truncate)(struct vnode *vnode, uint64_t size);
+    /* Stores new permission bits (vnode->mode is already updated). Optional:
+     * file systems without it keep modes in memory only. */
+    int (*set_mode)(struct vnode *vnode);
+    /* Optional: sizes for statfs, in bytes. */
+    void (*statfs)(struct mount *mount, uint64_t *total, uint64_t *free);
     /* The last reference is gone. */
     void (*release)(struct vnode *vnode);
 };
@@ -48,6 +53,7 @@ struct vnode {
     uint64_t inode;
     uint64_t size;
     uint32_t links;
+    uint32_t mode; /* Permission bits (07777). */
     int64_t modified;
     const struct vnode_ops *ops;
     struct mount *mount;        /* The file system this vnode belongs to. */
@@ -107,6 +113,12 @@ int vfs_symlink(const char *target, const char *path, size_t length);
 /* Copies a link's target (not NUL-terminated); returns its length, or
  * -VX_EINVAL if `path` isn't a symbolic link. */
 int vfs_readlink(const char *path, size_t length, char *buffer, size_t size);
+/* Changes permission bits (07777). */
+int vfs_chmod(const char *path, size_t length, uint32_t mode);
+int vfs_file_chmod(struct file *file, uint32_t mode);
+/* Total and free bytes of the file system holding `path` (0 if unknown). */
+int vfs_statfs(const char *path, size_t length, uint64_t *total, uint64_t *free,
+               const char **fs_name);
 int vfs_mkdir(const char *path, size_t length);
 int vfs_remove(const char *path, size_t length);
 int vfs_rename(const char *from, size_t from_length, const char *to, size_t to_length);

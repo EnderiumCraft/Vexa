@@ -80,6 +80,14 @@ BASH_TARBALL := third_party/bash-$(BASH_VERSION).tar.xz
 BASH_BUILD := $(BUILD)/bash-$(BASH_VERSION)
 BASH := $(BASH_BUILD)/bash
 
+# GNU coreutils: one binary, with a link per command (instead of BusyBox's).
+COREUTILS_VERSION := 9.4
+COREUTILS_URL := https://archive.ubuntu.com/ubuntu/pool/main/c/coreutils/coreutils_$(COREUTILS_VERSION).orig.tar.xz
+COREUTILS_SHA256 := ea613a4cf44612326e917201bbbcdfbd301de21ffc3b59b6e5c07e040b275e52
+COREUTILS_TARBALL := third_party/coreutils-$(COREUTILS_VERSION).tar.xz
+COREUTILS_BUILD := $(BUILD)/coreutils-$(COREUTILS_VERSION)
+COREUTILS := $(COREUTILS_BUILD)/src/coreutils
+
 # Everything under /linux: the Linux programs and what they need.
 LINUX_ROOT := $(BUILD)/linux-root
 ifeq ($(LINUX_COMPAT),1)
@@ -97,7 +105,7 @@ USER_OBJS := $(LIBVEXA_OBJS) \
 	$(patsubst %,$(BUILD)/%.o,$(wildcard $(addsuffix /*.c,$(addprefix userland/,$(PROGRAMS)))))
 
 .PHONY: all kernel programs iso run run-disk run-nographic test test-disks clean distclean \
-	busybox busybox-source bash test-native
+	busybox busybox-source bash coreutils test-native
 
 all: iso
 kernel: $(KERNEL)
@@ -198,6 +206,28 @@ $(BASH): $(BASH_TARBALL)
 
 bash: $(BASH)
 
+# ---- coreutils ----
+
+$(COREUTILS_TARBALL):
+	mkdir -p $(dir $@)
+	curl -fsSL -o $@.part $(COREUTILS_URL)
+	echo "$(COREUTILS_SHA256)  $@.part" | sha256sum -c --quiet
+	mv $@.part $@
+
+$(COREUTILS): $(COREUTILS_TARBALL)
+	rm -rf $(COREUTILS_BUILD) && mkdir -p $(BUILD)
+	tar -xJf $(COREUTILS_TARBALL) -C $(BUILD)
+	cd $(COREUTILS_BUILD) && FORCE_UNSAFE_CONFIGURE=1 ./configure CC=$(MUSL_CC) --prefix=/usr \
+		--disable-nls --enable-single-binary=symlinks --without-selinux --disable-acl \
+		--disable-xattr --without-libgmp --without-openssl \
+		--enable-no-install-program=stdbuf > configure.log
+	$(MAKE) -C $(COREUTILS_BUILD) > $(COREUTILS_BUILD)/build.log
+	strip $@
+	./$@ --help | sed -n '/Built-in programs/,/^$$/p' | tail -n +2 | tr ' ' '\n' | \
+		grep -v '^$$' | sed 's/^ginstall$$/install/' > $(COREUTILS_BUILD)/programs.txt
+
+coreutils: $(COREUTILS)
+
 # ---- /linux ----
 
 # Linux test programs (tests/linux/), built with musl like the rest of /linux.
@@ -207,9 +237,11 @@ $(BUILD)/linux-tests/%: tests/linux/%.c
 	@mkdir -p $(dir $@)
 	$(MUSL_CC) -O2 -Wall -Wextra -Werror -pthread $< -o $@
 
-$(LINUX_ROOT)/.done: $(BUSYBOX) $(BASH) $(MUSL_LIBC) $(LINUX_TESTS) tools/make-linux-root.sh
+$(LINUX_ROOT)/.done: $(BUSYBOX) $(BASH) $(COREUTILS) $(MUSL_LIBC) $(LINUX_TESTS) \
+		tools/make-linux-root.sh
 	tools/make-linux-root.sh $(LINUX_ROOT) $(MUSL_LIBC) $(BUSYBOX) \
-		$(BUSYBOX_BUILD)/busybox.links $(BASH) $(LINUX_TESTS)
+		$(BUSYBOX_BUILD)/busybox.links $(BASH) $(COREUTILS) $(COREUTILS_BUILD)/programs.txt \
+		$(LINUX_TESTS)
 	touch $@
 
 $(BUILD)/disk-content: $(DISK_CONTENT_FILES) $(BUILD)/programs/hello-world
@@ -297,6 +329,6 @@ clean:
 	rm -rf $(BUILD)
 
 distclean: clean
-	rm -rf limine $(BUSYBOX_SRC) $(BASH_TARBALL)
+	rm -rf limine $(BUSYBOX_SRC) $(BASH_TARBALL) $(COREUTILS_TARBALL)
 
 -include $(OBJS:.o=.d) $(USER_OBJS:.o=.d)

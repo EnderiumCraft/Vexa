@@ -122,10 +122,14 @@ LINUX_COMMANDS = [
     # Dynamically linked programs (musl's loader), /proc, scripts, bash.
     ("busybox free", "Swap:", 20),
     ("busybox printf '#!/bin/sh\\necho script says $1\\n' > /tmp/s.sh", None, 20),
-    ("/tmp/s.sh hi", "script says hi", 20),
+    ("chmod +x /tmp/s.sh ; /tmp/s.sh hi", "script says hi", 20),
     ("bash -c 'echo bash $BASH_VERSION'", "bash 5.2", 20),
     ("bash -c 'f() { echo fn $1 ; } ; a=(x y z) ; f ${a[2]}'", "fn z", 20),
     ("bash -c 'cat <(echo substituted) | wc -c | sed s/^/count:/'", "count:12", 20),
+    # GNU coreutils; POSIX timers (timeout), statfs (df), permissions.
+    ("ls --version", "(GNU coreutils)", 20),
+    ("timeout 1 sleep 5 ; echo timeout-status $?", "timeout-status 124", 20),
+    ("df /", "tmpfs", 20),
     # Linux threads (musl's pthreads): clone, futex, thread-local storage, tgkill.
     ("pthread-test", "pthread-test: passed", 60),
     ("pthread-test exit", "exiting while threads spin", 30),

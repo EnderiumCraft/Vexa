@@ -6,3 +6,4 @@
 __pycache__/
 /third_party/busybox/
 /third_party/bash-*.tar.xz
+/third_party/*.tar.xz

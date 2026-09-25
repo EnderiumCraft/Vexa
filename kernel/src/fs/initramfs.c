@@ -91,6 +91,7 @@ int initramfs_unpack(const void *data, size_t size) {
                 if (error && error != -VX_EEXIST) {
                     kprintf("[initramfs] mkdir failed: %s\n", vfs_error_name(error));
                 }
+                vfs_chmod(name, length, (uint32_t)parse_octal(header->mode, sizeof(header->mode)));
                 directories++;
             } else if (header->type == '2') {
                 char target[sizeof(header->link_name) + 1];
@@ -113,6 +114,7 @@ int initramfs_unpack(const void *data, size_t size) {
                         kprintf("[initramfs] could not write a file (%s)\n",
                                 written < 0 ? vfs_error_name((int)written) : "short write");
                     }
+                    vfs_file_chmod(file, (uint32_t)parse_octal(header->mode, sizeof(header->mode)));
                     vfs_close(file);
                     files++;
                 } else {

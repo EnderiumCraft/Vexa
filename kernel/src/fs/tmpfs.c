@@ -287,6 +287,12 @@ static void tmpfs_release(struct vnode *vnode) {
     kfree(node);
 }
 
+static void tmpfs_statfs(struct mount *mount, uint64_t *total, uint64_t *free) {
+    (void)mount;
+    *total = pmm_total_pages() * PAGE_SIZE; /* tmpfs shares the machine's memory. */
+    *free = pmm_free_pages() * PAGE_SIZE;
+}
+
 static const struct vnode_ops tmpfs_ops = {
     .lookup = tmpfs_lookup,
     .create = tmpfs_create,
@@ -297,6 +303,7 @@ static const struct vnode_ops tmpfs_ops = {
     .write = tmpfs_write,
     .truncate = tmpfs_truncate,
     .release = tmpfs_release,
+    .statfs = tmpfs_statfs,
 };
 
 static int tmpfs_mount(struct mount *mount, struct block_device *device) {

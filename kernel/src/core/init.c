@@ -82,6 +82,7 @@ void init_thread(void *unused) {
     must(vfs_mount("proc", NULL, "proc", "/proc"), "mounting /proc");
     vfs_mkdir("/mnt", 4);
     vfs_mkdir("/tmp", 4);
+    vfs_chmod("/tmp", 4, 01777);
 
     storage_init();
 
