@@ -121,6 +121,10 @@ long vx_wake_address(volatile unsigned *address, long count) {
     return syscall2(VX_SYS_WAKE_ADDRESS, address, count);
 }
 
+long vx_protect(void *address, size_t size, unsigned flags) {
+    return syscall3(VX_SYS_PROTECT, address, size, flags);
+}
+
 long vx_chdir(const char *path) {
     return syscall2(VX_SYS_CHDIR, path, strlen(path));
 }

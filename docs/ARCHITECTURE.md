@@ -63,6 +63,14 @@ set of objects. `libvexa` wraps it in C functions and provides the standard C li
 on top, so ordinary C code still compiles for Vexa. The interface can change freely until
 Vexa 1.0; only `libvexa` has to keep up.
 
+Native programs are position-independent executables linked against `libvexa.so`.
+Their `PT_INTERP` names Vexa's own dynamic loader, `/lib/vexa-ld.so` (`libvexa/ld/`):
+the kernel maps the program and the loader, the loader relocates itself, reads the
+libraries the program needs from `/lib`, binds symbols (the program's first), sets page
+permissions with `vx_protect`, and jumps to the program. Each program still carries
+`crt0` (its entry point and the `.note.vexa` note); `hello-world` stays statically
+linked, so both kinds keep being tested.
+
 ### Linux subsystem
 
 `personality/linux/` translates Linux x86_64 system calls into core operations. File

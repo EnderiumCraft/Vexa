@@ -143,7 +143,8 @@ Linux track:
       the Linux subsystem builds `futex` on it). Several threads per process on every
       CPU, per-thread signals, exit of one thread or all, exec from a threaded process,
       and TLB shootdowns between CPUs (0.9.0)
-- [ ] Shared libraries for native programs (`libvexa.so` and Vexa's own dynamic loader)
+- [x] Shared libraries for native programs: `libvexa.so` and Vexa's own dynamic loader,
+      `/lib/vexa-ld.so`; native programs are position-independent and use them (0.10.0)
 - [x] Linux: the musl dynamic loader (`PT_INTERP`, `AT_BASE`), and Linux programs'
       files under `/linux` (tried first, like FreeBSD's Linux emulation)
 - [x] Symbolic links (tmpfs, ext2, initramfs, both system call interfaces), `#!`
@@ -155,11 +156,15 @@ Linux track:
 - [x] Linux: `clone` for threads (TLS, parent/child tid), `set_tid_address` clearing,
       `futex` (wait, wake, bitsets, requeue), `gettid`, `tgkill`: musl's pthreads work
       (0.9.0); robust futex lists are accepted but not acted on yet
-- [ ] Linux: more software: coreutils, python3
-- [ ] Moved here from Phase 5: timers that send signals (`alarm`), non-blocking I/O,
-      file permissions; file-backed memory that's shared rather than copied
+- [x] Linux: more software: GNU coreutils 9.4 and Python 3.12 (with zlib, libffi/ctypes,
+      threads, `subprocess`, `multiprocessing`), built from source (0.10.0)
+- [x] Moved here from Phase 5: timers that send signals (`alarm`, `setitimer`,
+      `timer_create`), file permissions and the umask, hard links, `statfs`, and
+      `MAP_SHARED` memory that's shared rather than copied (0.10.0); non-blocking I/O
+      moves on to Phase 7, with sockets
 
-**Milestone:** multithreaded programs run on both tracks, including Python.
+**Milestone:** multithreaded programs run on both tracks, including Python. Reached in
+0.10.0.
 
 ## Phase 7: Networking
 

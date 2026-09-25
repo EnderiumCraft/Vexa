@@ -58,6 +58,8 @@ TYPED_COMMANDS = [
     ("cat /etc/motd", "Welcome to Vexa", 10, 2),
     ("ln -s /etc/motd /tmp/motd-link ; cat /tmp/motd-link", "Welcome to Vexa", 10, 3),
     ("ls /proc", "meminfo", 10),
+    # Native programs use libvexa.so through /lib/vexa-ld.so.
+    ("ls /lib", "vexa-ld.so", 10),
     ("cat /proc/self/status", "Name:\tcat", 10),
     # Pipes, redirection and variables.
     ("echo one two | cat | cat", "one two", 10, 2),
@@ -127,8 +129,8 @@ LINUX_COMMANDS = [
     ("bash -c 'f() { echo fn $1 ; } ; a=(x y z) ; f ${a[2]}'", "fn z", 20),
     ("bash -c 'cat <(echo substituted) | wc -c | sed s/^/count:/'", "count:12", 20),
     # GNU coreutils; POSIX timers (timeout), statfs (df), permissions.
-    ("ls --version", "(GNU coreutils)", 20),
-    ("timeout 1 sleep 5 ; echo timeout-status $?", "timeout-status 124", 20),
+    ("/linux/bin/ls --version", "(GNU coreutils)", 20),
+    ("bash -c 'timeout 1 sleep 5 ; echo timeout-status $?'", "timeout-status 124", 20),
     ("df /", "tmpfs", 20),
     # Python 3: threads, subprocess, multiprocessing, shared memory, signals...
     ("python-test.py", "python-test: passed", 300),

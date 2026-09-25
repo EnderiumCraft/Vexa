@@ -1,11 +1,13 @@
-/* Program entry point. The kernel starts us with rsp pointing at argc, then
- * argv[], NULL, envp[], NULL (the System V layout). __libvexa_start does the
- * rest in C. */
+/* Program entry point, linked into every program (also those that use
+ * libvexa.so). The kernel, or the dynamic loader, starts us with rsp pointing
+ * at argc, then argv[], NULL, envp[], NULL (the System V layout).
+ * __libvexa_start(stack, main) does the rest in C. */
 .text
 .globl _start
 _start:
     xorl %ebp, %ebp
     movq %rsp, %rdi
+    leaq main(%rip), %rsi
     andq $-16, %rsp
     call __libvexa_start
     ud2

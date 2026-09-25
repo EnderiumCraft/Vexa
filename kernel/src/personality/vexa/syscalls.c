@@ -615,6 +615,15 @@ static int64_t sys_unmap(uint64_t address, uint64_t size, uint64_t a2, uint64_t 
     return vm_unmap(me()->address_space, address, size);
 }
 
+static int64_t sys_protect(uint64_t address, uint64_t size, uint64_t flags, uint64_t a3) {
+    (void)a3;
+    if (address % PAGE_SIZE || flags & ~(uint64_t)(VX_MAP_WRITE | VX_MAP_EXEC)) {
+        return -VX_EINVAL;
+    }
+    unsigned vm_flags = (flags & VX_MAP_WRITE ? VM_WRITE : 0) | (flags & VX_MAP_EXEC ? VM_EXEC : 0);
+    return vm_protect(me()->address_space, address, size, vm_flags);
+}
+
 static int64_t sys_kill(uint64_t id, uint64_t signal, uint64_t a2, uint64_t a3) {
     (void)a2, (void)a3;
     if (signal > VX_SIGNAL_COUNT) {
@@ -795,6 +804,7 @@ static const syscall_fn syscalls[] = {
     [VX_SYS_THREAD_ID] = sys_thread_id,
     [VX_SYS_WAIT_ADDRESS] = sys_wait_address,
     [VX_SYS_WAKE_ADDRESS] = sys_wake_address,
+    [VX_SYS_PROTECT] = sys_protect,
 };
 
 static void vexa_syscall(struct interrupt_frame *frame) {

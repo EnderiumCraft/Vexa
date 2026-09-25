@@ -58,6 +58,7 @@
 #define VX_SYS_THREAD_ID 37     /* vx_thread_id() -> the calling thread's id */
 #define VX_SYS_WAIT_ADDRESS 38  /* vx_wait_address(address, expected, timeout_ms or -1) */
 #define VX_SYS_WAKE_ADDRESS 39  /* vx_wake_address(address, count) -> how many woke */
+#define VX_SYS_PROTECT 40       /* vx_protect(address, size, VX_MAP_* flags) */
 
 #define VX_MAP_WRITE 0x1
 #define VX_MAP_EXEC 0x2

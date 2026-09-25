@@ -45,14 +45,22 @@ OBJS := $(patsubst kernel/src/%,$(BUILD)/obj/%.o,$(SRCS))
 # -nostdinc keeps the host's C library headers out; only the compiler's own
 # (stdint.h, stdarg.h...) and libvexa's are used.
 USER_CFLAGS := -g -O2 -pipe -std=gnu11 -Wall -Wextra -Werror \
-	-ffreestanding -fno-stack-protector -fno-PIC -fno-pie -m64 -march=x86-64 \
+	-ffreestanding -fno-stack-protector -fPIC -fno-asynchronous-unwind-tables -m64 -march=x86-64 \
 	-nostdinc -isystem $(shell $(CC) -print-file-name=include) \
 	-Ilibvexa/include -Iabi -MMD -MP
-USER_LDFLAGS := -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 \
-	--no-dynamic-linker -T libvexa/program.ld
+# Programs are position independent and use libvexa.so through the native
+# dynamic loader, /lib/vexa-ld.so; STATIC_PROGRAMS link libvexa in instead.
+USER_LDFLAGS := -m elf_x86_64 -nostdlib -z max-page-size=0x1000 -z norelro --hash-style=sysv
+STATIC_LDFLAGS := $(USER_LDFLAGS) -static --no-dynamic-linker -T libvexa/program.ld
+DYNAMIC_LDFLAGS := $(USER_LDFLAGS) -pie -dynamic-linker /lib/vexa-ld.so
+STATIC_PROGRAMS := hello-world
 
 LIBVEXA_SRCS := $(wildcard libvexa/src/*.c libvexa/src/*.S)
 LIBVEXA_OBJS := $(patsubst libvexa/src/%,$(BUILD)/libvexa/%.o,$(LIBVEXA_SRCS))
+CRT0 := $(BUILD)/libvexa/crt0.S.o
+LIBVEXA_SO := $(BUILD)/lib/libvexa.so
+VEXA_LD := $(BUILD)/lib/vexa-ld.so
+VEXA_LD_OBJS := $(patsubst libvexa/ld/%,$(BUILD)/vexa-ld/%.o,$(wildcard libvexa/ld/*.c libvexa/ld/*.S))
 PROGRAMS := $(notdir $(wildcard userland/*))
 PROGRAM_BINS := $(addprefix $(BUILD)/programs/,$(PROGRAMS))
 INITRAMFS := $(BUILD)/initramfs.tar
@@ -133,7 +141,7 @@ USER_OBJS := $(LIBVEXA_OBJS) \
 
 all: iso
 kernel: $(KERNEL)
-programs: $(PROGRAM_BINS)
+programs: $(PROGRAM_BINS) $(LIBVEXA_SO) $(VEXA_LD)
 iso: $(ISO)
 
 $(BUILD)/obj/%.c.o: kernel/src/%.c
@@ -155,19 +163,39 @@ $(BUILD)/userland/%.c.o: userland/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
+# libvexa.so: libvexa without crt0 (which each program carries), binding its
+# own references to itself.
+$(LIBVEXA_SO): $(filter-out $(CRT0),$(LIBVEXA_OBJS))
+	@mkdir -p $(dir $@)
+	$(LD) $(USER_LDFLAGS) -shared -Bsymbolic -soname libvexa.so $^ -o $@
+
+# The dynamic loader relocates itself before it uses any pointer, so all its
+# symbols are hidden: it needs only relative relocations.
+$(BUILD)/vexa-ld/%.o: libvexa/ld/%
+	@mkdir -p $(dir $@)
+	$(CC) $(USER_CFLAGS) -fvisibility=hidden -c $< -o $@
+
+$(VEXA_LD): $(VEXA_LD_OBJS)
+	@mkdir -p $(dir $@)
+	$(LD) $(USER_LDFLAGS) -shared -Bsymbolic -e _start $^ -o $@
+
 .SECONDEXPANSION:
-$(BUILD)/programs/%: $(LIBVEXA_OBJS) libvexa/program.ld \
+$(BUILD)/programs/%: $(CRT0) $(LIBVEXA_SO) $(LIBVEXA_OBJS) libvexa/program.ld \
 		$$(addprefix $(BUILD)/,$$(addsuffix .o,$$(wildcard userland/$$*/*.c)))
 	@mkdir -p $(dir $@)
-	$(LD) $(USER_LDFLAGS) $(filter %.o,$^) -o $@
+	$(if $(filter $*,$(STATIC_PROGRAMS)), \
+		$(LD) $(STATIC_LDFLAGS) $(sort $(filter %.o,$^)) -o $@, \
+		$(LD) $(DYNAMIC_LDFLAGS) $(CRT0) $(filter-out $(LIBVEXA_OBJS),$(filter %.o,$^)) \
+			$(LIBVEXA_SO) -o $@)
 
 # The starting root file system: rootfs/ plus the programs in /bin, as a tar
 # archive (ustar, with fixed owners and times so builds are reproducible).
-$(INITRAMFS): $(PROGRAM_BINS) $(ROOTFS_FILES) $(LINUX_TREE)
+$(INITRAMFS): $(PROGRAM_BINS) $(LIBVEXA_SO) $(VEXA_LD) $(ROOTFS_FILES) $(LINUX_TREE)
 	rm -rf $(BUILD)/rootfs
-	mkdir -p $(BUILD)/rootfs/bin
+	mkdir -p $(BUILD)/rootfs/bin $(BUILD)/rootfs/lib
 	cp -R rootfs/. $(BUILD)/rootfs/
 	cp $(PROGRAM_BINS) $(BUILD)/rootfs/bin/
+	cp $(LIBVEXA_SO) $(VEXA_LD) $(BUILD)/rootfs/lib/
 	if [ -n "$(LINUX_TREE)" ]; then \
 		mkdir -p $(BUILD)/rootfs/linux && cp -a $(LINUX_ROOT)/. $(BUILD)/rootfs/linux/ && \
 		rm $(BUILD)/rootfs/linux/.done; fi
@@ -414,4 +442,4 @@ distclean: clean
 	rm -rf limine $(BUSYBOX_SRC) $(BASH_TARBALL) $(COREUTILS_TARBALL) $(ZLIB_TARBALL) \
 		$(LIBFFI_TARBALL) $(PYTHON_TARBALL)
 
--include $(OBJS:.o=.d) $(USER_OBJS:.o=.d)
+-include $(OBJS:.o=.d) $(USER_OBJS:.o=.d) $(VEXA_LD_OBJS:.o=.d)

@@ -31,6 +31,8 @@ long vx_rename(const char *from, const char *to);
 long vx_symlink(const char *target, const char *path);
 long vx_readlink(const char *path, char *buffer, size_t size);
 long vx_lstat(const char *path, struct vx_stat *stat);
+/* Changes the access to mapped memory (page aligned): VX_MAP_WRITE, VX_MAP_EXEC. */
+long vx_protect(void *address, size_t size, unsigned flags);
 
 /* Threads, at the system call level; <vexa/thread.h> has the easy way. */
 long vx_thread_start(const struct vx_thread_start *start);

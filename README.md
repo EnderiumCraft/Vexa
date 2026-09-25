@@ -98,8 +98,8 @@ ext4 disks are refused (Vexa doesn't support their extra features yet), and ext2
 journal, so pulling the plug mid-write can leave the disk needing a check with
 `e2fsck` on Linux.
 
-Next in Phase 6: shared libraries for native programs, and more Linux software
-(coreutils, Python). See [docs/ROADMAP.md](docs/ROADMAP.md) for the full
+Phase 6 is done: native programs use a shared `libvexa.so`, and the Linux subsystem runs
+threaded programs, GNU coreutils and Python 3.12. Next, Phase 7: networking. See [docs/ROADMAP.md](docs/ROADMAP.md) for the full
 plan from here to Firefox.
 
 ## Download
@@ -169,7 +169,8 @@ kernel/
 abi/vexa/abi.h       system call numbers and error codes, shared by kernel and libvexa
 rootfs/              files for the root file system (packed into initramfs.tar)
 third_party/         BusyBox's build configuration; sources are fetched here at build time
-libvexa/             Vexa's C library: program startup, system calls, printf, strings
+libvexa/             Vexa's C library: program startup, system calls, printf, strings,
+                     threads; built as libvexa.so, with the dynamic loader in libvexa/ld/
 userland/            Vexa programs, one directory each: vinit, vsh, ls, cat, ...
 tests/disk-content/  files put on the test disks
 tools/
@@ -193,7 +194,9 @@ The console font is [Spleen](https://github.com/fcambus/spleen) 8x16 by Frederic
 The ISO includes [BusyBox](https://busybox.net) 1.36.1 (GPL-2.0), built unmodified from
 its source with the configuration in `third_party/busybox.config`, and
 [GNU bash](https://www.gnu.org/software/bash/) 5.2.37 (GPL-3.0), built unmodified with
-the options in the Makefile. Both are linked against the [musl](https://musl.libc.org)
-C library (MIT license), which the ISO also includes. Every release on the Releases
-page carries the matching sources (`busybox-1_36_1-source.tar.gz`,
-`bash-5.2.37.tar.xz`).
+the options in the Makefile. [GNU coreutils](https://www.gnu.org/software/coreutils/) 9.4 (GPL-3.0) and
+[Python](https://www.python.org) 3.12.3 (PSF License, with [zlib](https://zlib.net) 1.3
+and [libffi](https://sourceware.org/libffi/) 3.4.6), also built unmodified. All of them are
+linked against the [musl](https://musl.libc.org) C library (MIT license), which the ISO
+also includes. Every release on the Releases page carries the matching GPL sources
+(`busybox-1_36_1-source.tar.gz`, `bash-5.2.37.tar.xz`, `coreutils-9.4.tar.xz`).
