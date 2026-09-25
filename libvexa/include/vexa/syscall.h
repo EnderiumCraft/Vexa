@@ -77,6 +77,15 @@ long vx_poll(struct vx_poll *handles, size_t count, long timeout_ms);
 /* The network interfaces; returns how many there are. */
 long vx_net_info(struct vx_net_interface *interfaces, size_t count);
 
+/* Devices and shared files. */
+/* A device request (see abi.h: VX_INPUT_*, VX_DISPLAY_*); `arg` is read and
+ * written, `size` bytes (at most 256). */
+long vx_control(int handle, unsigned request, void *arg, size_t size);
+/* Maps a file or device (from `offset`, page aligned), shared: what one
+ * mapping writes, the file and every other mapping see. NULL on failure. */
+void *vx_map_file(int handle, unsigned long offset, size_t size, unsigned flags);
+long vx_resize(int handle, unsigned long size);
+
 /* The system. */
 long vx_system_info(struct vx_system_info *info);
 long vx_kernel_command(const char *command);

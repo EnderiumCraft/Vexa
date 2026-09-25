@@ -230,6 +230,19 @@ long vx_net_info(struct vx_net_interface *interfaces, size_t count) {
     return syscall2(VX_SYS_NET_INFO, interfaces, count);
 }
 
+long vx_control(int handle, unsigned request, void *arg, size_t size) {
+    return syscall4(VX_SYS_CONTROL, handle, request, (long)arg, (long)size);
+}
+
+void *vx_map_file(int handle, unsigned long offset, size_t size, unsigned flags) {
+    long result = syscall4(VX_SYS_MAP_FILE, handle, (long)offset, (long)size, flags);
+    return result < 0 ? NULL : (void *)result;
+}
+
+long vx_resize(int handle, unsigned long size) {
+    return syscall2(VX_SYS_RESIZE, handle, size);
+}
+
 const char *vx_strerror(long error) {
     switch (-error) {
     case VX_ENOSYS: return "not supported";

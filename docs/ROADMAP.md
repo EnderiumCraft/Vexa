@@ -186,23 +186,29 @@ Reached in 0.11.0 (`fetch`, BusyBox `wget`, and Python's `urllib`).
 ## Phase 8: Graphics and input
 
 Core:
-- [ ] Mouse (PS/2), then USB: xHCI controller and HID keyboard/mouse
-- [ ] Vexa display interface: find outputs, set modes, allocate and show buffers
-      (boot framebuffer first, then a virtio-gpu driver in QEMU)
-- [ ] Vexa input event interface for keyboards and mice
-- [ ] Shared memory objects that can be mapped into several processes
+- [x] PS/2 mouse with a scroll wheel (0.12.0); USB (xHCI and HID keyboards and mice)
+      still to come
+- [x] Vexa display interface: `/dev/display0` on the boot framebuffer, which a program
+      acquires (the text console steps aside) and maps (0.12.0); a virtio-gpu driver,
+      mode setting and several outputs come later
+- [x] Vexa input event interface: `/dev/input/eventN`, with Linux's event codes, and
+      grabbing (0.12.0)
+- [x] Shared memory: files in `/run/shm` mapped into several processes (`vx_map_file`,
+      `vx_resize`)
+- [x] Pseudo-terminals (`/dev/ptmx`, `/dev/pts/N`), for terminal windows (0.12.0)
 
 Native track:
-- [ ] A first Vexa compositor: windows as shared buffers, drawn on the screen,
-      with mouse and keyboard focus
-- [ ] A native terminal window running `vsh`
+- [x] A first Vexa compositor (`desktop`): windows as shared buffers, drawn on the
+      screen, with a mouse pointer, keyboard focus, raising and dragging (0.12.0)
+- [x] A native terminal window (`term`) running `vsh` on a pseudo-terminal (0.12.0)
 
 Linux track:
 - [ ] Translate the Linux interfaces onto the core: DRM/KMS "dumb buffers",
       evdev devices under `/dev/input`, `memfd_create`, `/dev/shm`, `MAP_SHARED`
 - [ ] Run an X server (Xorg with the modesetting driver), then `xterm`
 
-**Milestone:** a graphical Vexa desktop with windows you can drag around.
+**Milestone:** a graphical Vexa desktop with windows you can drag around. Reached on the
+native track in 0.12.0; the Linux track (X) is next.
 
 ## Phase 9: The desktop stack
 

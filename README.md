@@ -9,13 +9,16 @@ that sits on top of the Vexa kernel. See [docs/ARCHITECTURE.md](docs/ARCHITECTUR
 
 ![Vexa running in QEMU](docs/screenshot.png)
 
+![The Vexa desktop with two terminal windows](docs/desktop-screenshot.png)
+
 ## Status
 
-Phases 1 to 5 are complete: boot and CPU basics, memory management, processes and
-user mode, files and storage, and a userland. Vexa boots into its own shell, `vsh`,
-with a set of native programs, and runs dynamically linked Linux programs (BusyBox and
-GNU bash) through the Linux subsystem. Phase 6, threads and dynamic linking, is under
-way: programs on both sides can now use threads. The kernel:
+Phases 1 to 7 are complete: boot and CPU basics, memory management, processes and
+user mode, files and storage, a userland, threads and dynamic linking, and networking.
+Vexa boots into its own shell, `vsh`, with a set of native programs, and runs Linux
+programs (BusyBox, GNU bash and coreutils, Python 3.12) through the Linux subsystem.
+Phase 8, graphics, is under way: Vexa has its own desktop with terminal windows. The
+kernel:
 
 - boots through the [Limine](https://github.com/limine-bootloader/limine) bootloader (BIOS and UEFI)
 - runs in 64-bit long mode as a higher-half kernel
@@ -31,7 +34,10 @@ way: programs on both sides can now use threads. The kernel:
 - gives programs memory on demand, and shares pages copy-on-write
 - runs on kernel stacks with guard pages, and reports stack overflows and other faults
   in plain words
-- reads the PS/2 keyboard (US layout, Shift, Caps Lock, Ctrl)
+- reads the PS/2 keyboard (US layout, Shift, Caps Lock, Ctrl) and mouse (with a scroll
+  wheel), as input events programs can read
+- has a graphical desktop: a compositor that draws programs' windows (shared buffers)
+  on the screen, which you move by their title bars, and a terminal window
 - has a terminal with line editing, Ctrl-C (or Ctrl-\\) to stop programs and Ctrl-D for
   end of input
 - runs threads with a preemptive scheduler, on every CPU core it finds; a program can
@@ -76,6 +82,8 @@ the `vexa:/>` prompt:
 | `bash` | GNU bash, a Linux program (`exit` to go back); inside it, `ls`, `vi`, `grep`, `ps`, `top`... are BusyBox's |
 | `sh`, `busybox` | BusyBox's shell; `busybox` alone lists its commands |
 | `ln -s`, `cat /proc/meminfo` | symbolic links; `/proc` |
+| `desktop` | the graphical desktop, with a terminal window; Ctrl+Alt+T opens another, Ctrl+Alt+Q goes back to the text console |
+| `input` | the keyboard and mouse; `input watch 1` shows what the mouse reports |
 | `net` | network interfaces and addresses (Linux: `ifconfig`, `route -n`) |
 | `fetch http://example.com/` | downloads a web page (a Vexa program); `wget` is BusyBox's |
 | `socket-test`, `bsd-socket-test` | checks sockets: a Vexa program and a Linux one |
@@ -112,9 +120,9 @@ ext4 disks are refused (Vexa doesn't support their extra features yet), and ext2
 journal, so pulling the plug mid-write can leave the disk needing a check with
 `e2fsck` on Linux.
 
-Phase 7 is done: Vexa has a TCP/IP stack, and both native programs and Linux ones
-(BusyBox `wget`, Python's `urllib` and `asyncio`) use the network. Next, Phase 8:
-graphics and input. See [docs/ROADMAP.md](docs/ROADMAP.md) for the full
+Phase 8 is under way: Vexa has a graphical desktop of its own (`desktop`), with terminal
+windows you can drag around. Next: the Linux side of graphics (input and display devices
+the Linux way, then an X server and `xterm`). See [docs/ROADMAP.md](docs/ROADMAP.md) for the full
 plan from here to Firefox.
 
 ## Download
@@ -179,15 +187,17 @@ kernel/
                      block cache and partitions, ELF loader, ACPI, init, kernel monitor
   src/personality/vexa/  the native Vexa system calls
   src/personality/linux/ the Linux subsystem (optional: LINUX_COMPAT)
-  src/dev/           serial, framebuffer, text console, terminal, font, PS/2 keyboard, clock,
-                     PCI, virtio-blk, virtio-net, AHCI, NVMe
+  src/dev/           serial, framebuffer and /dev/display0, text console, terminals and
+                     pseudo-terminals, font, PS/2 keyboard and mouse, clock, PCI,
+                     virtio-blk, virtio-net, AHCI, NVMe
   src/lib/           string functions, kprintf, panic
   src/fs/            ext2, tmpfs, devfs, initramfs unpacking
 abi/vexa/abi.h       system call numbers and error codes, shared by kernel and libvexa
 rootfs/              files for the root file system (packed into initramfs.tar)
 third_party/         BusyBox's build configuration; sources are fetched here at build time
 libvexa/             Vexa's C library: program startup, system calls, printf, strings,
-                     threads; built as libvexa.so, with the dynamic loader in libvexa/ld/
+                     threads, networking, drawing and windows; built as libvexa.so, with
+                     the dynamic loader in libvexa/ld/
 userland/            Vexa programs, one directory each: vinit, vsh, ls, cat, ...
 tests/disk-content/  files put on the test disks
 tools/

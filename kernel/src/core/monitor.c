@@ -420,10 +420,10 @@ static struct process *start_program(const char *name, bool background) {
 static void cmd_run(const char *args) {
     struct process *process = start_program(args, false);
     if (process) {
-        uint32_t previous = tty_foreground();
-        tty_set_foreground(process->group); /* Ctrl+C goes to the program. */
+        uint32_t previous = tty_foreground(console_tty);
+        tty_set_foreground(console_tty, process->group); /* Ctrl+C goes to the program. */
         process_wait_exit(process, false);
-        tty_set_foreground(previous);
+        tty_set_foreground(console_tty, previous);
         kprintf("[proc] %s (process %u) exited with code %d\n", process->name, process->id,
                 process->exit_code);
         process_reap(process);

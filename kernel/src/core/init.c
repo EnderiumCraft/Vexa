@@ -1,8 +1,10 @@
 #include <vexa/cmdline.h>
+#include <vexa/fb.h>
 #include <vexa/fs.h>
 #include <vexa/keyboard.h>
 #include <vexa/object.h>
 #include <vexa/process.h>
+#include <vexa/pty.h>
 #include <vexa/tty.h>
 #include <vexa/kprintf.h>
 #include <vexa/mm.h>
@@ -61,7 +63,7 @@ static bool start_vinit(void) {
         kprintf("[init] cannot start /bin/vinit: %s\n", reason);
         return false;
     }
-    tty_set_foreground(vinit->group);
+    tty_set_foreground(console_tty, vinit->group);
     object_put(&vinit->object);
     return true;
 }
@@ -79,6 +81,7 @@ void init_thread(void *unused) {
     }
     vfs_mkdir("/dev", 4);
     must(vfs_mount("devfs", NULL, "devfs", "/dev"), "mounting /dev");
+    pty_init();
     vfs_mkdir("/proc", 5);
     must(vfs_mount("proc", NULL, "proc", "/proc"), "mounting /proc");
     vfs_mkdir("/mnt", 4);
@@ -89,6 +92,7 @@ void init_thread(void *unused) {
     vfs_chmod("/run/shm", 8, 01777);
 
     storage_init();
+    display_init();
     net_init();
     virtio_net_init();
 

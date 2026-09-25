@@ -185,7 +185,8 @@ static int64_t sys_read(uint64_t handle, uint64_t buffer, uint64_t size, uint64_
             break;
         }
         total += n;
-        if ((uint64_t)n < want || object->type != &file_object_type) {
+        if ((uint64_t)n < want || object->type != &file_object_type ||
+            vfs_is_stream((struct file *)object)) {
             break; /* End of file; or a pipe/terminal: return what's there. */
         }
     }
@@ -652,9 +653,19 @@ static int64_t sys_signal(uint64_t signal, uint64_t action, uint64_t a2, uint64_
     return 0;
 }
 
+/* The foreground group of the caller's terminal: the one behind its
+ * standard input, or the console. */
 static int64_t sys_set_foreground(uint64_t group, uint64_t a1, uint64_t a2, uint64_t a3) {
     (void)a1, (void)a2, (void)a3;
-    tty_set_foreground((uint32_t)group);
+    uint32_t rights;
+    struct object *object = handle_get_any(me()->handles, 0, &rights);
+    struct tty *tty = object && object->type == &file_object_type
+                          ? vfs_terminal((struct file *)object)
+                          : NULL;
+    tty_set_foreground(tty ? tty : console_tty, (uint32_t)group);
+    if (object) {
+        object_put(object);
+    }
     return 0;
 }
 
@@ -1071,6 +1082,105 @@ static int64_t sys_net_info(uint64_t out, uint64_t count, uint64_t a2, uint64_t 
     return result;
 }
 
+/* ---- Devices ---- */
+
+#define CONTROL_MAX 256 /* Bytes of argument a device request may have. */
+
+static int64_t sys_control(uint64_t handle, uint64_t request, uint64_t arg, uint64_t size) {
+    if (size > CONTROL_MAX || (size && !user_range_ok(arg, size))) {
+        return -VX_EINVAL;
+    }
+    uint32_t rights;
+    struct object *object = handle_get_any(me()->handles, (int)handle, &rights);
+    if (!object) {
+        return -VX_EBADF;
+    }
+    if (object->type != &file_object_type) {
+        object_put(object);
+        return -VX_ENOTTY;
+    }
+    uint8_t buffer[CONTROL_MAX];
+    memset(buffer, 0, sizeof(buffer));
+    int64_t result = size && !copy_from_user(buffer, arg, size) ? -VX_EFAULT : 0;
+    if (!result) {
+        result = vfs_control((struct file *)object, (uint32_t)request, buffer, size);
+    }
+    if (result >= 0 && size && !copy_to_user(arg, buffer, size)) {
+        result = -VX_EFAULT;
+    }
+    object_put(object);
+    return result;
+}
+
+#define MAP_FILE_MAX (256ULL * 1024 * 1024)
+
+static int64_t sys_map_file(uint64_t handle, uint64_t offset, uint64_t size, uint64_t flags) {
+    if (!size || size > MAP_FILE_MAX || offset % PAGE_SIZE ||
+        (flags & ~(uint64_t)(VX_MAP_WRITE | VX_MAP_EXEC))) {
+        return -VX_EINVAL;
+    }
+    uint32_t rights;
+    struct object *object = handle_get_any(me()->handles, (int)handle, &rights);
+    if (!object) {
+        return -VX_EBADF;
+    }
+    struct file *file = object->type == &file_object_type ? (struct file *)object : NULL;
+    int64_t result = !file                                         ? -VX_EINVAL
+                     : !(rights & HANDLE_RIGHT_READ)               ? -VX_EACCES
+                     : (flags & VX_MAP_WRITE) && !(rights & HANDLE_RIGHT_WRITE) ? -VX_EACCES
+                                                                              : 0;
+    uint64_t count = (size + PAGE_SIZE - 1) / PAGE_SIZE;
+    uint64_t *array = result ? NULL : kzalloc(count * sizeof(uint64_t)), *pages = array;
+    if (!result && !pages) {
+        result = -VX_ENOMEM;
+    }
+    for (uint64_t i = 0; !result && i < count; i++) {
+        pages[i] = vfs_share_page(file, offset / PAGE_SIZE + i);
+        if (!pages[i]) {
+            result = -VX_EINVAL; /* Past the end, or a file that can't be shared. */
+        }
+    }
+    uint64_t address = 0;
+    if (!result) {
+        unsigned vm_flags = VM_SHARED | (flags & VX_MAP_WRITE ? VM_WRITE : 0) |
+                            (flags & VX_MAP_EXEC ? VM_EXEC : 0);
+        struct address_space *as = me()->address_space;
+        address = vm_map(as, count * PAGE_SIZE, vm_flags);
+        if (!address) {
+            result = -VX_ENOMEM;
+        } else {
+            result = vm_populate_shared(as, address, count, pages);
+            pages = NULL; /* The mapping took the references. */
+            if (result) {
+                vm_unmap(as, address, count * PAGE_SIZE);
+            }
+        }
+    }
+    if (pages) {
+        for (uint64_t i = 0; i < count; i++) {
+            if (pages[i]) {
+                page_ref_put(pages[i]);
+            }
+        }
+    }
+    kfree(array);
+    object_put(object);
+    return result ? result : (int64_t)address;
+}
+
+static int64_t sys_resize(uint64_t handle, uint64_t size, uint64_t a2, uint64_t a3) {
+    (void)a2, (void)a3;
+    int error;
+    struct object *object = get_io((int64_t)handle, HANDLE_RIGHT_WRITE, &error);
+    if (!object) {
+        return error;
+    }
+    int result = object->type == &file_object_type ? vfs_truncate((struct file *)object, size)
+                                                   : -VX_EINVAL;
+    object_put(object);
+    return result;
+}
+
 static int64_t sys_kernel_command(uint64_t text, uint64_t length, uint64_t a2, uint64_t a3) {
     (void)a2, (void)a3;
     char line[128];
@@ -1138,6 +1248,9 @@ static const syscall_fn syscalls[] = {
     [VX_SYS_SOCKET_PAIR] = sys_socket_pair,
     [VX_SYS_POLL] = sys_poll,
     [VX_SYS_NET_INFO] = sys_net_info,
+    [VX_SYS_CONTROL] = sys_control,
+    [VX_SYS_MAP_FILE] = sys_map_file,
+    [VX_SYS_RESIZE] = sys_resize,
 };
 
 static void vexa_syscall(struct interrupt_frame *frame) {

@@ -264,6 +264,9 @@ static int64_t tmpfs_write(struct vnode *vnode, const void *buffer, size_t size,
     if (offset + size < offset) {
         return -VX_EINVAL;
     }
+    if (size == 0) {
+        return 0;
+    }
     if (!ensure_page_slots(node, (offset + size + PAGE_SIZE - 1) / PAGE_SIZE)) {
         return -VX_ENOMEM;
     }

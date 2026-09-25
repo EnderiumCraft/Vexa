@@ -169,6 +169,33 @@ Disks sit behind the block layer (`core/block.c`), which caches them in 4 KiB ch
 reads partition tables, and calls the drivers (`dev/virtio_blk.c`, `dev/ahci.c`,
 `dev/nvme.c`).
 
+## Graphics and input today
+
+- **Devices with state per open file.** `vnode_ops` has optional `open`, `close`,
+  `file_read`, `file_write`, `file_poll` and `control` hooks, so a device can keep
+  something for each open file (`file->private`). `vx_control(handle, request, arg,
+  size)` is Vexa's `ioctl`: the argument is copied into the kernel and back.
+- **Input** (`core/input.c`): drivers report events (Linux's types and codes, so the
+  Linux subsystem's evdev view is a thin layer) and each open `/dev/input/eventN` gets
+  its own queue. A program can grab a device; a grabbed keyboard no longer types into
+  the console terminal. The PS/2 keyboard and mouse share the controller's interrupt
+  path: each byte goes to one or the other by where it came from.
+- **The display** (`dev/display.c`): `/dev/display0` is the boot framebuffer. A program
+  acquires it, which hides the text console (it keeps its text and redraws when the
+  program is done), and maps it with `vx_map_file`. The framebuffer's pages are device
+  memory: page reference counts leave pages outside RAM alone.
+- **Shared buffers.** `vx_map_file` maps a file shared (from any file system that can
+  hand out its pages, like tmpfs); a window's pixels are a file in `/run/shm` that the
+  program and the desktop both map.
+- **Terminals** are `struct tty` instances: the console, and pseudo-terminals
+  (`dev/pty.c`) whose master side is `/dev/ptmx` and whose terminal is `/dev/pts/N`,
+  with the same line editing and job control signals.
+- **The desktop** (`userland/desktop`) is an ordinary program: it grabs the keyboard and
+  mouse, listens on the local socket `/run/desktop`, keeps windows in a stack, composes
+  the parts of the screen that changed into memory and copies them to the display.
+  Programs use `<vexa/gui.h>`: `vx_window_create`, draw into `window->surface`,
+  `vx_window_present`, and `vx_gui_wait` for key, pointer and close events.
+
 ## Networking today
 
 `net/` is Vexa's own TCP/IP stack; `dev/virtio_net.c` is the one network card driver so

@@ -2,6 +2,7 @@
 #define VEXA_KEYBOARD_H
 
 #include <stdbool.h>
+#include <stdint.h>
 
 /* Special keys delivered as values above the ASCII range. */
 #define KEY_UP 0x100
@@ -19,5 +20,14 @@ int keyboard_read_blocking(void);
 /* Sends every key to `consumer` (called from the keyboard interrupt) instead
  * of buffering it for keyboard_read. */
 void keyboard_set_consumer(void (*consumer)(int key));
+
+/* The PS/2 mouse, on the keyboard's controller (dev/ps2_mouse.c). */
+void ps2_mouse_init(void);
+void ps2_mouse_byte(uint8_t byte); /* A byte from the mouse, in an interrupt. */
+void ps2_drain(void);              /* Reads every waiting byte, keyboard or mouse. */
+/* The controller, for the drivers: a command, a data byte, waiting for a reply. */
+bool ps2_command(uint8_t command);
+bool ps2_write(uint8_t value);
+bool ps2_wait_output(void);
 
 #endif

@@ -51,6 +51,9 @@ uint64_t page_ref_new(void);
 void page_ref_get(uint64_t phys);
 void page_ref_put(uint64_t phys);
 uint32_t page_ref_count(uint64_t phys);
+/* For device memory mapped into programs (a framebuffer): an extra reference
+ * that is never put, in case the page lies within RAM's range. */
+void page_ref_pin(uint64_t phys);
 uint64_t pmm_total_pages(void);
 uint64_t pmm_free_pages(void);
 

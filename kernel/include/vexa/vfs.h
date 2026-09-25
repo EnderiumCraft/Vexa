@@ -21,6 +21,7 @@
 struct vnode;
 struct mount;
 struct block_device;
+struct file;
 
 struct vnode_ops {
     /* Directories. `name` is not NUL-terminated. Returned vnodes carry a reference. */
@@ -50,6 +51,18 @@ struct vnode_ops {
     void (*statfs)(struct mount *mount, uint64_t *total, uint64_t *free);
     /* The last reference is gone. */
     void (*release)(struct vnode *vnode);
+
+    /* Devices that keep state for each open file (input devices, the
+     * display, terminals). All optional; with file_read or file_write, the
+     * plain read and write aren't used. None of these run under vfs_lock. */
+    int (*open)(struct file *file);    /* May set file->private. */
+    void (*close)(struct file *file);  /* The file's last reference is gone. */
+    int64_t (*file_read)(struct file *file, void *buffer, size_t size);
+    int64_t (*file_write)(struct file *file, const void *buffer, size_t size);
+    uint32_t (*file_poll)(struct file *file); /* OBJECT_* bits */
+    /* A device-specific request (Vexa's ioctl): `arg` is a kernel buffer of
+     * `size` bytes that the request reads and may fill in. */
+    int (*control)(struct file *file, uint32_t request, void *arg, size_t size);
 };
 
 struct vnode {
@@ -90,6 +103,8 @@ struct file {
     uint64_t offset;
     uint32_t flags; /* VX_OPEN_* */
     char *path;     /* As opened (absolute), for fchdir and openat. */
+    void *private;  /* The device's, for files it opened (vnode_ops.open). */
+    bool opened;    /* vnode_ops.open succeeded: close must be called. */
 };
 
 extern const struct object_type file_object_type;
@@ -141,8 +156,16 @@ void vfs_close(struct file *file);
 int vfs_truncate(struct file *file, uint64_t size);
 /* A page of the file to map shared (see vnode_ops.share_page), or 0. */
 uint64_t vfs_share_page(struct file *file, uint64_t index);
-/* True if the file is the terminal (/dev/console or /dev/tty). */
+/* The terminal behind a file (/dev/console, /dev/tty, a pty), or NULL. */
+struct tty;
+struct tty *vfs_terminal(struct file *file);
 bool vfs_is_terminal(struct file *file);
+/* True for character devices: reads return what is there and don't fill the
+ * buffer (a terminal line, input events...). */
+bool vfs_is_stream(struct file *file);
+/* A device-specific request (see vnode_ops.control); -VX_ENOTTY if the file
+ * takes none. */
+int vfs_control(struct file *file, uint32_t request, void *arg, size_t size);
 
 void vfs_register_filesystem(const struct filesystem_type *type);
 const char *vfs_error_name(int error);

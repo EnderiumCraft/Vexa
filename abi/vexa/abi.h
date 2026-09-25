@@ -75,6 +75,12 @@
 #define VX_SYS_POLL 51     /* vx_poll(struct vx_poll *, count, timeout_ms or -1) -> ready count */
 #define VX_SYS_NET_INFO 52 /* vx_net_info(struct vx_net_interface *, count) -> interfaces */
 
+/* Devices. */
+#define VX_SYS_CONTROL 53  /* vx_control(handle, request, void *arg, size): a device request */
+#define VX_SYS_MAP_FILE 54 /* vx_map_file(handle, offset, size, VX_MAP_* flags) -> address,
+                              shared: writes reach the file (or device) and other mappings */
+#define VX_SYS_RESIZE 55   /* vx_resize(handle, size): a file's new length (zero-filled) */
+
 #define VX_MAP_WRITE 0x1
 #define VX_MAP_EXEC 0x2
 
@@ -225,6 +231,94 @@ struct vx_net_interface {
     unsigned int mtu;
     unsigned int address, netmask, gateway, dns; /* Network byte order; 0 if none. */
     unsigned long long rx_packets, rx_bytes, tx_packets, tx_bytes, rx_dropped, tx_dropped;
+};
+
+/* ---- Input devices: /dev/input/event0, event1... ----
+ * Reading one gives whole struct vx_input_events. Types and codes are
+ * Linux's (<linux/input-event-codes.h>): keys are KEY_A = 30 and so on. */
+#define VX_EV_SYN 0x00 /* The end of a group of events that belong together. */
+#define VX_EV_KEY 0x01 /* A key or button: value 1 pressed, 0 released, 2 repeated. */
+#define VX_EV_REL 0x02 /* Relative motion. */
+
+#define VX_REL_X 0x00
+#define VX_REL_Y 0x01 /* Positive is down. */
+#define VX_REL_WHEEL 0x08 /* Positive is away from the user. */
+#define VX_BTN_LEFT 0x110
+#define VX_BTN_RIGHT 0x111
+#define VX_BTN_MIDDLE 0x112
+
+#define VX_KEY_ESC 1
+#define VX_KEY_BACKSPACE 14
+#define VX_KEY_TAB 15
+#define VX_KEY_ENTER 28
+#define VX_KEY_LEFTCTRL 29
+#define VX_KEY_LEFTSHIFT 42
+#define VX_KEY_RIGHTSHIFT 54
+#define VX_KEY_LEFTALT 56
+#define VX_KEY_SPACE 57
+#define VX_KEY_CAPSLOCK 58
+#define VX_KEY_F1 59 /* F1 to F10 are 59 to 68 */
+#define VX_KEY_RIGHTCTRL 97
+#define VX_KEY_RIGHTALT 100
+#define VX_KEY_HOME 102
+#define VX_KEY_UP 103
+#define VX_KEY_PAGEUP 104
+#define VX_KEY_LEFT 105
+#define VX_KEY_RIGHT 106
+#define VX_KEY_END 107
+#define VX_KEY_DOWN 108
+#define VX_KEY_PAGEDOWN 109
+#define VX_KEY_INSERT 110
+#define VX_KEY_DELETE 111
+#define VX_KEY_LEFTMETA 125
+
+struct vx_input_event {
+    unsigned long long time_ms; /* vx_uptime() when it happened. */
+    unsigned short type;        /* VX_EV_* */
+    unsigned short code;        /* VX_KEY_*, VX_BTN_*, VX_REL_* */
+    int value;
+};
+
+#define VX_INPUT_KEYS 0x1    /* A keyboard. */
+#define VX_INPUT_POINTER 0x2 /* A mouse: buttons and relative motion. */
+
+/* vx_control requests for input devices. */
+#define VX_INPUT_INFO 0x4901 /* struct vx_input_info (out) */
+#define VX_INPUT_GRAB 0x4902 /* int (in): 1 = only this handle gets the events (for a
+                                keyboard, the terminal stops getting keys); 0 = release */
+
+struct vx_input_info {
+    char name[64];
+    unsigned int capabilities; /* VX_INPUT_* */
+    unsigned int reserved;
+};
+
+/* ---- The display: /dev/display0 ----
+ * vx_control(VX_DISPLAY_INFO) describes it; VX_DISPLAY_ACQUIRE takes the
+ * screen over from the text console (until the handle is closed), and
+ * vx_map_file then maps the frame buffer: `pitch` bytes per row, 32-bit
+ * pixels. */
+#define VX_DISPLAY_INFO 0x4401    /* struct vx_display_info (out) */
+#define VX_DISPLAY_ACQUIRE 0x4402 /* no argument: -VX_EBUSY if someone else has it */
+
+struct vx_display_info {
+    unsigned int width, height; /* Pixels. */
+    unsigned int pitch;         /* Bytes from one row to the next. */
+    unsigned int bits_per_pixel;
+    unsigned char red_shift, green_shift, blue_shift, reserved;
+    unsigned int size;          /* Bytes to map. */
+};
+
+/* ---- Terminals ----
+ * /dev/ptmx opens the controlling side of a new pseudo-terminal (what a
+ * terminal window holds: it reads the programs' output and writes the keys
+ * typed); /dev/pts/N is the terminal the programs in it see. */
+#define VX_TTY_PTY_NUMBER 0x5401   /* int (out): N, on a /dev/ptmx handle */
+#define VX_TTY_SET_SIZE 0x5402     /* struct vx_tty_size (in) */
+#define VX_TTY_GET_SIZE 0x5403     /* struct vx_tty_size (out) */
+
+struct vx_tty_size {
+    unsigned short rows, columns;
 };
 
 /* vx_open flags. A handle can only be used the ways it was opened for. */

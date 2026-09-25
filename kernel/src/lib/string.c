@@ -60,3 +60,14 @@ char *strcpy(char *dest, const char *src) {
     memcpy(dest, src, strlen(src) + 1);
     return dest;
 }
+
+char *strchr(const char *s, int c) {
+    for (;; s++) {
+        if (*s == (char)c) {
+            return (char *)s;
+        }
+        if (!*s) {
+            return NULL;
+        }
+    }
+}

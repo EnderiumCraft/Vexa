@@ -4,6 +4,15 @@
 /* A copy: the bootloader's structure goes away when its memory is reclaimed. */
 static struct limine_framebuffer fb_info;
 static struct limine_framebuffer *fb;
+static volatile bool hidden; /* A program has the screen: the kernel doesn't draw. */
+
+const struct limine_framebuffer *fb_limine(void) {
+    return fb;
+}
+
+void fb_set_hidden(bool value) {
+    hidden = value;
+}
 
 bool fb_init(struct limine_framebuffer *framebuffer) {
     if (framebuffer->bpp != 32) {
@@ -36,7 +45,7 @@ static uint32_t *row_ptr(uint64_t y) {
 }
 
 void fb_fill_rect(uint64_t x, uint64_t y, uint64_t w, uint64_t h, uint32_t rgb) {
-    if (!fb) {
+    if (!fb || hidden) {
         return;
     }
     uint32_t color = pack_color(rgb);
@@ -50,7 +59,7 @@ void fb_fill_rect(uint64_t x, uint64_t y, uint64_t w, uint64_t h, uint32_t rgb) 
 
 void fb_draw_bitmap8(uint64_t x, uint64_t y, const uint8_t *rows, uint64_t height,
                      uint32_t fg_rgb, uint32_t bg_rgb) {
-    if (!fb || x + 8 > fb->width || y + height > fb->height) {
+    if (!fb || hidden || x + 8 > fb->width || y + height > fb->height) {
         return;
     }
     uint32_t fg = pack_color(fg_rgb), bg = pack_color(bg_rgb);

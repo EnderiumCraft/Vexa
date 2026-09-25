@@ -10,6 +10,8 @@ void console_write(const char *s);
 void console_set_color(uint32_t fg_rgb);
 void console_reset_color(void);
 void console_clear(void);
+/* Draws the whole screen again (after a program had it: see fb_set_hidden). */
+void console_redraw(void);
 
 #define CONSOLE_COLOR_TEXT 0xe4dcf2
 #define CONSOLE_COLOR_ACCENT 0xb07cff

@@ -226,18 +226,32 @@ uint64_t page_ref_new(void) {
     return phys;
 }
 
+/* Pages beyond RAM (device memory such as a framebuffer) aren't counted:
+ * they were never allocated, so they are never freed. */
+static bool counted(uint64_t phys) {
+    return (phys >> PAGE_SHIFT) < page_count;
+}
+
 void page_ref_get(uint64_t phys) {
-    __atomic_add_fetch(&page_refs[phys >> PAGE_SHIFT], 1, __ATOMIC_RELAXED);
+    if (counted(phys)) {
+        __atomic_add_fetch(&page_refs[phys >> PAGE_SHIFT], 1, __ATOMIC_RELAXED);
+    }
 }
 
 void page_ref_put(uint64_t phys) {
-    if (__atomic_sub_fetch(&page_refs[phys >> PAGE_SHIFT], 1, __ATOMIC_ACQ_REL) == 0) {
+    if (counted(phys) &&
+        __atomic_sub_fetch(&page_refs[phys >> PAGE_SHIFT], 1, __ATOMIC_ACQ_REL) == 0) {
         pmm_free(phys, 0);
     }
 }
 
 uint32_t page_ref_count(uint64_t phys) {
-    return __atomic_load_n(&page_refs[phys >> PAGE_SHIFT], __ATOMIC_ACQUIRE);
+    return counted(phys) ? __atomic_load_n(&page_refs[phys >> PAGE_SHIFT], __ATOMIC_ACQUIRE)
+                         : 1;
+}
+
+void page_ref_pin(uint64_t phys) {
+    page_ref_get(phys);
 }
 
 uint64_t pmm_total_pages(void) {

@@ -56,7 +56,9 @@ EXPECTED_BOOT_LEGACY = [
 # wait for the prompt to come back), how many seconds to wait for it, and
 # optionally how many times it must appear in the whole log. Typed text is
 # echoed to the log too, which is why some counts are 2. "^C" presses Ctrl-C
-# a second after the rest of the line was typed.
+# a second after the rest of the line was typed. A command starting with "@"
+# goes to the QEMU monitor instead (to move the mouse, say), and "@type ..."
+# is typed without waiting for vsh's prompt first.
 TYPED_COMMANDS = [
     ("help", "run in the background", 10),
     ("hello", "hi :)", 10),
@@ -113,6 +115,21 @@ TYPED_COMMANDS = [
     ("net", "address 10.0.2.15", 10),
     ("socket-test", "socket-test: passed", 60),
     ("fetch @URL@/hello.txt", "Hello from the test's web server", 30),
+    # Graphics: the mouse, then the desktop with a terminal window. Typing
+    # goes to the window's shell; dragging its title bar moves it (the pointer
+    # starts in the middle of the 1280x800 screen; QEMU delivers moves of up
+    # to about 1000 pixels at a time); Ctrl+Alt+T opens another; Ctrl+Alt+Q
+    # goes back.
+    ("input", "PS/2 mouse", 10),
+    ("desktop", 'desktop: window 1 "Terminal"', 30),
+    ("@type echo from-the-window > /dev/console", "from-the-window", 30),
+    ("@mouse_move -440 -330", None, 5),
+    ("@mouse_button 1", "desktop: left button at 200,70", 10),
+    ("@mouse_move 100 50", None, 5),
+    ("@mouse_button 0", "desktop: moved window 1 to 180,132", 10),
+    ("@sendkey ctrl-alt-t", "desktop: window 2", 30),
+    ("@type exit", "desktop: closed window 2", 30),
+    ("@sendkey ctrl-alt-q", "desktop: back to the console", 20),
     ("Hello Vexa", "Hello: command not found", 10),
 ]
 
@@ -361,10 +378,25 @@ def main():
                 break
 
         if not failures:
-            for typed, (command, expected, timeout, *count) in enumerate(commands):
+            typed = 0
+            for command, expected, timeout, *count in commands:
+                if command.startswith("@"):
+                    # "@type text": typed without waiting for a prompt (into a
+                    # window, say). Otherwise a QEMU monitor command, such as
+                    # "@mouse_move 10 5".
+                    time.sleep(0.5)
+                    if command.startswith("@type "):
+                        for key in keys_for(command[6:] + "\n"):
+                            monitor.command("sendkey " + key)
+                    else:
+                        monitor.command(command[1:])
+                    if expected is not None and not wait_for(log_path, expected, timeout, *count):
+                        failures.append(f"{command!r}: missing {expected!r}")
+                    continue
                 # Type only once the previous command is finished and the
                 # prompt is back, so slow machines don't mix commands up.
-                if not wait_for(log_path, PROMPT, 300, typed + 1):
+                typed += 1
+                if not wait_for(log_path, PROMPT, 300, typed):
                     failures.append(f"no prompt before typing {command!r}")
                     break
                 line, interrupt = command, command.endswith("^C")

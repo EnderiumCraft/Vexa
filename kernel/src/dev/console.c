@@ -67,6 +67,19 @@ static void blank(uint32_t x, uint32_t y) {
     draw_cell(x, y);
 }
 
+void console_redraw(void) {
+    if (!ready) {
+        return;
+    }
+    fb_fill_rect(0, 0, fb_width(), fb_height(), CONSOLE_COLOR_BACKGROUND);
+    for (uint32_t y = 0; y < rows; y++) {
+        for (uint32_t x = 0; x < cols; x++) {
+            draw_cell(x, y);
+        }
+    }
+    draw_cursor(true);
+}
+
 void console_clear(void) {
     if (!ready) {
         return;

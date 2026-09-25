@@ -308,6 +308,9 @@ int vfs_mount(const char *fs, struct block_device *device, const char *source, c
 
 static void file_destroy(struct object *object) {
     struct file *file = (struct file *)object;
+    if (file->opened && file->vnode->ops->close) {
+        file->vnode->ops->close(file);
+    }
     vfs_lock();
     vnode_put(file->vnode);
     vfs_unlock();
@@ -324,9 +327,11 @@ static int64_t file_object_write(struct object *object, const void *buffer, size
 }
 
 static uint32_t file_object_poll(struct object *object) {
-    if (vfs_is_terminal((struct file *)object)) {
-        return (tty_bytes_ready() ? OBJECT_READABLE : 0) | OBJECT_WRITABLE;
+    struct file *file = (struct file *)object;
+    if (file->vnode->ops->file_poll) {
+        return file->vnode->ops->file_poll(file);
     }
+
     return OBJECT_READABLE | OBJECT_WRITABLE; /* Files never make you wait for long. */
 }
 
@@ -399,8 +404,25 @@ int vfs_open(const char *path, size_t length, uint32_t flags, struct file **out)
         memcpy(file->path, path, length);
         file->path[length] = '\0';
     }
+    if (vnode->ops->open) {
+        error = vnode->ops->open(file);
+        if (error) {
+            object_put(&file->object);
+            return error;
+        }
+        file->opened = true;
+    }
     *out = file;
     return 0;
+}
+
+bool vfs_is_stream(struct file *file) {
+    return file->vnode->type == VX_TYPE_CHAR_DEVICE;
+}
+
+int vfs_control(struct file *file, uint32_t request, void *arg, size_t size) {
+    return file->vnode->ops->control ? file->vnode->ops->control(file, request, arg, size)
+                                     : -VX_ENOTTY;
 }
 
 static void fill_stat(struct vnode *vnode, struct vx_stat *stat) {
@@ -649,6 +671,9 @@ int64_t vfs_pread(struct file *file, void *buffer, size_t size, uint64_t offset)
     if (vnode->type == VX_TYPE_DIRECTORY) {
         return -VX_EISDIR;
     }
+    if (vnode->ops->file_read) {
+        return vnode->ops->file_read(file, buffer, size);
+    }
     if (!vnode->ops->read) {
         return -VX_EINVAL;
     }
@@ -677,6 +702,9 @@ int64_t vfs_read(struct file *file, void *buffer, size_t size) {
 
 int64_t vfs_write(struct file *file, const void *buffer, size_t size) {
     struct vnode *vnode = file->vnode;
+    if (vnode->ops->file_write) {
+        return vnode->ops->file_write(file, buffer, size);
+    }
     if (!vnode->ops->write) {
         return -VX_EINVAL;
     }

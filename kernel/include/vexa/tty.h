@@ -6,9 +6,9 @@
 #include <stdint.h>
 
 /*
- * The console terminal: keyboard in, screen out, with Unix-style line editing
- * in between. In "canonical" mode (the default) a program reading it gets a
- * whole line once Enter is pressed; Backspace and Ctrl+U edit the line, Ctrl+D
+ * Terminals: the console (keyboard in, screen out) and pseudo-terminals
+ * (dev/pty.c), with Unix-style line editing in between. In "canonical" mode
+ * (the default) a program reading it gets a whole line once Enter is pressed; Backspace and Ctrl+U edit the line, Ctrl+D
  * ends input, and Ctrl+C sends SIGINT to the foreground process group. Raw
  * mode hands over each key as it comes.
  *
@@ -46,17 +46,41 @@ struct tty_settings {
     uint8_t cc[TTY_NCCS];
 };
 
+/* A terminal: the console, or the program side of a pseudo-terminal. */
+struct tty;
+
+/* Where a terminal's output (and echo) goes: the screen, or a pty's
+ * master side. Called with no locks held; must not sleep. */
+typedef void (*tty_output_fn)(struct tty *tty, const char *text, size_t length);
+
+/* The console terminal (keyboard in, screen out). */
+extern struct tty *console_tty;
+
 void tty_init(void);
 /* Takes the keyboard away from the kernel monitor. */
 void tty_attach_keyboard(void);
 
-int64_t tty_read(void *buffer, size_t size);  /* Kernel buffer; may wait. */
-int64_t tty_write(const void *buffer, size_t size);
-void tty_get_settings(struct tty_settings *settings);
-void tty_set_settings(const struct tty_settings *settings);
-uint32_t tty_foreground(void);
-void tty_set_foreground(uint32_t group);
-void tty_window_size(uint16_t *rows, uint16_t *columns);
-size_t tty_bytes_ready(void);
+/* A new terminal with the default settings; `owner` is the creator's. */
+struct tty *tty_create(tty_output_fn output, void *owner, uint16_t rows, uint16_t columns);
+void tty_destroy(struct tty *tty);
+void *tty_owner(struct tty *tty);
+/* Typed input: one byte, as if from a keyboard (line editing, echo, Ctrl+C). */
+void tty_receive(struct tty *tty, char c);
+/* The other side is gone: reads return 0 from now on, and the foreground
+ * group gets SIGHUP. */
+void tty_hang_up(struct tty *tty);
+
+/* Kernel buffers. Reading may wait, unless `nonblocking` (-VX_EAGAIN). */
+int64_t tty_read(struct tty *tty, void *buffer, size_t size, bool nonblocking);
+int64_t tty_write(struct tty *tty, const void *buffer, size_t size);
+void tty_get_settings(struct tty *tty, struct tty_settings *settings);
+void tty_set_settings(struct tty *tty, const struct tty_settings *settings);
+uint32_t tty_foreground(struct tty *tty);
+void tty_set_foreground(struct tty *tty, uint32_t group);
+void tty_window_size(struct tty *tty, uint16_t *rows, uint16_t *columns);
+/* Sets the size and sends SIGWINCH to the foreground group if it changed. */
+void tty_set_window_size(struct tty *tty, uint16_t rows, uint16_t columns);
+size_t tty_bytes_ready(struct tty *tty);
+uint32_t tty_poll(struct tty *tty); /* OBJECT_* bits */
 
 #endif

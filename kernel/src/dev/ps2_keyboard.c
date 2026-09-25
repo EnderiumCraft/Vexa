@@ -1,5 +1,6 @@
 #include <stdint.h>
 #include <vexa/arch.h>
+#include <vexa/input.h>
 #include <vexa/io.h>
 #include <vexa/keyboard.h>
 #include <vexa/kprintf.h>
@@ -11,6 +12,7 @@
 
 #define STATUS_OUTPUT_FULL 0x01
 #define STATUS_INPUT_FULL 0x02
+#define STATUS_MOUSE_DATA 0x20 /* The waiting byte is from the mouse. */
 
 #define CMD_READ_CONFIG 0x20
 #define CMD_WRITE_CONFIG 0x60
@@ -57,6 +59,53 @@ static volatile uint32_t buffer_head, buffer_tail;
 static bool shift_left, shift_right, ctrl, caps_lock, extended;
 static struct wait_queue key_waiters = WAIT_QUEUE_INIT;
 
+/* Keys also go out as input events (/dev/input/event0), with Linux's key
+ * codes: for the keys of scancode set 1, the code is the scancode itself;
+ * extended (E0) keys have their own. */
+static struct input_device keyboard_device = {
+    .name = "PS/2 keyboard",
+    .capabilities = VX_INPUT_KEYS,
+};
+static uint8_t keys_down[256 / 8];
+
+static uint16_t extended_keycode(uint8_t code) {
+    switch (code) {
+    case 0x1c: return 96;  /* Keypad Enter */
+    case 0x1d: return VX_KEY_RIGHTCTRL;
+    case 0x35: return 98;  /* Keypad / */
+    case 0x38: return VX_KEY_RIGHTALT;
+    case 0x47: return VX_KEY_HOME;
+    case 0x48: return VX_KEY_UP;
+    case 0x49: return VX_KEY_PAGEUP;
+    case 0x4b: return VX_KEY_LEFT;
+    case 0x4d: return VX_KEY_RIGHT;
+    case 0x4f: return VX_KEY_END;
+    case 0x50: return VX_KEY_DOWN;
+    case 0x51: return VX_KEY_PAGEDOWN;
+    case 0x52: return VX_KEY_INSERT;
+    case 0x53: return VX_KEY_DELETE;
+    case 0x5b: return VX_KEY_LEFTMETA;
+    case 0x5c: return 126; /* Right Meta */
+    case 0x5d: return 127; /* Compose (menu) */
+    default: return 0;
+    }
+}
+
+static void report_key(uint16_t keycode, bool released) {
+    if (!keycode || keycode > 255) {
+        return;
+    }
+    bool down = keys_down[keycode / 8] & (1 << (keycode % 8));
+    int value = released ? 0 : down ? 2 : 1; /* 2: the key repeats while held. */
+    if (released) {
+        keys_down[keycode / 8] &= (uint8_t)~(1 << (keycode % 8));
+    } else {
+        keys_down[keycode / 8] |= (uint8_t)(1 << (keycode % 8));
+    }
+    input_report(&keyboard_device, VX_EV_KEY, keycode, value);
+    input_sync(&keyboard_device);
+}
+
 static bool wait_input_empty(void) {
     for (int i = 0; i < TIMEOUT; i++) {
         if (!(inb(PS2_STATUS) & STATUS_INPUT_FULL)) {
@@ -66,7 +115,7 @@ static bool wait_input_empty(void) {
     return false;
 }
 
-static bool wait_output_full(void) {
+bool ps2_wait_output(void) {
     for (int i = 0; i < TIMEOUT; i++) {
         if (inb(PS2_STATUS) & STATUS_OUTPUT_FULL) {
             return true;
@@ -75,7 +124,7 @@ static bool wait_output_full(void) {
     return false;
 }
 
-static bool controller_command(uint8_t command) {
+bool ps2_command(uint8_t command) {
     if (!wait_input_empty()) {
         return false;
     }
@@ -83,7 +132,7 @@ static bool controller_command(uint8_t command) {
     return true;
 }
 
-static bool write_data(uint8_t value) {
+bool ps2_write(uint8_t value) {
     if (!wait_input_empty()) {
         return false;
     }
@@ -98,6 +147,9 @@ void keyboard_set_consumer(void (*function)(int key)) {
 }
 
 static void push_key(int key) {
+    if (input_grabbed(&keyboard_device)) {
+        return; /* A program (the desktop) has the keyboard to itself. */
+    }
     if (consumer) {
         consumer(key);
         return;
@@ -139,9 +191,13 @@ static void handle_scancode(uint8_t scancode) {
     uint8_t code = scancode & ~SC_RELEASED;
     if (extended) {
         extended = false;
+        if (code != 0x2a && code != 0x36) { /* Fake shifts around some E0 keys. */
+            report_key(extended_keycode(code), released);
+        }
         handle_extended(code, released);
         return;
     }
+    report_key(code < 0x59 ? code : 0, released);
 
     switch (code) {
     case SC_LSHIFT: shift_left = !released; return;
@@ -171,11 +227,23 @@ static void handle_scancode(uint8_t scancode) {
     push_key(c);
 }
 
+/* Both PS/2 interrupts drain the controller: a byte goes to the keyboard or
+ * the mouse by where it came from. */
+void ps2_drain(void) {
+    uint8_t status;
+    while ((status = inb(PS2_STATUS)) & STATUS_OUTPUT_FULL) {
+        uint8_t byte = inb(PS2_DATA);
+        if (status & STATUS_MOUSE_DATA) {
+            ps2_mouse_byte(byte);
+        } else {
+            handle_scancode(byte);
+        }
+    }
+}
+
 static void keyboard_irq(struct interrupt_frame *frame) {
     (void)frame;
-    while (inb(PS2_STATUS) & STATUS_OUTPUT_FULL) {
-        handle_scancode(inb(PS2_DATA));
-    }
+    ps2_drain();
     if (!consumer && buffer_head != buffer_tail) {
         wait_queue_wake_all(&key_waiters);
     }
@@ -186,7 +254,7 @@ bool keyboard_init(void) {
         kprintf("[kbd] no PS/2 controller\n");
         return false;
     }
-    if (!controller_command(CMD_DISABLE_PORT1) || !controller_command(CMD_DISABLE_PORT2)) {
+    if (!ps2_command(CMD_DISABLE_PORT1) || !ps2_command(CMD_DISABLE_PORT2)) {
         kprintf("[kbd] PS/2 controller not responding\n");
         return false;
     }
@@ -194,25 +262,27 @@ bool keyboard_init(void) {
         inb(PS2_DATA); /* Flush stale bytes. */
     }
 
-    controller_command(CMD_READ_CONFIG);
-    if (!wait_output_full()) {
+    ps2_command(CMD_READ_CONFIG);
+    if (!ps2_wait_output()) {
         kprintf("[kbd] could not read PS/2 controller configuration\n");
         return false;
     }
     uint8_t config = inb(PS2_DATA);
     config |= CONFIG_PORT1_IRQ | CONFIG_TRANSLATION;
     config &= ~CONFIG_PORT2_IRQ;
-    controller_command(CMD_WRITE_CONFIG);
-    write_data(config);
-    controller_command(CMD_ENABLE_PORT1);
+    ps2_command(CMD_WRITE_CONFIG);
+    ps2_write(config);
+    ps2_command(CMD_ENABLE_PORT1);
 
-    write_data(KBD_ENABLE_SCANNING);
-    if (wait_output_full()) {
+    ps2_write(KBD_ENABLE_SCANNING);
+    if (ps2_wait_output()) {
         inb(PS2_DATA); /* The keyboard's acknowledgement. */
     }
 
     isa_irq_enable(1, keyboard_irq);
     kprintf("[kbd] PS/2 keyboard ready\n");
+    input_register(&keyboard_device);
+    ps2_mouse_init();
     return true;
 }
 

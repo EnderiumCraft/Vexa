@@ -10,6 +10,7 @@
 #include <vexa/object.h>
 #include <vexa/pipe.h>
 #include <vexa/process.h>
+#include <vexa/pty.h>
 #include <vexa/random.h>
 #include <vexa/sched.h>
 #include <vexa/signal.h>
@@ -295,10 +296,6 @@ static struct file *get_file(int64_t fd, uint32_t rights, int64_t *error) {
     return file;
 }
 
-static bool is_terminal(struct object *object) {
-    return object->type == &file_object_type && vfs_is_terminal((struct file *)object);
-}
-
 /* ---- Reading and writing ---- */
 
 static int64_t read_object(struct object *object, uint64_t buffer, uint64_t size) {
@@ -329,7 +326,8 @@ static int64_t read_object(struct object *object, uint64_t buffer, uint64_t size
             break;
         }
         total += n;
-        if ((uint64_t)n < want || object->type != &file_object_type || is_terminal(object)) {
+        if ((uint64_t)n < want || object->type != &file_object_type ||
+            vfs_is_stream((struct file *)object)) {
             break;
         }
     }
@@ -1461,6 +1459,9 @@ static int64_t sys_no_such_call_quietly(struct interrupt_frame *f, uint64_t a0, 
 
 static int64_t sys_ioctl(struct interrupt_frame *f, uint64_t fd, uint64_t request, uint64_t arg,
                          uint64_t a3, uint64_t a4, uint64_t a5) {
+    /* The request is 32 bits (C libraries pass an int, which may arrive
+     * sign-extended). */
+    request = (uint32_t)request;
     if (request == LINUX_FIOCLEX || request == LINUX_FIONCLEX) {
         return lx(handle_set_flags(me()->handles, (int)fd,
                                    request == LINUX_FIOCLEX ? HANDLE_FLAG_CLOSE_ON_EXEC : 0));
@@ -1489,15 +1490,28 @@ static int64_t sys_ioctl(struct interrupt_frame *f, uint64_t fd, uint64_t reques
         object_put(object);
         return copy_to_user(arg, &ready, sizeof(ready)) ? 0 : -LE_EFAULT;
     }
-    bool terminal = is_terminal(object);
-    object_put(object);
-    if (!terminal) {
+    struct tty *tty = object->type == &file_object_type ? vfs_terminal((struct file *)object)
+                                                        : NULL;
+    bool master = tty && pty_is_master((struct file *)object);
+    int pty_number = 0;
+    if (master) {
+        vfs_control((struct file *)object, VX_TTY_PTY_NUMBER, &pty_number, sizeof(pty_number));
+    }
+    object_put(object); /* The tty lives as long as the pty's vnode, which is in use. */
+    if (!tty) {
         return -LE_ENOTTY;
     }
     switch (request) {
+    case LINUX_TIOCGPTN:
+        if (!master) {
+            return -LE_ENOTTY;
+        }
+        return copy_to_user(arg, &pty_number, sizeof(pty_number)) ? 0 : -LE_EFAULT;
+    case LINUX_TIOCSPTLCK:
+        return master ? 0 : -LE_ENOTTY; /* New ptys are never locked. */
     case LINUX_TCGETS: {
         struct tty_settings settings;
-        tty_get_settings(&settings);
+        tty_get_settings(tty, &settings);
         struct linux_termios t = {settings.iflag, settings.oflag, settings.cflag,
                                   settings.lflag, 0, {0}};
         memcpy(t.cc, settings.cc, sizeof(t.cc));
@@ -1511,22 +1525,30 @@ static int64_t sys_ioctl(struct interrupt_frame *f, uint64_t fd, uint64_t reques
             return -LE_EFAULT;
         }
         struct tty_settings settings;
-        tty_get_settings(&settings);
+        tty_get_settings(tty, &settings);
         settings.iflag = t.iflag;
         settings.oflag = t.oflag;
         settings.cflag = t.cflag;
         settings.lflag = t.lflag;
         memcpy(settings.cc, t.cc, sizeof(t.cc));
-        tty_set_settings(&settings);
+        tty_set_settings(tty, &settings);
         return 0;
     }
     case LINUX_TIOCGWINSZ: {
         uint16_t size[4] = {0};
-        tty_window_size(&size[0], &size[1]);
+        tty_window_size(tty, &size[0], &size[1]);
         return copy_to_user(arg, size, sizeof(size)) ? 0 : -LE_EFAULT;
     }
+    case LINUX_TIOCSWINSZ: {
+        uint16_t size[4];
+        if (!copy_from_user(size, arg, sizeof(size))) {
+            return -LE_EFAULT;
+        }
+        tty_set_window_size(tty, size[0], size[1]);
+        return 0;
+    }
     case LINUX_TIOCGPGRP: {
-        int group = (int)tty_foreground();
+        int group = (int)tty_foreground(tty);
         return copy_to_user(arg, &group, sizeof(group)) ? 0 : -LE_EFAULT;
     }
     case LINUX_TIOCSPGRP: {
@@ -1534,7 +1556,7 @@ static int64_t sys_ioctl(struct interrupt_frame *f, uint64_t fd, uint64_t reques
         if (!copy_from_user(&group, arg, sizeof(group))) {
             return -LE_EFAULT;
         }
-        tty_set_foreground((uint32_t)group);
+        tty_set_foreground(tty, (uint32_t)group);
         return 0;
     }
     case LINUX_TIOCGSID: {
@@ -1542,10 +1564,9 @@ static int64_t sys_ioctl(struct interrupt_frame *f, uint64_t fd, uint64_t reques
         return copy_to_user(arg, &session, sizeof(session)) ? 0 : -LE_EFAULT;
     }
     case LINUX_FIONREAD: {
-        int ready = (int)tty_bytes_ready();
+        int ready = (int)tty_bytes_ready(tty);
         return copy_to_user(arg, &ready, sizeof(ready)) ? 0 : -LE_EFAULT;
     }
-    case LINUX_TIOCSWINSZ:
     case LINUX_TIOCSCTTY:
     case LINUX_TIOCNOTTY:
     case LINUX_FIONBIO:
