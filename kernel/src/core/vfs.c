@@ -2,6 +2,7 @@
 #include <vexa/mm.h>
 #include <vexa/mutex.h>
 #include <vexa/string.h>
+#include <vexa/tty.h>
 #include <vexa/vfs.h>
 
 #define MAX_FILESYSTEMS 8
@@ -322,11 +323,19 @@ static int64_t file_object_write(struct object *object, const void *buffer, size
     return vfs_write((struct file *)object, buffer, size);
 }
 
+static uint32_t file_object_poll(struct object *object) {
+    if (vfs_is_terminal((struct file *)object)) {
+        return (tty_bytes_ready() ? OBJECT_READABLE : 0) | OBJECT_WRITABLE;
+    }
+    return OBJECT_READABLE | OBJECT_WRITABLE; /* Files never make you wait for long. */
+}
+
 const struct object_type file_object_type = {
     .name = "file",
     .destroy = file_destroy,
     .read = file_object_read,
     .write = file_object_write,
+    .poll = file_object_poll,
 };
 
 static bool writes(uint32_t flags) {
@@ -534,6 +543,50 @@ static bool is_dot_or_dotdot(const char *name, size_t length) {
     return (length == 1 && name[0] == '.') || (length == 2 && name[0] == '.' && name[1] == '.');
 }
 
+int vfs_link(const char *from, size_t from_length, const char *to, size_t to_length) {
+    vfs_lock();
+    struct walk from_walk = {0}, to_walk = {0};
+    struct vnode *target = NULL, *dir = NULL;
+    const char *name;
+    size_t name_length;
+    int error = resolve(&from_walk, from, from_length, false, false, &target, NULL, NULL);
+    if (!error) {
+        error = resolve(&to_walk, to, to_length, true, true, &dir, &name, &name_length);
+    }
+    if (!error && target->type == VX_TYPE_DIRECTORY) {
+        error = -VX_EACCES; /* No hard links to directories. */
+    } else if (!error && (name_length == 0 || is_dot_or_dotdot(name, name_length))) {
+        error = -VX_EEXIST;
+    } else if (!error && dir->type != VX_TYPE_DIRECTORY) {
+        error = -VX_ENOTDIR;
+    } else if (!error && target->mount != dir->mount) {
+        error = -VX_EXDEV;
+    } else if (!error && (dir->mount->read_only || !dir->ops->link)) {
+        error = dir->mount->read_only ? -VX_EROFS : -VX_EACCES;
+    } else if (!error && name_length > VX_NAME_MAX) {
+        error = -VX_ENAMETOOLONG;
+    }
+    if (!error) {
+        struct vnode *existing;
+        if (dir->ops->lookup(dir, name, name_length, &existing) == 0) {
+            vnode_put(existing);
+            error = -VX_EEXIST;
+        } else {
+            error = dir->ops->link(dir, name, name_length, target);
+        }
+    }
+    if (dir) {
+        vnode_put(dir);
+    }
+    if (target) {
+        vnode_put(target);
+    }
+    walk_done(&from_walk);
+    walk_done(&to_walk);
+    vfs_unlock();
+    return error;
+}
+
 int vfs_rename(const char *from, size_t from_length, const char *to, size_t to_length) {
     /* Moving a directory inside itself would cut it off from the tree. Paths
      * from system calls are absolute and normalized, so a prefix check works. */
@@ -723,6 +776,16 @@ int vfs_statfs(const char *path, size_t length, uint64_t *total, uint64_t *free,
     }
     vfs_unlock();
     return error;
+}
+
+uint64_t vfs_share_page(struct file *file, uint64_t index) {
+    if (!file->vnode->ops->share_page) {
+        return 0;
+    }
+    vfs_lock();
+    uint64_t phys = file->vnode->ops->share_page(file->vnode, index);
+    vfs_unlock();
+    return phys;
 }
 
 int vfs_truncate(struct file *file, uint64_t size) {

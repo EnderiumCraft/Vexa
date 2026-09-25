@@ -91,6 +91,7 @@ bool vmm_is_stack_guard(uint64_t virt);
 
 #define VM_WRITE 0x1
 #define VM_EXEC 0x2
+#define VM_SHARED 0x4 /* Pages stay shared (not copy-on-write) across fork. */
 
 struct vm_area {
     uint64_t start, end; /* Page aligned, end exclusive. */
@@ -126,6 +127,11 @@ struct address_space *vm_fork(struct address_space *parent);
 int vm_add_area(struct address_space *as, uint64_t start, uint64_t end, unsigned flags);
 /* Finds room for `size` bytes and adds an area there. Returns 0 if full. */
 uint64_t vm_map(struct address_space *as, uint64_t size, unsigned flags);
+/* Fills a shared area (from vm_map/vm_map_fixed with VM_SHARED) with pages:
+ * pages[i] (whose reference the mapping takes over), or fresh zeroed pages
+ * where pages is NULL or an entry is 0. */
+int vm_populate_shared(struct address_space *as, uint64_t start, size_t count,
+                       const uint64_t *pages);
 /* Maps exactly at `start`, replacing whatever was there. */
 int vm_map_fixed(struct address_space *as, uint64_t start, uint64_t size, unsigned flags);
 int vm_unmap(struct address_space *as, uint64_t start, uint64_t size);
@@ -141,6 +147,9 @@ bool vm_handle_fault(struct address_space *as, uint64_t address, bool write);
 /* Copies into another (inactive) address space, e.g. to set up a new stack. */
 bool vm_write(struct address_space *as, uint64_t address, const void *data, size_t size);
 uint64_t vm_resident_bytes(struct address_space *as);
+/* If `address` is in a shared area (VM_SHARED), stores the physical address
+ * behind it (faulting the page in) and returns true. */
+bool vm_shared_physical(struct address_space *as, uint64_t address, uint64_t *phys);
 /* Calls `fn` for each area, with the address space locked (no sleeping). */
 void vm_for_each_area(struct address_space *as,
                       void (*fn)(const struct vm_area *area, void *arg), void *arg);

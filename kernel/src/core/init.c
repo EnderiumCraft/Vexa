@@ -83,6 +83,9 @@ void init_thread(void *unused) {
     vfs_mkdir("/mnt", 4);
     vfs_mkdir("/tmp", 4);
     vfs_chmod("/tmp", 4, 01777);
+    vfs_mkdir("/run", 4);
+    vfs_mkdir("/run/shm", 8);
+    vfs_chmod("/run/shm", 8, 01777);
 
     storage_init();
 

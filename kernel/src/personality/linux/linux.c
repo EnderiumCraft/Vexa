@@ -1046,6 +1046,33 @@ static int64_t symlink_at(uint64_t user_target, int64_t dirfd, uint64_t user_pat
     return error;
 }
 
+static int64_t link_at(int64_t old_dirfd, uint64_t old_path, int64_t new_dirfd,
+                       uint64_t new_path) {
+    char *from, *to;
+    int64_t error = path_at(old_dirfd, old_path, &from);
+    if (error) {
+        return error;
+    }
+    error = path_at(new_dirfd, new_path, &to);
+    if (!error) {
+        error = vfs_link(from, strlen(from), to, strlen(to));
+        error = error == -VX_EACCES ? -LE_EPERM : lx(error);
+        kfree(to);
+    }
+    kfree(from);
+    return error;
+}
+
+static int64_t sys_link(struct interrupt_frame *f, uint64_t from, uint64_t to, uint64_t a2,
+                        uint64_t a3, uint64_t a4, uint64_t a5) {
+    return link_at(LINUX_AT_FDCWD, from, LINUX_AT_FDCWD, to);
+}
+
+static int64_t sys_linkat(struct interrupt_frame *f, uint64_t old_dirfd, uint64_t from,
+                          uint64_t new_dirfd, uint64_t to, uint64_t flags, uint64_t a5) {
+    return link_at((int)old_dirfd, from, (int)new_dirfd, to);
+}
+
 static int64_t sys_symlink(struct interrupt_frame *f, uint64_t target, uint64_t path,
                            uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5) {
     return symlink_at(target, LINUX_AT_FDCWD, path);
@@ -1479,16 +1506,9 @@ static int16_t poll_events(int fd, int16_t wanted) {
     if (!object) {
         return LINUX_POLLNVAL;
     }
-    int16_t ready = 0;
-    if (is_terminal(object)) {
-        ready = (tty_bytes_ready() ? LINUX_POLLIN : 0) | LINUX_POLLOUT;
-    } else if (object->type == &pipe_read_type) {
-        ready = LINUX_POLLIN;
-    } else if (object->type == &pipe_write_type) {
-        ready = LINUX_POLLOUT;
-    } else {
-        ready = LINUX_POLLIN | LINUX_POLLOUT;
-    }
+    /* The OBJECT_* bits have Linux's poll values. */
+    int16_t ready = (int16_t)(object->type->poll ? object->type->poll(object)
+                                                 : OBJECT_READABLE | OBJECT_WRITABLE);
     object_put(object);
     return ready & (wanted | LINUX_POLLERR | LINUX_POLLHUP);
 }
@@ -1666,6 +1686,220 @@ static int64_t sys_pselect6(struct interrupt_frame *f, uint64_t count, uint64_t 
     return do_select(count, sets, ms);
 }
 
+/* ---- epoll ---- */
+
+struct epoll_item {
+    int fd;
+    uint32_t events;
+    uint64_t data;
+};
+
+struct epoll {
+    struct object object;
+    struct spinlock lock;
+    struct epoll_item *items;
+    size_t count, capacity;
+};
+
+struct linux_epoll_event {
+    uint32_t events;
+    uint64_t data;
+} __attribute__((packed));
+
+static void epoll_destroy(struct object *object) {
+    struct epoll *ep = (struct epoll *)object;
+    kfree(ep->items);
+    kfree(ep);
+}
+
+static const struct object_type epoll_type = {
+    .name = "epoll",
+    .destroy = epoll_destroy,
+};
+
+static int64_t sys_epoll_create1(struct interrupt_frame *f, uint64_t flags, uint64_t a1,
+                                 uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5) {
+    struct epoll *ep = kzalloc(sizeof(*ep));
+    if (!ep) {
+        return -LE_ENOMEM;
+    }
+    object_init(&ep->object, &epoll_type);
+    int fd = handle_add(me()->handles, &ep->object, HANDLE_RIGHT_READ);
+    if (fd < 0) {
+        object_put(&ep->object);
+        return lx(fd);
+    }
+    if (flags & LINUX_O_CLOEXEC) {
+        handle_set_flags(me()->handles, fd, HANDLE_FLAG_CLOSE_ON_EXEC);
+    }
+    return fd;
+}
+
+static int64_t sys_epoll_create(struct interrupt_frame *f, uint64_t size, uint64_t a1,
+                                uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5) {
+    return (int64_t)size <= 0 ? -LE_EINVAL : sys_epoll_create1(f, 0, 0, 0, 0, 0, 0);
+}
+
+static struct epoll *get_epoll(int64_t fd) {
+    int error;
+    return (struct epoll *)handle_get(me()->handles, (int)fd, &epoll_type, 0, &error);
+}
+
+static int64_t sys_epoll_ctl(struct interrupt_frame *f, uint64_t epfd, uint64_t op, uint64_t fd,
+                             uint64_t user_event, uint64_t a4, uint64_t a5) {
+    struct linux_epoll_event event = {0, 0};
+    if (op != LINUX_EPOLL_CTL_DEL && !copy_from_user(&event, user_event, sizeof(event))) {
+        return -LE_EFAULT;
+    }
+    uint32_t rights;
+    struct object *target = handle_get_any(me()->handles, (int)fd, &rights);
+    if (!target) {
+        return -LE_EBADF;
+    }
+    bool is_epoll = target->type == &epoll_type;
+    object_put(target);
+    struct epoll *ep = get_epoll(epfd);
+    if (!ep) {
+        return -LE_EBADF;
+    }
+    if (is_epoll || (int)fd == (int)epfd) {
+        object_put(&ep->object);
+        return -LE_EINVAL; /* Nesting epoll sets isn't supported. */
+    }
+    int64_t result = 0;
+    struct epoll_item *grown = NULL;
+    if (op == LINUX_EPOLL_CTL_ADD && ep->count == ep->capacity) {
+        grown = kmalloc((ep->capacity ? ep->capacity * 2 : 8) * sizeof(struct epoll_item));
+        if (!grown) {
+            object_put(&ep->object);
+            return -LE_ENOMEM;
+        }
+    }
+    uint64_t flags = spin_lock_irqsave(&ep->lock);
+    size_t at = 0;
+    while (at < ep->count && ep->items[at].fd != (int)fd) {
+        at++;
+    }
+    bool present = at < ep->count;
+    switch (op) {
+    case LINUX_EPOLL_CTL_ADD:
+        if (present) {
+            result = -LE_EEXIST;
+            break;
+        }
+        if (grown) {
+            memcpy(grown, ep->items, ep->count * sizeof(struct epoll_item));
+            struct epoll_item *old = ep->items;
+            ep->items = grown;
+            ep->capacity = ep->capacity ? ep->capacity * 2 : 8;
+            grown = old; /* Freed below, outside the lock. */
+        }
+        ep->items[ep->count++] = (struct epoll_item){(int)fd, event.events, event.data};
+        break;
+    case LINUX_EPOLL_CTL_MOD:
+        if (!present) {
+            result = -LE_ENOENT;
+            break;
+        }
+        ep->items[at].events = event.events;
+        ep->items[at].data = event.data;
+        break;
+    case LINUX_EPOLL_CTL_DEL:
+        if (!present) {
+            result = -LE_ENOENT;
+            break;
+        }
+        ep->items[at] = ep->items[--ep->count];
+        break;
+    default:
+        result = -LE_EINVAL;
+    }
+    spin_unlock_irqrestore(&ep->lock, flags);
+    kfree(grown);
+    object_put(&ep->object);
+    return result;
+}
+
+struct epoll_wait_args {
+    struct epoll *ep;
+    struct linux_epoll_event *out;
+    int max;
+};
+
+static int64_t epoll_check(void *arg) {
+    struct epoll_wait_args *w = arg;
+    struct epoll *ep = w->ep;
+    /* Copy the list, then look at each descriptor without the lock held. */
+    uint64_t flags = spin_lock_irqsave(&ep->lock);
+    size_t count = ep->count;
+    struct epoll_item snapshot[64];
+    count = count > 64 ? 64 : count;
+    memcpy(snapshot, ep->items, count * sizeof(struct epoll_item));
+    spin_unlock_irqrestore(&ep->lock, flags);
+    int found = 0;
+    for (size_t i = 0; i < count && found < w->max; i++) {
+        uint32_t wanted = snapshot[i].events;
+        if (!(wanted & (LINUX_POLLIN | LINUX_POLLOUT | LINUX_POLLERR | LINUX_POLLHUP)) &&
+            !(wanted & LINUX_EPOLLRDHUP)) {
+            continue; /* Disabled (a one-shot that already fired). */
+        }
+        int16_t ready = poll_events(snapshot[i].fd, (int16_t)(wanted & 0xffff));
+        if (ready & LINUX_POLLNVAL) {
+            continue; /* Closed: Linux drops it from the set. */
+        }
+        if (ready) {
+            w->out[found].events = (uint32_t)(uint16_t)ready;
+            w->out[found].data = snapshot[i].data;
+            found++;
+            if (wanted & LINUX_EPOLLONESHOT) {
+                flags = spin_lock_irqsave(&ep->lock);
+                for (size_t j = 0; j < ep->count; j++) {
+                    if (ep->items[j].fd == snapshot[i].fd) {
+                        ep->items[j].events &= LINUX_EPOLLONESHOT | LINUX_EPOLLET;
+                    }
+                }
+                spin_unlock_irqrestore(&ep->lock, flags);
+            }
+        }
+    }
+    return found;
+}
+
+static int64_t epoll_wait_ms(uint64_t epfd, uint64_t user_events, uint64_t max,
+                             int64_t timeout_ms) {
+    if ((int64_t)max <= 0 || max > 1024) {
+        return -LE_EINVAL;
+    }
+    struct epoll_wait_args w = {get_epoll(epfd), kmalloc(max * sizeof(struct linux_epoll_event)),
+                                (int)max};
+    if (!w.ep || !w.out) {
+        if (w.ep) {
+            object_put(&w.ep->object);
+        }
+        kfree(w.out);
+        return w.ep ? -LE_ENOMEM : -LE_EBADF;
+    }
+    int64_t found = wait_until_ready(epoll_check, &w, timeout_ms);
+    if (found > 0 && !copy_to_user(user_events, w.out, found * sizeof(struct linux_epoll_event))) {
+        found = -LE_EFAULT;
+    }
+    object_put(&w.ep->object);
+    kfree(w.out);
+    return found;
+}
+
+static int64_t sys_epoll_wait(struct interrupt_frame *f, uint64_t epfd, uint64_t events,
+                              uint64_t max, uint64_t timeout, uint64_t a4, uint64_t a5) {
+    return epoll_wait_ms(epfd, events, max, (int)timeout);
+}
+
+static int64_t sys_epoll_pwait2(struct interrupt_frame *f, uint64_t epfd, uint64_t events,
+                                uint64_t max, uint64_t timeout, uint64_t mask, uint64_t a5) {
+    int64_t ms;
+    int64_t error = timespec_ms(timeout, &ms);
+    return error ? error : epoll_wait_ms(epfd, events, max, ms);
+}
+
 /* ---- Memory ---- */
 
 static int64_t sys_brk(struct interrupt_frame *f, uint64_t end, uint64_t a1, uint64_t a2,
@@ -1676,6 +1910,8 @@ static int64_t sys_brk(struct interrupt_frame *f, uint64_t end, uint64_t a1, uin
 static unsigned vm_flags_of(uint64_t prot) {
     return (prot & LINUX_PROT_WRITE ? VM_WRITE : 0) | (prot & LINUX_PROT_EXEC ? VM_EXEC : 0);
 }
+
+#define SHARED_MAP_MAX (256ULL * 1024 * 1024)
 
 static int64_t sys_mmap(struct interrupt_frame *f, uint64_t address, uint64_t length,
                         uint64_t prot, uint64_t flags, uint64_t fd, uint64_t offset) {
@@ -1693,8 +1929,19 @@ static int64_t sys_mmap(struct interrupt_frame *f, uint64_t address, uint64_t le
         }
     }
     struct address_space *as = me()->address_space;
-    /* A file's contents are copied in, so the area starts out writable. */
-    unsigned vm_flags = vm_flags_of(prot) | (file ? VM_WRITE : 0);
+    /* Shared mappings of anonymous memory or of files that can lend their
+     * pages (tmpfs, so /dev/shm) really share; other file mappings get a
+     * copy of the file, so the area starts out writable. */
+    bool shared = (flags & LINUX_MAP_SHARED) &&
+                  (anonymous || file->vnode->ops->share_page);
+    if (shared && size > SHARED_MAP_MAX) {
+        if (file) {
+            vfs_close(file);
+        }
+        return -LE_ENOMEM; /* Shared memory is filled in up front. */
+    }
+    unsigned vm_flags = shared ? vm_flags_of(prot) | VM_SHARED
+                               : vm_flags_of(prot) | (file ? VM_WRITE : 0);
     int64_t result;
     if (flags & LINUX_MAP_FIXED) {
         result = address % PAGE_SIZE || address < USER_BASE || address + size > USER_END
@@ -1707,9 +1954,23 @@ static int64_t sys_mmap(struct interrupt_frame *f, uint64_t address, uint64_t le
         uint64_t mapped = vm_map(as, size, vm_flags);
         result = mapped ? (int64_t)mapped : -LE_ENOMEM;
     }
-    if (file && result > 0) {
+    if (shared && result > 0) {
+        size_t count = size / PAGE_SIZE;
+        uint64_t *pages = file ? kzalloc(count * sizeof(uint64_t)) : NULL;
+        for (size_t i = 0; pages && i < count; i++) {
+            pages[i] = vfs_share_page(file, offset / PAGE_SIZE + i);
+        }
+        if (file && !pages) {
+            vm_unmap(as, (uint64_t)result, size);
+            result = -LE_ENOMEM;
+        } else if (vm_populate_shared(as, (uint64_t)result, count, pages)) {
+            vm_unmap(as, (uint64_t)result, size);
+            result = -LE_ENOMEM;
+        }
+        kfree(pages);
+    } else if (file && result > 0) {
         /* Private file mappings get a copy of the file; changes to shared ones
-         * aren't written back yet. */
+         * of other files aren't written back yet. */
         uint8_t *chunk = kmalloc(IO_CHUNK);
         for (uint64_t done = 0; chunk && done < length; done += IO_CHUNK) {
             uint64_t want = length - done < IO_CHUNK ? length - done : IO_CHUNK;
@@ -2935,7 +3196,7 @@ static const linux_fn syscalls[] = {
     CALL(mkdir, sys_mkdir),
     CALL(rmdir, sys_rmdir),
     CALL(creat, sys_creat),
-    CALL(link, sys_not_permitted),
+    CALL(link, sys_link),
     CALL(unlink, sys_unlink),
     CALL(symlink, sys_symlink),
     CALL(readlink, sys_readlink),
@@ -3009,7 +3270,7 @@ static const linux_fn syscalls[] = {
     CALL(newfstatat, sys_newfstatat),
     CALL(unlinkat, sys_unlinkat),
     CALL(renameat, sys_renameat),
-    CALL(linkat, sys_not_permitted),
+    CALL(linkat, sys_linkat),
     CALL(symlinkat, sys_symlinkat),
     CALL(readlinkat, sys_readlinkat),
     CALL(fchmodat, sys_fchmodat),
@@ -3024,6 +3285,12 @@ static const linux_fn syscalls[] = {
     CALL(renameat2, sys_renameat2),
     CALL(getrandom, sys_getrandom),
     CALL(membarrier, sys_no_such_call_quietly),
+    CALL(epoll_create, sys_epoll_create),
+    CALL(epoll_create1, sys_epoll_create1),
+    CALL(epoll_ctl, sys_epoll_ctl),
+    CALL(epoll_wait, sys_epoll_wait),
+    CALL(epoll_pwait, sys_epoll_wait),
+    CALL(epoll_pwait2, sys_epoll_pwait2),
     CALL(fadvise64, sys_accept_quietly),
     CALL(copy_file_range, sys_no_such_call_quietly),
     CALL(statx, sys_no_such_call_quietly),

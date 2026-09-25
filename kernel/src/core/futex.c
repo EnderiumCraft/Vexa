@@ -14,6 +14,22 @@
  * scheduler lock (inside wait_queue_wake_all), or an address space's lock
  * (reading the value). */
 
+/* What a waiter waits on: an address in an address space, or, in memory
+ * shared between processes, a physical address (as == NULL), so waits and
+ * wakes from different processes meet, as with Linux's shared futexes. */
+struct futex_key {
+    struct address_space *as;
+    uint64_t address;
+};
+
+static struct futex_key key_for(struct address_space *as, uint64_t address) {
+    uint64_t phys;
+    if (vm_shared_physical(as, address, &phys)) {
+        return (struct futex_key){NULL, phys};
+    }
+    return (struct futex_key){as, address};
+}
+
 struct futex_waiter {
     struct address_space *as;
     uint64_t address;
@@ -47,9 +63,8 @@ int futex_wait(uint64_t address, uint32_t expected, uint32_t bitset, int64_t tim
     if (!valid(address) || bitset == 0) {
         return -VX_EINVAL;
     }
-    struct futex_waiter waiter = {
-        .as = process_current()->address_space, .address = address, .bitset = bitset,
-    };
+    struct futex_key key = key_for(process_current()->address_space, address);
+    struct futex_waiter waiter = {.as = key.as, .address = key.address, .bitset = bitset};
     uint64_t flags = spin_lock_irqsave(&futex_lock);
     uint32_t value;
     if (!copy_from_user(&value, address, sizeof(value))) {
@@ -98,8 +113,9 @@ int futex_wake(struct address_space *as, uint64_t address, int count, uint32_t b
     if (!valid(address) || count <= 0) {
         return count <= 0 ? 0 : -VX_EINVAL;
     }
+    struct futex_key key = key_for(as, address);
     uint64_t flags = spin_lock_irqsave(&futex_lock);
-    int woke = wake_locked(as, address, count, bitset);
+    int woke = wake_locked(key.as, key.address, count, bitset);
     spin_unlock_irqrestore(&futex_lock, flags);
     return woke;
 }
@@ -110,6 +126,7 @@ int futex_requeue(uint64_t address, int wake, uint64_t target, int move, bool co
         return -VX_EINVAL;
     }
     struct address_space *as = process_current()->address_space;
+    struct futex_key from = key_for(as, address), to = key_for(as, target);
     uint64_t flags = spin_lock_irqsave(&futex_lock);
     if (compare) {
         uint32_t value;
@@ -122,10 +139,11 @@ int futex_requeue(uint64_t address, int wake, uint64_t target, int move, bool co
             return -VX_EAGAIN;
         }
     }
-    int done = wake_locked(as, address, wake, FUTEX_ANY);
+    int done = wake_locked(from.as, from.address, wake, FUTEX_ANY);
     for (struct futex_waiter *waiter = waiters; waiter && move > 0; waiter = waiter->next) {
-        if (waiter->as == as && waiter->address == address) {
-            waiter->address = target;
+        if (waiter->as == from.as && waiter->address == from.address) {
+            waiter->as = to.as;
+            waiter->address = to.address;
             move--;
             done++;
         }

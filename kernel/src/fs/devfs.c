@@ -93,6 +93,7 @@ static const char *const link_targets[][2] = {
     {"stdin", "/proc/self/fd/0"},
     {"stdout", "/proc/self/fd/1"},
     {"stderr", "/proc/self/fd/2"},
+    {"shm", "/run/shm"}, /* POSIX shared memory and semaphores: files in a tmpfs. */
 };
 
 static int64_t link_read(struct vnode *v, void *b, size_t s, uint64_t o) {

@@ -88,6 +88,30 @@ COREUTILS_TARBALL := third_party/coreutils-$(COREUTILS_VERSION).tar.xz
 COREUTILS_BUILD := $(BUILD)/coreutils-$(COREUTILS_VERSION)
 COREUTILS := $(COREUTILS_BUILD)/src/coreutils
 
+# zlib (for Python's zlib module), as a static library.
+ZLIB_URL := https://archive.ubuntu.com/ubuntu/pool/main/z/zlib/zlib_1.3.dfsg.orig.tar.xz
+ZLIB_SHA256 := 5eea0322c1c21c75cad3b607ac1c43ff5c71e014b8ac4a34300b5e2b80d02e70
+ZLIB_TARBALL := third_party/zlib-1.3.tar.xz
+ZLIB_PREFIX := $(BUILD)/zlib
+ZLIB := $(ZLIB_PREFIX)/lib/libz.a
+
+# libffi (for Python's ctypes), as a static library, from the official release.
+LIBFFI_VERSION := 3.4.6
+LIBFFI_URL := https://github.com/libffi/libffi/releases/download/v$(LIBFFI_VERSION)/libffi-$(LIBFFI_VERSION).tar.gz
+LIBFFI_SHA256 := b0dea9df23c863a7a50e825440f3ebffabd65df1497108e5d437747843895a4e
+LIBFFI_TARBALL := third_party/libffi-$(LIBFFI_VERSION).tar.gz
+LIBFFI_PREFIX := $(BUILD)/libffi
+LIBFFI := $(LIBFFI_PREFIX)/lib/libffi.a
+
+# Python, installed into its own root and pruned (tools/prune-python.sh).
+PYTHON_VERSION := 3.12.3
+PYTHON_URL := https://archive.ubuntu.com/ubuntu/pool/main/p/python3.12/python3.12_$(PYTHON_VERSION).orig.tar.xz
+PYTHON_SHA256 := 56bfef1fdfc1221ce6720e43a661e3eb41785dd914ce99698d8c7896af4bdaa1
+PYTHON_TARBALL := third_party/Python-$(PYTHON_VERSION).tar.xz
+PYTHON_BUILD := $(BUILD)/Python-$(PYTHON_VERSION)
+PYTHON_ROOT := $(BUILD)/python-root
+PYTHON := $(PYTHON_ROOT)/.done
+
 # Everything under /linux: the Linux programs and what they need.
 LINUX_ROOT := $(BUILD)/linux-root
 ifeq ($(LINUX_COMPAT),1)
@@ -105,7 +129,7 @@ USER_OBJS := $(LIBVEXA_OBJS) \
 	$(patsubst %,$(BUILD)/%.o,$(wildcard $(addsuffix /*.c,$(addprefix userland/,$(PROGRAMS)))))
 
 .PHONY: all kernel programs iso run run-disk run-nographic test test-disks clean distclean \
-	busybox busybox-source bash coreutils test-native
+	busybox busybox-source bash coreutils python test-native
 
 all: iso
 kernel: $(KERNEL)
@@ -228,20 +252,78 @@ $(COREUTILS): $(COREUTILS_TARBALL)
 
 coreutils: $(COREUTILS)
 
+# ---- zlib and Python ----
+
+# $(call fetch,url,sha256): downloads to $@, checked against the checksum.
+define fetch
+	mkdir -p $(dir $@)
+	curl -fsSL -o $@.part $(1)
+	echo "$(2)  $@.part" | sha256sum -c --quiet
+	mv $@.part $@
+endef
+
+$(ZLIB_TARBALL):
+	$(call fetch,$(ZLIB_URL),$(ZLIB_SHA256))
+
+$(ZLIB): $(ZLIB_TARBALL)
+	rm -rf $(BUILD)/zlib-1.3.dfsg $(ZLIB_PREFIX) && mkdir -p $(BUILD)
+	tar -xJf $(ZLIB_TARBALL) -C $(BUILD)
+	cd $(BUILD)/zlib-1.3.dfsg && CC=$(MUSL_CC) CFLAGS="-O2 -fPIC" ./configure --static \
+		--prefix=$(abspath $(ZLIB_PREFIX)) > /dev/null
+	$(MAKE) -C $(BUILD)/zlib-1.3.dfsg install > /dev/null
+
+$(LIBFFI_TARBALL):
+	$(call fetch,$(LIBFFI_URL),$(LIBFFI_SHA256))
+
+$(LIBFFI): $(LIBFFI_TARBALL) | $(BUILD)/linux-headers
+	rm -rf $(BUILD)/libffi-$(LIBFFI_VERSION) $(LIBFFI_PREFIX) && mkdir -p $(BUILD)
+	tar -xzf $(LIBFFI_TARBALL) -C $(BUILD)
+	cd $(BUILD)/libffi-$(LIBFFI_VERSION) && CC=$(MUSL_CC) \
+		CFLAGS="-O2 -fPIC -isystem $(abspath $(BUILD)/linux-headers)" ./configure \
+		--disable-shared --enable-static --disable-docs \
+		--prefix=$(abspath $(LIBFFI_PREFIX)) > configure.log
+	$(MAKE) -C $(BUILD)/libffi-$(LIBFFI_VERSION) install > /dev/null
+
+$(PYTHON_TARBALL):
+	$(call fetch,$(PYTHON_URL),$(PYTHON_SHA256))
+
+# Built with musl like the rest; host pkg-config is kept out so only libraries
+# built here are used. The build runs its own python on the host (which has
+# musl's loader), and optional modules without their libraries are skipped.
+$(PYTHON): $(PYTHON_TARBALL) $(ZLIB) $(LIBFFI) tools/prune-python.sh | $(BUILD)/linux-headers
+	rm -rf $(PYTHON_BUILD) $(PYTHON_ROOT) && mkdir -p $(BUILD)
+	tar -xJf $(PYTHON_TARBALL) -C $(BUILD)
+	cd $(PYTHON_BUILD) && \
+		PKG_CONFIG_LIBDIR=$(abspath $(ZLIB_PREFIX))/lib/pkgconfig:$(abspath $(LIBFFI_PREFIX))/lib/pkgconfig \
+		PKG_CONFIG_PATH= MUSL_CC=$(MUSL_CC) ./configure \
+		CC=$(abspath tools/musl-cc-wrapper.sh) --prefix=/usr --without-ensurepip \
+		--disable-test-modules --with-computed-gotos \
+		CPPFLAGS="-I$(abspath $(ZLIB_PREFIX))/include -I$(abspath $(LIBFFI_PREFIX))/include \
+		-isystem $(abspath $(BUILD)/linux-headers)" \
+		LDFLAGS="-L$(abspath $(ZLIB_PREFIX))/lib -L$(abspath $(LIBFFI_PREFIX))/lib" > configure.log
+	MUSL_CC=$(MUSL_CC) $(MAKE) -C $(PYTHON_BUILD) -j$$(nproc) > $(PYTHON_BUILD)/build.log 2>&1
+	MUSL_CC=$(MUSL_CC) $(MAKE) -C $(PYTHON_BUILD) install DESTDIR=$(abspath $(PYTHON_ROOT)) \
+		> $(PYTHON_BUILD)/install.log 2>&1
+	tools/prune-python.sh $(PYTHON_ROOT) $(basename $(PYTHON_VERSION))
+	touch $@
+
+python: $(PYTHON)
+
 # ---- /linux ----
 
 # Linux test programs (tests/linux/), built with musl like the rest of /linux.
-LINUX_TESTS := $(patsubst tests/linux/%.c,$(BUILD)/linux-tests/%,$(wildcard tests/linux/*.c))
+LINUX_TESTS := $(patsubst tests/linux/%.c,$(BUILD)/linux-tests/%,$(wildcard tests/linux/*.c)) \
+	$(wildcard tests/linux/*.py)
 
 $(BUILD)/linux-tests/%: tests/linux/%.c
 	@mkdir -p $(dir $@)
 	$(MUSL_CC) -O2 -Wall -Wextra -Werror -pthread $< -o $@
 
-$(LINUX_ROOT)/.done: $(BUSYBOX) $(BASH) $(COREUTILS) $(MUSL_LIBC) $(LINUX_TESTS) \
+$(LINUX_ROOT)/.done: $(BUSYBOX) $(BASH) $(COREUTILS) $(PYTHON) $(MUSL_LIBC) $(LINUX_TESTS) \
 		tools/make-linux-root.sh
 	tools/make-linux-root.sh $(LINUX_ROOT) $(MUSL_LIBC) $(BUSYBOX) \
 		$(BUSYBOX_BUILD)/busybox.links $(BASH) $(COREUTILS) $(COREUTILS_BUILD)/programs.txt \
-		$(LINUX_TESTS)
+		$(PYTHON_ROOT) $(LINUX_TESTS)
 	touch $@
 
 $(BUILD)/disk-content: $(DISK_CONTENT_FILES) $(BUILD)/programs/hello-world
@@ -329,6 +411,7 @@ clean:
 	rm -rf $(BUILD)
 
 distclean: clean
-	rm -rf limine $(BUSYBOX_SRC) $(BASH_TARBALL) $(COREUTILS_TARBALL)
+	rm -rf limine $(BUSYBOX_SRC) $(BASH_TARBALL) $(COREUTILS_TARBALL) $(ZLIB_TARBALL) \
+		$(LIBFFI_TARBALL) $(PYTHON_TARBALL)
 
 -include $(OBJS:.o=.d) $(USER_OBJS:.o=.d)

@@ -798,6 +798,20 @@ static int ext2_create(struct vnode *dir_vnode, const char *name, size_t length,
     return 0;
 }
 
+static int ext2_link(struct vnode *dir_vnode, const char *name, size_t length,
+                     struct vnode *target) {
+    struct ext2 *fs = fs_of(dir_vnode);
+    struct ext2_node *node = node_of(target);
+    int error = add_entry(fs, node_of(dir_vnode), name, length, node->number, target->type);
+    if (!error) {
+        node->inode.links_count++;
+        node->inode.ctime = (uint32_t)time_now();
+        target->links = node->inode.links_count;
+        error = write_inode(fs, node);
+    }
+    return error;
+}
+
 static int ext2_remove(struct vnode *dir_vnode, const char *name, size_t length) {
     struct ext2 *fs = fs_of(dir_vnode);
     struct ext2_node *dir = node_of(dir_vnode);
@@ -1030,6 +1044,7 @@ static const struct vnode_ops ext2_ops = {
     .lookup = ext2_lookup,
     .create = ext2_create,
     .remove = ext2_remove,
+    .link = ext2_link,
     .rename = ext2_rename,
     .read_dir = ext2_read_dir,
     .read = ext2_read,

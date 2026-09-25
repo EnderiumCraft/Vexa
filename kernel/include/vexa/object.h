@@ -17,7 +17,16 @@ struct object_type {
      * buffers; return bytes transferred or a negative VX_E* error. */
     int64_t (*read)(struct object *object, void *buffer, size_t size);
     int64_t (*write)(struct object *object, const void *buffer, size_t size);
+    /* Optional: what reading or writing would do right now, as OBJECT_*
+     * bits (for poll, select and epoll). Without it: always ready. */
+    uint32_t (*poll)(struct object *object);
 };
+
+/* Readiness bits (the same values as Linux's POLLIN, POLLOUT...). */
+#define OBJECT_READABLE 0x001 /* A read wouldn't wait. */
+#define OBJECT_WRITABLE 0x004 /* A write wouldn't wait. */
+#define OBJECT_ERROR 0x008    /* E.g. a pipe with no reader left. */
+#define OBJECT_HANGUP 0x010   /* The other end is gone. */
 
 struct object {
     const struct object_type *type;

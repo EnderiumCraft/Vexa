@@ -2,11 +2,11 @@
 # Builds the tree that becomes /linux: what Linux programs see as /lib, /bin,
 # /usr/bin... (the Linux subsystem looks there first).
 # Usage: tools/make-linux-root.sh <dir> <musl libc.so> <busybox> <busybox.links> <bash>
-#                                 <coreutils> <coreutils programs.txt>
+#                                 <coreutils> <coreutils programs.txt> <python root>
 #                                 [test programs for /usr/bin...]
 set -eu
-root=$1 libc=$2 busybox=$3 links=$4 bash=$5 coreutils=$6 coreutils_programs=$7
-shift 7
+root=$1 libc=$2 busybox=$3 links=$4 bash=$5 coreutils=$6 coreutils_programs=$7 python=$8
+shift 8
 rm -rf "$root"
 mkdir -p "$root/lib" "$root/bin" "$root/sbin" "$root/usr/bin" "$root/usr/sbin" "$root/etc"
 
@@ -38,6 +38,9 @@ while read -r program; do
     rm -f "$root/bin/$program" "$root/usr/bin/$program"
     ln -s ../usr/bin/coreutils "$root/bin/$program"
 done < "$coreutils_programs"
+
+# Python (its /usr/bin/python3 and /usr/lib/python3.x).
+cp -a "$python/usr/." "$root/usr/"
 
 # One user so far: root.
 echo 'root:x:0:0:root:/root:/bin/sh' > "$root/etc/passwd"

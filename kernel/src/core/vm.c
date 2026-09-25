@@ -181,19 +181,24 @@ static void vm_destroy(struct address_space *as) {
 }
 
 /* Shares every present page of `from` with `to`, read-only in both. */
-static bool share_tables(uint64_t *from, uint64_t *to_pml4, int level, uint64_t base) {
+static bool share_tables(struct address_space *parent, uint64_t *from, uint64_t *to_pml4,
+                         int level, uint64_t base) {
     for (int i = 0; i < 512; i++) {
         if (!(from[i] & PTE_PRESENT)) {
             continue;
         }
         uint64_t address = base + ((uint64_t)i << (12 + 9 * (level - 1)));
         if (level > 1) {
-            if (!share_tables(phys_to_virt(from[i] & PTE_ADDR_MASK), to_pml4, level - 1, address)) {
+            if (!share_tables(parent, phys_to_virt(from[i] & PTE_ADDR_MASK), to_pml4, level - 1,
+                              address)) {
                 return false;
             }
             continue;
         }
-        from[i] &= ~PTE_WRITE;
+        struct vm_area *area = find_area(parent, address);
+        if (!area || !(area->flags & VM_SHARED)) {
+            from[i] &= ~PTE_WRITE; /* Copy on write from now on, in both. */
+        }
         struct address_space to = {.pml4 = to_pml4};
         uint64_t *pte = user_pte(&to, address, true);
         if (!pte) {
@@ -223,7 +228,7 @@ struct address_space *vm_fork(struct address_space *parent) {
     child->heap_end = parent->heap_end;
     for (int i = 0; i < 256 && ok; i++) {
         if (parent->pml4[i] & PTE_PRESENT) {
-            ok = share_tables(phys_to_virt(parent->pml4[i] & PTE_ADDR_MASK), child->pml4, 3,
+            ok = share_tables(parent, phys_to_virt(parent->pml4[i] & PTE_ADDR_MASK), child->pml4, 3,
                               (uint64_t)i << 39);
         }
     }
@@ -367,6 +372,33 @@ int vm_unmap(struct address_space *as, uint64_t start, uint64_t size) {
     return 0;
 }
 
+int vm_populate_shared(struct address_space *as, uint64_t start, size_t count,
+                       const uint64_t *pages) {
+    uint64_t lock_flags = spin_lock_irqsave(&as->lock);
+    int error = 0;
+    for (size_t i = 0; i < count; i++) {
+        uint64_t page = start + i * PAGE_SIZE;
+        struct vm_area *area = find_area(as, page);
+        uint64_t phys = pages ? pages[i] : 0;
+        uint64_t *pte = area ? user_pte(as, page, true) : NULL;
+        if (!pte || !(phys = phys ? phys : page_ref_new())) {
+            if (pages && pages[i]) {
+                page_ref_put(pages[i]);
+            }
+            error = -VX_ENOMEM;
+            continue;
+        }
+        if (*pte & PTE_PRESENT) {
+            page_ref_put(*pte & PTE_ADDR_MASK);
+        }
+        *pte = phys | pte_flags(area->flags, true);
+        flush(as, page);
+    }
+    tlb_shootdown(as);
+    spin_unlock_irqrestore(&as->lock, lock_flags);
+    return error;
+}
+
 int vm_map_fixed(struct address_space *as, uint64_t start, uint64_t size, unsigned flags) {
     int error = vm_unmap(as, start, size);
     return error ? error : vm_add_area(as, start, start + size, flags);
@@ -384,7 +416,7 @@ int vm_protect(struct address_space *as, uint64_t start, uint64_t size, unsigned
     }
     for (struct vm_area *area = as->areas; area && !error; area = area->next) {
         if (area->start >= start && area->end <= end) {
-            area->flags = flags;
+            area->flags = flags | (area->flags & VM_SHARED);
         }
     }
     for (uint64_t page = start; !error && page < end; page += PAGE_SIZE) {
@@ -443,7 +475,7 @@ static uint64_t resolve(struct address_space *as, uint64_t address, bool write) 
     }
     uint64_t phys = *pte & PTE_ADDR_MASK;
     if (write && !(*pte & PTE_WRITE)) {
-        if (page_ref_count(phys) > 1) {
+        if (page_ref_count(phys) > 1 && !(area->flags & VM_SHARED)) {
             /* Shared since a fork: this process gets its own copy. Other
              * threads' CPUs must stop using the old page before it's let go. */
             uint64_t copy = page_ref_new();
@@ -497,6 +529,17 @@ void vm_for_each_area(struct address_space *as,
         fn(area, arg);
     }
     spin_unlock_irqrestore(&as->lock, lock_flags);
+}
+
+bool vm_shared_physical(struct address_space *as, uint64_t address, uint64_t *phys) {
+    uint64_t lock_flags = spin_lock_irqsave(&as->lock);
+    struct vm_area *area = find_area(as, page_down(address));
+    uint64_t page = area && (area->flags & VM_SHARED) ? resolve(as, address, false) : 0;
+    spin_unlock_irqrestore(&as->lock, lock_flags);
+    if (page) {
+        *phys = page + address % PAGE_SIZE;
+    }
+    return page != 0;
 }
 
 uint64_t vm_resident_bytes(struct address_space *as) {

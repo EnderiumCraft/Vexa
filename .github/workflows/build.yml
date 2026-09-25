@@ -24,7 +24,7 @@ jobs:
             build-essential xorriso qemu-system-x86 ovmf python3 e2fsprogs \
             musl-tools linux-libc-dev
 
-      - name: Build ISO (with BusyBox and bash, built from source)
+      - name: Build ISO (with BusyBox, bash, coreutils and Python, built from source)
         run: make && make busybox-source
 
       - name: Boot tests (BIOS, UEFI with 4 CPUs, safe mode; with test disks)
@@ -45,9 +45,9 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           cp build/vexa.iso "vexa-$version.iso"
           sha256sum "vexa-$version.iso" > "vexa-$version.iso.sha256"
-          # BusyBox (GPL-2.0) and bash (GPL-3.0): every release carries their exact
-          # sources; BusyBox's with its configuration.
-          cp build/busybox-*-source.tar.gz third_party/bash-*.tar.xz .
+          # BusyBox (GPL-2.0), bash and coreutils (GPL-3.0): every release carries
+          # their exact sources; BusyBox's with its configuration.
+          cp build/busybox-*-source.tar.gz third_party/bash-*.tar.xz third_party/coreutils-*.tar.xz .
 
       - uses: actions/upload-artifact@v4
         with:
@@ -57,6 +57,7 @@ jobs:
             vexa-${{ steps.version.outputs.version }}.iso.sha256
             busybox-*-source.tar.gz
             bash-*.tar.xz
+            coreutils-*.tar.xz
 
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -90,7 +91,7 @@ jobs:
 
           Run it with: \`qemu-system-x86_64 -M q35 -m 512M -cdrom vexa-${VERSION}.iso\`
 
-          The ISO includes BusyBox (GPL-2.0) and GNU bash (GPL-3.0); their sources are attached."
+          The ISO includes BusyBox (GPL-2.0), GNU bash and coreutils (GPL-3.0); their sources are attached."
           # Move the tag to this commit, then replace the release and its files.
           git tag -f latest-build
           git push -f origin refs/tags/latest-build
@@ -98,7 +99,7 @@ jobs:
           gh release create latest-build \
             --title "Latest build (${VERSION}, ${short_sha})" \
             --notes "$notes" --prerelease --latest=false \
-            "vexa-${VERSION}.iso" "vexa-${VERSION}.iso.sha256" busybox-*-source.tar.gz bash-*.tar.xz
+            "vexa-${VERSION}.iso" "vexa-${VERSION}.iso.sha256" busybox-*-source.tar.gz bash-*.tar.xz coreutils-*.tar.xz
 
       - name: Create versioned release if VEXA_VERSION is new
         run: |
@@ -108,4 +109,4 @@ jobs:
           fi
           gh release create "v${VERSION}" --target "$GITHUB_SHA" \
             --title "Vexa ${VERSION}" --generate-notes --latest \
-            "vexa-${VERSION}.iso" "vexa-${VERSION}.iso.sha256" busybox-*-source.tar.gz bash-*.tar.xz
+            "vexa-${VERSION}.iso" "vexa-${VERSION}.iso.sha256" busybox-*-source.tar.gz bash-*.tar.xz coreutils-*.tar.xz

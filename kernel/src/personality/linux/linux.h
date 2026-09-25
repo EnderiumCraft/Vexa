@@ -165,6 +165,12 @@
 #define LINUX_SYS_renameat2 316
 #define LINUX_SYS_getrandom 318
 #define LINUX_SYS_membarrier 324
+#define LINUX_SYS_epoll_create 213
+#define LINUX_SYS_epoll_wait 232
+#define LINUX_SYS_epoll_ctl 233
+#define LINUX_SYS_epoll_pwait 281
+#define LINUX_SYS_epoll_create1 291
+#define LINUX_SYS_epoll_pwait2 441
 #define LINUX_SYS_fadvise64 221
 #define LINUX_SYS_copy_file_range 326
 #define LINUX_SYS_statx 332
@@ -316,6 +322,12 @@ struct linux_termios {
 #define LINUX_POLLERR 0x8
 #define LINUX_POLLHUP 0x10
 #define LINUX_POLLNVAL 0x20
+#define LINUX_EPOLLRDHUP 0x2000
+#define LINUX_EPOLLONESHOT (1U << 30)
+#define LINUX_EPOLLET (1U << 31)
+#define LINUX_EPOLL_CTL_ADD 1
+#define LINUX_EPOLL_CTL_DEL 2
+#define LINUX_EPOLL_CTL_MOD 3
 
 struct linux_pollfd {
     int32_t fd;
@@ -327,6 +339,7 @@ struct linux_pollfd {
 
 #define LINUX_PROT_WRITE 0x2
 #define LINUX_PROT_EXEC 0x4
+#define LINUX_MAP_SHARED 0x01
 #define LINUX_MAP_FIXED 0x10
 #define LINUX_MAP_ANONYMOUS 0x20
 

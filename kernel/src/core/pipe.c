@@ -110,16 +110,37 @@ static int64_t pipe_write(struct object *object, const void *buffer, size_t size
     return (int64_t)done;
 }
 
+static uint32_t read_end_poll(struct object *object) {
+    struct pipe *pipe = ((struct pipe_end *)object)->pipe;
+    uint64_t flags = spin_lock_irqsave(&pipe->lock);
+    uint32_t ready = (pipe->used > 0 ? OBJECT_READABLE : 0) |
+                     (pipe->writers == 0 ? OBJECT_READABLE | OBJECT_HANGUP : 0);
+    spin_unlock_irqrestore(&pipe->lock, flags);
+    return ready;
+}
+
+static uint32_t write_end_poll(struct object *object) {
+    struct pipe *pipe = ((struct pipe_end *)object)->pipe;
+    uint64_t flags = spin_lock_irqsave(&pipe->lock);
+    uint32_t ready = pipe->readers == 0         ? OBJECT_WRITABLE | OBJECT_ERROR
+                     : pipe->used < PIPE_SIZE ? OBJECT_WRITABLE
+                                              : 0;
+    spin_unlock_irqrestore(&pipe->lock, flags);
+    return ready;
+}
+
 const struct object_type pipe_read_type = {
     .name = "pipe (read end)",
     .destroy = read_end_destroy,
     .read = pipe_read,
+    .poll = read_end_poll,
 };
 
 const struct object_type pipe_write_type = {
     .name = "pipe (write end)",
     .destroy = write_end_destroy,
     .write = pipe_write,
+    .poll = write_end_poll,
 };
 
 int pipe_create(struct object **read_end, struct object **write_end) {

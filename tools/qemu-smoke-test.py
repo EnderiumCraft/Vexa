@@ -130,6 +130,8 @@ LINUX_COMMANDS = [
     ("ls --version", "(GNU coreutils)", 20),
     ("timeout 1 sleep 5 ; echo timeout-status $?", "timeout-status 124", 20),
     ("df /", "tmpfs", 20),
+    # Python 3: threads, subprocess, multiprocessing, shared memory, signals...
+    ("python-test.py", "python-test: passed", 300),
     # Linux threads (musl's pthreads): clone, futex, thread-local storage, tgkill.
     ("pthread-test", "pthread-test: passed", 60),
     ("pthread-test exit", "exiting while threads spin", 30),

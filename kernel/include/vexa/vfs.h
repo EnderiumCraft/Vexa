@@ -28,6 +28,8 @@ struct vnode_ops {
     int (*create)(struct vnode *dir, const char *name, size_t length, uint32_t type,
                   struct vnode **out);
     int (*remove)(struct vnode *dir, const char *name, size_t length);
+    /* Gives an existing file (not a directory) another name in `dir`. */
+    int (*link)(struct vnode *dir, const char *name, size_t length, struct vnode *target);
     /* Moves an entry, replacing any file (or empty directory) at the target.
      * Both directories are on this file system. */
     int (*rename)(struct vnode *old_dir, const char *old_name, size_t old_length,
@@ -41,6 +43,9 @@ struct vnode_ops {
     /* Stores new permission bits (vnode->mode is already updated). Optional:
      * file systems without it keep modes in memory only. */
     int (*set_mode)(struct vnode *vnode);
+    /* Optional: the physical page holding page `index` of the file, with a
+     * reference for the caller, so it can be mapped shared (0 if it can't). */
+    uint64_t (*share_page)(struct vnode *vnode, uint64_t index);
     /* Optional: sizes for statfs, in bytes. */
     void (*statfs)(struct mount *mount, uint64_t *total, uint64_t *free);
     /* The last reference is gone. */
@@ -122,6 +127,8 @@ int vfs_statfs(const char *path, size_t length, uint64_t *total, uint64_t *free,
 int vfs_mkdir(const char *path, size_t length);
 int vfs_remove(const char *path, size_t length);
 int vfs_rename(const char *from, size_t from_length, const char *to, size_t to_length);
+/* A hard link: `to` becomes another name for the file at `from`. */
+int vfs_link(const char *from, size_t from_length, const char *to, size_t to_length);
 
 /* Operations on open files. Buffers are kernel memory. */
 int64_t vfs_read(struct file *file, void *buffer, size_t size);
@@ -132,6 +139,8 @@ int vfs_read_dir(struct file *file, struct vx_dir_entry *entry);
 void vfs_file_stat(struct file *file, struct vx_stat *stat);
 void vfs_close(struct file *file);
 int vfs_truncate(struct file *file, uint64_t size);
+/* A page of the file to map shared (see vnode_ops.share_page), or 0. */
+uint64_t vfs_share_page(struct file *file, uint64_t index);
 /* True if the file is the terminal (/dev/console or /dev/tty). */
 bool vfs_is_terminal(struct file *file);
 
