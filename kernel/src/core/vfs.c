@@ -410,8 +410,8 @@ int vfs_open(const char *path, size_t length, uint32_t flags, struct file **out)
             object_put(&file->object);
             return error;
         }
-        file->opened = true;
     }
+    file->opened = true; /* So close runs, with or without an open hook. */
     *out = file;
     return 0;
 }

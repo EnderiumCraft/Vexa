@@ -104,7 +104,7 @@ struct file {
     uint32_t flags; /* VX_OPEN_* */
     char *path;     /* As opened (absolute), for fchdir and openat. */
     void *private;  /* The device's, for files it opened (vnode_ops.open). */
-    bool opened;    /* vnode_ops.open succeeded: close must be called. */
+    bool opened;    /* Fully opened (open hook, if any, succeeded): close must be called. */
 };
 
 extern const struct object_type file_object_type;
