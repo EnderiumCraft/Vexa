@@ -184,6 +184,9 @@
 #define LINUX_SYS_epoll_create1 291
 #define LINUX_SYS_eventfd 284
 #define LINUX_SYS_eventfd2 290
+#define LINUX_SYS_memfd_create 319
+#define LINUX_F_ADD_SEALS 1033
+#define LINUX_F_GET_SEALS 1034
 #define LINUX_SYS_epoll_pwait2 441
 #define LINUX_SYS_fadvise64 221
 #define LINUX_SYS_copy_file_range 326

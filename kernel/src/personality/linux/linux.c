@@ -825,6 +825,9 @@ static int64_t sys_fcntl(struct interrupt_frame *f, uint64_t fd, uint64_t comman
     case LINUX_F_SETOWN:
     case LINUX_F_GETOWN:
         return 0; /* One user, no locks needed yet. */
+    case LINUX_F_ADD_SEALS:
+    case LINUX_F_GET_SEALS:
+        return 0; /* memfd seals: accepted, not enforced (no seals). */
     default:
         return -LE_EINVAL;
     }
@@ -1775,6 +1778,47 @@ static int64_t sys_pselect6(struct interrupt_frame *f, uint64_t count, uint64_t 
     }
     uint64_t sets[3] = {readfds, writefds, exceptfds};
     return do_select(count, sets, ms);
+}
+
+/* ---- memfd_create: a file in memory with no name ----
+ * A tmpfs file in /run/shm, removed as soon as it's open: it lives as long
+ * as the handle (and any mappings), and can be mapped shared. */
+
+#define LINUX_MFD_CLOEXEC 0x1
+#define LINUX_MFD_ALLOW_SEALING 0x2
+#define LINUX_MFD_NOEXEC_SEAL 0x8
+#define LINUX_MFD_EXEC 0x10
+
+static int64_t sys_memfd_create(struct interrupt_frame *f, uint64_t user_name, uint64_t flags,
+                                uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5) {
+    static uint32_t made;
+    char name[250];
+    if (flags & ~(uint64_t)(LINUX_MFD_CLOEXEC | LINUX_MFD_ALLOW_SEALING | LINUX_MFD_NOEXEC_SEAL |
+                            LINUX_MFD_EXEC)) {
+        return -LE_EINVAL; /* Huge pages, say. */
+    }
+    if (copy_string_from_user(name, user_name, sizeof(name)) < 0) {
+        return -LE_EFAULT;
+    }
+    char path[64];
+    ksnprintf(path, sizeof(path), "/run/shm/.memfd-%u-%u", me()->id,
+              __atomic_add_fetch(&made, 1, __ATOMIC_RELAXED));
+    struct file *file;
+    int error = vfs_open(path, strlen(path),
+                         VX_OPEN_READ | VX_OPEN_WRITE | VX_OPEN_CREATE | VX_OPEN_TRUNCATE, &file);
+    if (error) {
+        return lx(error);
+    }
+    vfs_remove(path, strlen(path));
+    int fd = handle_add(me()->handles, &file->object, HANDLE_RIGHT_READ | HANDLE_RIGHT_WRITE);
+    if (fd < 0) {
+        vfs_close(file);
+        return lx(fd);
+    }
+    if (flags & LINUX_MFD_CLOEXEC) {
+        handle_set_flags(me()->handles, fd, HANDLE_FLAG_CLOSE_ON_EXEC);
+    }
+    return fd;
 }
 
 /* ---- eventfd: a counter to wait on (GLib's main loop wakes itself with one) ---- */
@@ -3527,6 +3571,7 @@ static const linux_fn syscalls[] = {
     CALL(epoll_create1, sys_epoll_create1),
     CALL(eventfd, sys_eventfd),
     CALL(eventfd2, sys_eventfd2),
+    CALL(memfd_create, sys_memfd_create),
     CALL(epoll_ctl, sys_epoll_ctl),
     CALL(epoll_wait, sys_epoll_wait),
     CALL(epoll_pwait, sys_epoll_wait),

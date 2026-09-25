@@ -188,6 +188,8 @@ LINUX_COMMANDS = [
     # Linux threads (musl's pthreads): clone, futex, thread-local storage, tgkill.
     ("pthread-test", "pthread-test: passed", 60),
     ("pthread-test exit", "exiting while threads spin", 30),
+    # memfd_create (files in memory, mapped shared) and eventfd.
+    ("memfd-test", "memfd-test: passed", 30),
     # X: the desktop, then an xterm (Ctrl+Alt+X) through Xvexa, a rootless X
     # server: the xterm is a desktop window, which has the keyboard, and its
     # close button (736,88 to 756,110) closes it (WM_DELETE_WINDOW).
