@@ -2,6 +2,7 @@
 #include <vexa/cpu.h>
 #include <vexa/elf.h>
 #include <vexa/fpu.h>
+#include <vexa/futex.h>
 #include <vexa/kprintf.h>
 #include <vexa/mm.h>
 #include <vexa/object.h>
@@ -439,7 +440,6 @@ struct process *process_spawn(const struct spawn_request *request, int *error,
             }
             *error = -VX_ENOMEM;
         } else {
-            thread->process = process;
             thread->fpu_state = fpu;
         }
     }
@@ -457,7 +457,6 @@ struct process *process_spawn(const struct spawn_request *request, int *error,
             handle_set(process->handles, i, request->handles[i], request->rights[i]);
         }
     }
-    process->main_thread = thread;
     process->parent = request->parent;
     process->auto_reap = request->parent == NULL;
     process->start_ms = timer_ms();
@@ -468,11 +467,13 @@ struct process *process_spawn(const struct spawn_request *request, int *error,
     process->group = request->join_group                         ? request->join_group
                      : request->new_group || !request->parent ? process->id
                                                               : request->parent->group;
+    thread->tid = process->id;
     process->next = processes;
     processes = process;
     object_ref(&process->object); /* One for the list, one for the caller. */
     spin_unlock_irqrestore(&process_lock, flags);
 
+    sched_attach_thread(process, thread);
     thread_start(thread);
     return process;
 }
@@ -488,6 +489,10 @@ static void forked_thread_entry(void *arg) {
     struct fork_start *start = arg;
     struct interrupt_frame frame = start->frame; /* On this thread's own stack. */
     kfree(start);
+    struct thread *thread = thread_current();
+    if (thread->process->exiting || thread->killed) {
+        process_thread_exit(0); /* The process ended before this thread got going. */
+    }
     interrupts_disable();
     return_to_user(&frame);
 }
@@ -555,10 +560,8 @@ struct process *process_fork(struct interrupt_frame *frame, int *error) {
     start->frame.rax = 0;
     fpu_save(fpu);
     thread->fpu_state = fpu;
-    thread->process = child;
     thread->blocked_signals = parent_thread->blocked_signals;
     thread->fs_base = rdmsr(IA32_FS_BASE_MSR);
-    child->main_thread = thread;
     child->parent = parent;
     child->start_ms = timer_ms();
     if (parent->exe) {
@@ -577,6 +580,7 @@ struct process *process_fork(struct interrupt_frame *frame, int *error) {
 
     uint64_t flags = spin_lock_irqsave(&process_lock);
     child->id = next_process_id++;
+    thread->tid = child->id;
     child->group = parent->group;
     child->next = processes;
     processes = child;
@@ -584,8 +588,66 @@ struct process *process_fork(struct interrupt_frame *frame, int *error) {
     spin_unlock_irqrestore(&process_lock, flags);
 
     *error = 0;
+    sched_attach_thread(child, thread);
     thread_start(thread);
     return child;
+}
+
+int process_thread_create(const struct interrupt_frame *frame, uint64_t fs_base,
+                          bool copy_vector_registers, uint64_t clear_on_exit) {
+    struct process *process = process_current();
+    struct thread *caller = thread_current();
+    struct fork_start *start = kmalloc(sizeof(*start));
+    struct thread *thread = start ? thread_create_stopped(process->name, forked_thread_entry, start)
+                                  : NULL;
+    void *fpu = thread ? fpu_alloc_state() : NULL;
+    if (!fpu) {
+        if (thread) {
+            thread_destroy_unstarted(thread);
+        }
+        kfree(start);
+        return -VX_ENOMEM;
+    }
+    if (copy_vector_registers) {
+        fpu_save(fpu);
+    }
+    start->process = process;
+    start->frame = *frame;
+    thread->fpu_state = fpu;
+    thread->fs_base = fs_base;
+    thread->blocked_signals = caller->blocked_signals;
+    thread->clear_on_exit = clear_on_exit;
+    uint64_t flags = spin_lock_irqsave(&process_lock);
+    thread->tid = next_process_id++; /* Thread and process ids share one space, as on Linux. */
+    spin_unlock_irqrestore(&process_lock, flags);
+    if (!sched_attach_thread(process, thread)) {
+        thread_destroy_unstarted(thread); /* The process is exiting. */
+        kfree(start);
+        return -VX_EAGAIN;
+    }
+    int tid = (int)thread->tid;
+    thread_start(thread);
+    return tid;
+}
+
+struct signal_thread_args {
+    uint32_t tid;
+    int signal;
+    bool found;
+};
+
+static void signal_if_tid(struct thread *thread, void *arg) {
+    struct signal_thread_args *args = arg;
+    if (thread->tid == args->tid && !args->found) {
+        args->found = true;
+        signal_send_thread_locked(thread, args->signal);
+    }
+}
+
+bool process_signal_thread(struct process *process, uint32_t tid, int signal) {
+    struct signal_thread_args args = {tid, signal, false};
+    sched_for_each_process_thread(process, signal_if_tid, &args);
+    return args.found;
 }
 
 int process_exec(const char *path, char *const *argv, size_t argc, char *const *envp,
@@ -606,8 +668,17 @@ int process_exec(const char *path, char *const *argv, size_t argc, char *const *
         *reason = "out of memory";
         return -VX_ENOMEM;
     }
-    /* Past the point of no return: swap in the new program. This is the
-     * process's only thread, so nothing else uses the old address space. */
+    /* Past the point of no return: the other threads go, then the new
+     * program replaces the old. */
+    struct thread *self = thread_current();
+    if (process->thread_count > 1) {
+        sched_kill_other_threads(process, self);
+    }
+    self->clear_on_exit = 0;
+    if (self->personality_data && process->personality->free_thread_data) {
+        process->personality->free_thread_data(self->personality_data);
+    }
+    self->personality_data = NULL;
     uint64_t lock_flags = spin_lock_irqsave(&process_lock);
     struct address_space *old = process->address_space;
     process->address_space = as;
@@ -766,10 +837,9 @@ struct process *process_find(uint32_t id) {
     return found;
 }
 
-void process_exit(int code) {
-    struct process *process = process_current();
-    process->exit_code = code;
-    /* Close handles here, in the thread, since that may wait for the disk. */
+/* The last live thread releases what the process holds: its handles (in a
+ * thread, since closing files may wait for the disk) and its children. */
+static void release_resources(struct process *process) {
     struct handle_table *handles = process->handles;
     process->handles = NULL;
     if (handles) {
@@ -797,21 +867,64 @@ void process_exit(int code) {
             object_put(&orphans[i]->object);
         }
     } while (orphan_count == 16);
-    thread_exit();
+}
+
+void process_thread_exit(int code) {
+    struct thread *thread = thread_current();
+    struct process *process = thread->process;
+    if (thread->clear_on_exit && !process->exiting && !thread->killed) {
+        /* Whoever waits to join this thread waits on this word. */
+        uint32_t zero = 0;
+        if (copy_to_user(thread->clear_on_exit, &zero, sizeof(zero))) {
+            futex_wake(process->address_space, thread->clear_on_exit, 1, FUTEX_ANY);
+        }
+    }
+    if (__atomic_sub_fetch(&process->live_threads, 1, __ATOMIC_SEQ_CST) == 0) {
+        if (!process->exiting) {
+            process->exit_code = code; /* The last thread's exit ends the process. */
+        }
+        release_resources(process);
+    }
+    thread_exit(); /* The process ends when its last thread is reaped. */
+}
+
+__attribute__((noreturn)) static void exit_group(int code, int signal) {
+    struct process *process = process_current();
+    if (!__atomic_exchange_n(&process->exiting, true, __ATOMIC_SEQ_CST)) {
+        process->exit_code = code;
+        process->exit_signal = signal;
+    }
+    sched_interrupt_all(process); /* Each thread exits on its way back to user mode. */
+    process_thread_exit(code);
+}
+
+void process_exit(int code) {
+    exit_group(code, 0);
 }
 
 void process_exit_by_signal(int signal) {
-    process_current()->exit_signal = signal;
-    process_exit(128 + signal);
+    exit_group(128 + signal, signal);
 }
 
 void process_thread_reaped(struct thread *thread) {
     struct process *process = thread->process;
-    if (thread != process->main_thread) {
+    for (struct thread **link = &process->threads; *link; link = &(*link)->process_next) {
+        if (*link == thread) {
+            *link = thread->process_next;
+            break;
+        }
+    }
+    if (thread->personality_data && process->personality &&
+        process->personality->free_thread_data) {
+        process->personality->free_thread_data(thread->personality_data);
+    }
+    process->thread_count--;
+    wait_queue_wake_all_locked(&process->threads_changed);
+    if (process->thread_count > 0) {
         return;
     }
-    /* The last (only) thread is gone, so no CPU can be using these tables.
-     * (Its handles were closed by process_exit.) */
+    /* The last thread is gone, so no CPU can be using these tables.
+     * (Its handles were closed by the last thread to exit.) */
     spin_lock_irqsave(&process_lock); /* Interrupts are already off. */
     struct address_space *as = process->address_space;
     process->address_space = NULL;
@@ -819,7 +932,6 @@ void process_thread_reaped(struct thread *thread) {
     if (as) {
         vm_put(as);
     }
-    process->main_thread = NULL; /* The thread is about to be freed. */
     process->state = PROCESS_EXITED;
     wait_queue_wake_all_locked(&process->exited);
 

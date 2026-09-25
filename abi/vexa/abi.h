@@ -53,6 +53,11 @@
 #define VX_SYS_SYMLINK 32  /* vx_symlink(target, target_length, path, path_length) */
 #define VX_SYS_READLINK 33 /* vx_readlink(path, path_length, buffer, size) -> length */
 #define VX_SYS_LSTAT 34    /* vx_lstat(path, length, struct vx_stat *): the link itself */
+#define VX_SYS_THREAD_CREATE 35 /* vx_thread_create(const struct vx_thread_start *) -> thread id */
+#define VX_SYS_THREAD_EXIT 36   /* vx_thread_exit(code): ends the calling thread only */
+#define VX_SYS_THREAD_ID 37     /* vx_thread_id() -> the calling thread's id */
+#define VX_SYS_WAIT_ADDRESS 38  /* vx_wait_address(address, expected, timeout_ms or -1) */
+#define VX_SYS_WAKE_ADDRESS 39  /* vx_wake_address(address, count) -> how many woke */
 
 #define VX_MAP_WRITE 0x1
 #define VX_MAP_EXEC 0x2
@@ -143,6 +148,19 @@ struct vx_process_info {
 #define VX_NAME_MAX 255
 #define VX_PATH_MAX 4096
 
+/* How a new thread starts: at `entry(arg)` on `stack` (rsp as given, so
+ * pass a 16-byte aligned top minus 8, as if `entry` had been called), with
+ * `tls` as its thread pointer (FS base). If `exit_word` isn't NULL, the
+ * kernel stores 0 there and wakes one waiter on it when the thread ends,
+ * which is how joining works. */
+struct vx_thread_start {
+    void *entry;
+    void *stack;
+    void *arg;
+    void *tls;
+    unsigned int *exit_word;
+};
+
 struct vx_stat {
     unsigned long long size;
     unsigned long long inode;
@@ -186,6 +204,7 @@ struct vx_dir_entry {
 #define VX_ENOTTY 26       /* Not a terminal. */
 #define VX_ESPIPE 27       /* Can't seek on a pipe or terminal. */
 #define VX_ELOOP 28        /* Too many symbolic links (or one where none may be). */
+#define VX_ETIMEDOUT 29    /* A wait ran out of time. */
 
 /* Every Vexa program carries an ELF note with this name and type, holding the
  * ABI version as a 32-bit integer. The kernel uses it to tell native programs

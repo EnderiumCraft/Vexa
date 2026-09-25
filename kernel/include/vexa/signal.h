@@ -27,6 +27,8 @@ enum signal_action {
 void signal_send(struct process *process, int signal);
 /* The same, for callers holding the scheduler lock. */
 void signal_send_locked(struct process *process, int signal);
+/* A signal for one thread (Linux tgkill). Call with the scheduler lock held. */
+void signal_send_thread_locked(struct thread *thread, int signal);
 /* Sends to every process in a process group; returns how many got it. */
 int signal_send_group(uint32_t group, int signal);
 /* True if the thread has a signal it doesn't block. Safe under the scheduler lock. */

@@ -1,6 +1,7 @@
 #include <limine.h>
 #include <vexa/arch.h>
 #include <vexa/kprintf.h>
+#include <vexa/cpu.h>
 #include <vexa/mm.h>
 #include <vexa/spinlock.h>
 #include <vexa/string.h>
@@ -217,8 +218,21 @@ uint64_t vmm_nx_bit(void) {
 }
 
 void vmm_activate(struct address_space *as) {
+    struct cpu *cpu = cpu_current();
+    struct address_space *old = cpu->active_as;
+    uint64_t bit = 1ULL << cpu->id;
+    /* Joining the new mask before loading its tables, and leaving the old one
+     * after, means a shootdown never misses a CPU that could hold stale
+     * entries (see tlb.c). */
+    if (as && old != as) {
+        __atomic_or_fetch(&as->active_cpus, bit, __ATOMIC_SEQ_CST);
+    }
     uint64_t phys = as ? as->pml4_phys : virt_to_phys(kernel_pml4);
     if ((read_cr3() & PTE_ADDR_MASK) != phys) {
         __asm__ volatile("mov %0, %%cr3" : : "r"(phys) : "memory");
     }
+    if (old && old != as) {
+        __atomic_and_fetch(&old->active_cpus, ~bit, __ATOMIC_SEQ_CST);
+    }
+    cpu->active_as = as;
 }

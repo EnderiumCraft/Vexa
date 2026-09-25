@@ -103,9 +103,15 @@ struct address_space {
     uint64_t pml4_phys;
     struct spinlock lock;
     uint32_t refs;         /* The process, plus anyone looking at it (/proc). */
+    uint64_t active_cpus;  /* Bit n: CPU n has these page tables loaded. */
     struct vm_area *areas; /* Sorted by address. */
     uint64_t heap_start, heap_end; /* The brk heap. */
 };
+
+/* Makes every other CPU using `as` drop its cached translations, and waits
+ * until they have (arch/x86_64/tlb.c). Call after changing or removing page
+ * table entries, before freeing the pages they pointed to. */
+void tlb_shootdown(struct address_space *as);
 
 /* A new, empty address space with one reference. */
 struct address_space *vm_create(void);

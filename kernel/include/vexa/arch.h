@@ -18,6 +18,7 @@
 /* Interrupt vector layout. */
 #define VECTOR_ISA_BASE 0x20 /* ISA IRQ n (timer, keyboard...) arrives on 0x20 + n. */
 #define VECTOR_APIC_TIMER 0x30
+#define VECTOR_TLB 0xfd  /* Asks other CPUs to flush their TLBs (tlb.c). */
 #define VECTOR_HALT 0xfe /* Sent to other CPUs when the kernel panics. */
 #define VECTOR_SPURIOUS 0xff
 

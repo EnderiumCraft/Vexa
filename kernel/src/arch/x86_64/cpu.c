@@ -70,7 +70,7 @@ void cpu_enable_features(struct cpu *cpu) {
     syscall_init_cpu();
 }
 
-static void set_gs_base(struct cpu *cpu) {
+void set_gs_base(struct cpu *cpu) {
     cpu->self = cpu;
     wrmsr(IA32_GS_BASE_MSR, (uint64_t)cpu);
     wrmsr(IA32_KERNEL_GS_BASE_MSR, 0); /* The user's GS base, swapped in by swapgs. */

@@ -25,6 +25,8 @@ struct personality {
     /* Personality data follows a process through fork and is freed at exit. */
     void *(*fork_data)(void *data);
     void (*free_data)(void *data);
+    /* Per-thread data (thread->personality_data), freed when the thread goes. */
+    void (*free_thread_data)(void *data);
     /* Optional: where this personality's programs find an absolute path (the
      * Linux subsystem looks in /linux first). Returns a new string, or NULL
      * to use the path as it is. */
@@ -54,7 +56,15 @@ struct process {
     void *personality_data;
     struct address_space *address_space;
     struct handle_table *handles;
-    struct thread *main_thread;
+    /* Threads: the list and thread_count change under the scheduler lock,
+     * when threads are added and when they are reaped. live_threads counts
+     * those that haven't started exiting; the last one out closes the
+     * handles, and the last one reaped ends the process. */
+    struct thread *threads;
+    uint32_t thread_count;
+    uint32_t live_threads;
+    bool exiting;            /* exit_group: every thread is on its way out. */
+    struct wait_queue threads_changed;
     char *cwd;               /* Absolute, normalized. */
     uint64_t pending_signals;
     uint8_t signal_actions[VX_SIGNAL_COUNT]; /* enum signal_action */
@@ -127,8 +137,21 @@ struct address_space *process_address_space(struct process *process);
 struct process *process_current(void);
 /* Returns a reference to the process with this id, or NULL. */
 struct process *process_find(uint32_t id);
+/* Ends the whole process, all its threads (Linux exit_group, vx_exit). */
 __attribute__((noreturn)) void process_exit(int code);
 __attribute__((noreturn)) void process_exit_by_signal(int signal);
+/* Ends the calling thread; if it was the last, the process too, with `code`. */
+__attribute__((noreturn)) void process_thread_exit(int code);
+
+/* Starts another thread in the calling process, resuming user mode from
+ * `frame` with thread pointer `fs_base`. `copy_vector_registers`: start
+ * with the caller's SSE/AVX state instead of a fresh one. Returns the new
+ * thread's id or a negative VX_E* error. */
+int process_thread_create(const struct interrupt_frame *frame, uint64_t fs_base,
+                          bool copy_vector_registers, uint64_t clear_on_exit);
+/* The thread of the calling process with this id, for thread-directed
+ * signals. Call with no locks held; the result is only a hint (it may exit). */
+bool process_signal_thread(struct process *process, uint32_t tid, int signal);
 
 /* Called by the scheduler, with its lock held, once a process thread is gone. */
 void process_thread_reaped(struct thread *thread);

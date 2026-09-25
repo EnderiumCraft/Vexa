@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <vexa/syscall.h>
+#include <vexa/thread.h>
 
 void exit(int code) {
     fflush(NULL);
@@ -50,7 +51,7 @@ static void *carve(size_t bytes) {
     return block;
 }
 
-void *malloc(size_t size) {
+static void *malloc_unlocked(size_t size) {
     if (size > ((size_t)1 << MAX_SHIFT)) {
         size_t total = (size + sizeof(struct header) + 4095) & ~(size_t)4095;
         if (total < size) {
@@ -79,7 +80,7 @@ void *malloc(size_t size) {
     return header + 1;
 }
 
-void free(void *pointer) {
+static void free_unlocked(void *pointer) {
     if (!pointer) {
         return;
     }
@@ -100,6 +101,22 @@ void free(void *pointer) {
     header->magic = 0;
     *(void **)(header + 1) = free_lists[shift];
     free_lists[shift] = header;
+}
+
+/* One lock for the allocator: threads may allocate at the same time. */
+static struct vx_mutex heap_lock = VX_MUTEX_INIT;
+
+void *malloc(size_t size) {
+    vx_mutex_lock(&heap_lock);
+    void *pointer = malloc_unlocked(size);
+    vx_mutex_unlock(&heap_lock);
+    return pointer;
+}
+
+void free(void *pointer) {
+    vx_mutex_lock(&heap_lock);
+    free_unlocked(pointer);
+    vx_mutex_unlock(&heap_lock);
 }
 
 void *calloc(size_t count, size_t size) {

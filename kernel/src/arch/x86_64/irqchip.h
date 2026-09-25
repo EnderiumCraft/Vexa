@@ -20,6 +20,8 @@ void lapic_eoi(void);
 uint32_t lapic_id(void);
 void lapic_init_ap(void);
 void lapic_send_ipi_all_but_self(uint8_t vector);
+/* TLB shootdowns (tlb.c): needed once more than one CPU runs. */
+void tlb_init(void);
 uint32_t lapic_read(uint32_t reg);
 void lapic_write(uint32_t reg, uint32_t value);
 

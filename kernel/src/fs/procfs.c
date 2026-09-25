@@ -162,9 +162,10 @@ static void gen_stat(struct text *text, struct process *process) {
     memory_of(process, &size, &resident);
     struct process *parent = process->parent;
     /* Fields 1-52 of Linux's /proc/<pid>/stat; times are in 1/100 s. */
-    text_printf(text, "%u (%s) %c %u %u 1 1024 %u 0 0 0 0 0 %lu 0 0 0 20 0 1 0 %lu %lu %lu",
+    text_printf(text, "%u (%s) %c %u %u 1 1024 %u 0 0 0 0 0 %lu 0 0 0 20 0 %u 0 %lu %lu %lu",
                 process->id, process->name, state_letter(process, &facts),
                 parent ? parent->id : 0, process->group, process->group, facts.cpu_ms / 10,
+                process->thread_count,
                 process->start_ms / 10, size, resident / PAGE_SIZE);
     text_printf(text, " 18446744073709551615 0 0 0 0 0 0 0 0 0 0 0 0 17 0 0 0 0 0 0 0 0 0 0 0 0 0 %d\n",
                 process->exit_code);
@@ -177,11 +178,11 @@ static void gen_status(struct text *text, struct process *process) {
     struct process *parent = process->parent;
     text_printf(text,
                 "Name:\t%s\nState:\t%s\nTgid:\t%u\nPid:\t%u\nPPid:\t%u\nUid:\t0\t0\t0\t0\n"
-                "Gid:\t0\t0\t0\t0\nVmSize:\t%lu kB\nVmRSS:\t%lu kB\nThreads:\t1\n"
+                "Gid:\t0\t0\t0\t0\nVmSize:\t%lu kB\nVmRSS:\t%lu kB\nThreads:\t%u\n"
                 "SigPnd:\t%016lx\nPersonality:\t%s\n",
                 process->name, state_name(state_letter(process, &facts)), process->id,
                 process->id, parent ? parent->id : 0, size / 1024, resident / 1024,
-                process->pending_signals, process->personality ? process->personality->name : "-");
+                process->thread_count, process->pending_signals, process->personality ? process->personality->name : "-");
 }
 
 static void gen_cmdline(struct text *text, struct process *process) {

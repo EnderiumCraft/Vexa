@@ -38,6 +38,8 @@ struct cpu {
     uint32_t slice_left;     /* Timer ticks before the current thread is preempted. */
     uint64_t idle_ticks;
     uint64_t busy_ticks;
+    struct address_space *active_as; /* Whose page tables are loaded (NULL: the kernel's). */
+    volatile bool tlb_flush_pending; /* Another CPU changed page tables we may cache. */
     uint64_t gdt[7];
     struct tss tss;
 };
@@ -47,6 +49,10 @@ struct cpu {
 #define CPU_KERNEL_RSP 16
 
 extern struct cpu cpus[MAX_CPUS];
+
+/* Makes cpu_current() work on this CPU. The very first thing a CPU does:
+ * locks and page table switches use it. */
+void set_gs_base(struct cpu *cpu);
 
 static inline struct cpu *cpu_current(void) {
     struct cpu *cpu;

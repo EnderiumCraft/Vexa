@@ -34,13 +34,26 @@ static void mark_pending(struct process *process, int signal) {
 
 void signal_send(struct process *process, int signal) {
     mark_pending(process, signal);
-    sched_interrupt_process(process);
+    if (valid(signal)) {
+        sched_interrupt_process(process, signal);
+    }
 }
 
 void signal_send_locked(struct process *process, int signal) {
     mark_pending(process, signal);
-    if (process->main_thread && thread_signal_pending(process->main_thread)) {
-        sched_interrupt_locked(process->main_thread);
+    if (valid(signal)) {
+        sched_interrupt_process_locked(process, signal);
+    }
+}
+
+void signal_send_thread_locked(struct thread *thread, int signal) {
+    struct process *process = thread->process;
+    if (!valid(signal) || process->state != PROCESS_RUNNING || would_ignore(process, signal)) {
+        return;
+    }
+    __atomic_or_fetch(&thread->pending_signals, BIT(signal), __ATOMIC_SEQ_CST);
+    if (thread_signal_pending(thread)) {
+        sched_interrupt_locked(thread);
     }
 }
 
@@ -75,25 +88,33 @@ bool thread_signal_pending(struct thread *thread) {
     if (!process) {
         return false;
     }
-    uint64_t pending = __atomic_load_n(&process->pending_signals, __ATOMIC_ACQUIRE);
+    if (process->exiting || thread->killed) {
+        return true; /* Not a signal, but the thread must stop waiting and leave. */
+    }
+    uint64_t pending = __atomic_load_n(&process->pending_signals, __ATOMIC_ACQUIRE) |
+                       __atomic_load_n(&thread->pending_signals, __ATOMIC_ACQUIRE);
     return pending & ~(thread->blocked_signals & ~BIT(VX_SIGKILL));
 }
 
-static int take_signal(struct thread *thread) {
-    struct process *process = thread->process;
+/* Takes the lowest deliverable signal from `set` (the thread's or the process's). */
+static int take_from(uint64_t *set, uint64_t blocked) {
     for (;;) {
-        uint64_t pending = __atomic_load_n(&process->pending_signals, __ATOMIC_ACQUIRE);
-        uint64_t deliverable = pending & ~(thread->blocked_signals & ~BIT(VX_SIGKILL));
+        uint64_t pending = __atomic_load_n(set, __ATOMIC_ACQUIRE);
+        uint64_t deliverable = pending & ~(blocked & ~BIT(VX_SIGKILL));
         if (!deliverable) {
             return 0;
         }
         int signal = __builtin_ctzll(deliverable) + 1;
-        if (__atomic_compare_exchange_n(&process->pending_signals, &pending,
-                                        pending & ~BIT(signal), false, __ATOMIC_SEQ_CST,
-                                        __ATOMIC_SEQ_CST)) {
+        if (__atomic_compare_exchange_n(set, &pending, pending & ~BIT(signal), false,
+                                        __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)) {
             return signal;
         }
     }
+}
+
+static int take_signal(struct thread *thread) {
+    int signal = take_from(&thread->pending_signals, thread->blocked_signals);
+    return signal ? signal : take_from(&thread->process->pending_signals, thread->blocked_signals);
 }
 
 void signal_deliver(struct interrupt_frame *frame) {
@@ -101,6 +122,9 @@ void signal_deliver(struct interrupt_frame *frame) {
     struct process *process = thread ? thread->process : NULL;
     if (!process || !(frame->cs & 3)) {
         return;
+    }
+    if (process->exiting || thread->killed) {
+        process_thread_exit(0); /* Another thread ended the process, or is exec'ing. */
     }
     int signal;
     while ((signal = take_signal(thread)) != 0) {

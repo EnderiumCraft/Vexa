@@ -14,6 +14,12 @@ struct spinlock {
     volatile uint32_t locked;
 };
 
+/* While a CPU spins, with interrupts off, it still answers TLB flush requests
+ * from other CPUs (see tlb.c), so a CPU that holds a lock and waits for the
+ * flush can't deadlock with one waiting for that lock. */
+extern volatile uint32_t tlb_requests_possible;
+void tlb_service(void);
+
 #define SPINLOCK_INIT {0}
 #define RFLAGS_IF (1ULL << 9)
 
@@ -22,6 +28,9 @@ static inline uint64_t spin_lock_irqsave(struct spinlock *lock) {
     __asm__ volatile("pushfq; popq %0; cli" : "=r"(flags) : : "memory");
     while (__atomic_exchange_n(&lock->locked, 1, __ATOMIC_ACQUIRE)) {
         while (__atomic_load_n(&lock->locked, __ATOMIC_RELAXED)) {
+            if (tlb_requests_possible) {
+                tlb_service();
+            }
             __asm__ volatile("pause");
         }
     }

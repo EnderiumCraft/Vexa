@@ -31,6 +31,15 @@ long vx_rename(const char *from, const char *to);
 long vx_symlink(const char *target, const char *path);
 long vx_readlink(const char *path, char *buffer, size_t size);
 long vx_lstat(const char *path, struct vx_stat *stat);
+
+/* Threads, at the system call level; <vexa/thread.h> has the easy way. */
+long vx_thread_start(const struct vx_thread_start *start);
+__attribute__((noreturn)) void vx_thread_exit(int code);
+long vx_thread_id(void);
+/* Sleeps while *address == expected, until woken (0), timed out (-VX_ETIMEDOUT;
+ * -1 waits forever), or interrupted; -VX_EAGAIN if it didn't hold `expected`. */
+long vx_wait_address(volatile unsigned *address, unsigned expected, long timeout_ms);
+long vx_wake_address(volatile unsigned *address, long count);
 long vx_chdir(const char *path);
 long vx_getcwd(char *buffer, size_t size);
 long vx_pipe(int handles[2]);

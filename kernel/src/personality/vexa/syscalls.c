@@ -2,6 +2,7 @@
 #include <vexa/abi.h>
 #include <vexa/arch.h>
 #include <vexa/cpu.h>
+#include <vexa/futex.h>
 #include <vexa/kprintf.h>
 #include <vexa/mm.h>
 #include <vexa/monitor.h>
@@ -693,6 +694,53 @@ static int64_t sys_process_list(uint64_t out, uint64_t count, uint64_t a2, uint6
     return result;
 }
 
+/* ---- Threads ---- */
+
+static int64_t sys_thread_create(uint64_t user_start, uint64_t a1, uint64_t a2, uint64_t a3) {
+    (void)a1, (void)a2, (void)a3;
+    struct vx_thread_start start;
+    if (!copy_from_user(&start, user_start, sizeof(start))) {
+        return -VX_EFAULT;
+    }
+    uint64_t entry = (uint64_t)start.entry, stack = (uint64_t)start.stack;
+    uint64_t tls = (uint64_t)start.tls, exit_word = (uint64_t)start.exit_word;
+    if (!user_range_ok(entry, 1) || !user_range_ok(stack - 8, 8) || tls >= USER_END ||
+        (exit_word && (exit_word % 4 || !user_range_ok(exit_word, 4)))) {
+        return -VX_EINVAL;
+    }
+    struct interrupt_frame frame = {
+        .rip = entry,
+        .cs = GDT_USER_CODE | 3,
+        .rflags = RFLAGS_INTERRUPTS_ON,
+        .rsp = stack,
+        .ss = GDT_USER_DATA | 3,
+        .rdi = (uint64_t)start.arg,
+    };
+    return process_thread_create(&frame, tls, false, exit_word);
+}
+
+static int64_t sys_thread_exit(uint64_t code, uint64_t a1, uint64_t a2, uint64_t a3) {
+    (void)a1, (void)a2, (void)a3;
+    process_thread_exit((int)code);
+}
+
+static int64_t sys_thread_id(uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3) {
+    (void)a0, (void)a1, (void)a2, (void)a3;
+    return thread_current()->tid;
+}
+
+static int64_t sys_wait_address(uint64_t address, uint64_t expected, uint64_t timeout_ms,
+                                uint64_t a3) {
+    (void)a3;
+    return futex_wait(address, (uint32_t)expected, FUTEX_ANY, (int64_t)timeout_ms);
+}
+
+static int64_t sys_wake_address(uint64_t address, uint64_t count, uint64_t a2, uint64_t a3) {
+    (void)a2, (void)a3;
+    return futex_wake(me()->address_space, address, count > 0x7fffffff ? 0x7fffffff : (int)count,
+                      FUTEX_ANY);
+}
+
 static int64_t sys_kernel_command(uint64_t text, uint64_t length, uint64_t a2, uint64_t a3) {
     (void)a2, (void)a3;
     char line[128];
@@ -742,6 +790,11 @@ static const syscall_fn syscalls[] = {
     [VX_SYS_SYMLINK] = sys_symlink,
     [VX_SYS_READLINK] = sys_readlink,
     [VX_SYS_LSTAT] = sys_lstat,
+    [VX_SYS_THREAD_CREATE] = sys_thread_create,
+    [VX_SYS_THREAD_EXIT] = sys_thread_exit,
+    [VX_SYS_THREAD_ID] = sys_thread_id,
+    [VX_SYS_WAIT_ADDRESS] = sys_wait_address,
+    [VX_SYS_WAKE_ADDRESS] = sys_wake_address,
 };
 
 static void vexa_syscall(struct interrupt_frame *frame) {

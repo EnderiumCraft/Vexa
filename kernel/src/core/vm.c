@@ -227,10 +227,12 @@ struct address_space *vm_fork(struct address_space *parent) {
                               (uint64_t)i << 39);
         }
     }
-    spin_unlock_irqrestore(&parent->lock, flags);
     if (is_active(parent)) {
         __asm__ volatile("mov %0, %%cr3" : : "r"(parent->pml4_phys) : "memory"); /* Flush. */
     }
+    /* The parent's other threads must stop writing through stale entries. */
+    tlb_shootdown(parent);
+    spin_unlock_irqrestore(&parent->lock, flags);
     if (!ok) {
         vm_put(child);
         return NULL;
@@ -318,15 +320,24 @@ uint64_t vm_map(struct address_space *as, uint64_t size, unsigned flags) {
     return candidate;
 }
 
-/* Removes the pages of [start, end) from the page tables. */
+/* Removes the pages of [start, end) from the page tables. They are freed only
+ * once no other CPU can still reach them through its TLB. */
 static void unmap_pages(struct address_space *as, uint64_t start, uint64_t end) {
+    uint64_t batch[128];
+    size_t count = 0;
     for (uint64_t page = start; page < end; page += PAGE_SIZE) {
         uint64_t *pte = user_pte(as, page, false);
         if (pte && (*pte & PTE_PRESENT)) {
-            uint64_t phys = *pte & PTE_ADDR_MASK;
+            batch[count++] = *pte & PTE_ADDR_MASK;
             *pte = 0;
             flush(as, page);
-            page_ref_put(phys);
+        }
+        if (count == sizeof(batch) / sizeof(batch[0]) || (count && page + PAGE_SIZE >= end)) {
+            tlb_shootdown(as);
+            for (size_t i = 0; i < count; i++) {
+                page_ref_put(batch[i]);
+            }
+            count = 0;
         }
     }
 }
@@ -385,6 +396,7 @@ int vm_protect(struct address_space *as, uint64_t start, uint64_t size, unsigned
             flush(as, page);
         }
     }
+    tlb_shootdown(as);
     merge_areas(as);
     spin_unlock_irqrestore(&as->lock, lock_flags);
     return error;
@@ -432,15 +444,21 @@ static uint64_t resolve(struct address_space *as, uint64_t address, bool write) 
     uint64_t phys = *pte & PTE_ADDR_MASK;
     if (write && !(*pte & PTE_WRITE)) {
         if (page_ref_count(phys) > 1) {
-            /* Shared since a fork: this process gets its own copy. */
+            /* Shared since a fork: this process gets its own copy. Other
+             * threads' CPUs must stop using the old page before it's let go. */
             uint64_t copy = page_ref_new();
             if (!copy) {
                 return 0;
             }
             memcpy(phys_to_virt(copy), phys_to_virt(phys), PAGE_SIZE);
+            *pte = copy | pte_flags(area->flags, true);
+            flush(as, page);
+            tlb_shootdown(as);
             page_ref_put(phys);
-            phys = copy;
+            return copy;
         }
+        /* Only gaining write access: stale read-only entries elsewhere just
+         * fault once more and find the page writable. */
         *pte = phys | pte_flags(area->flags, true);
         flush(as, page);
     }

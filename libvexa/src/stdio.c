@@ -5,8 +5,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <vexa/syscall.h>
+#include <vexa/thread.h>
 
-/* ---- Files ---- */
+/* ---- Files ----
+ * Each FILE has a lock, so threads can share one; the list of open files has
+ * another. Internal helpers ending in _unlocked expect the FILE locked. */
 
 enum buffering { UNBUFFERED, LINE_BUFFERED, FULLY_BUFFERED };
 
@@ -18,8 +21,11 @@ struct vx_file {
     size_t size;
     size_t write_used;          /* Bytes waiting to be written. */
     size_t read_pos, read_len;  /* Buffered input. */
+    struct vx_mutex lock;
     struct vx_file *next;
 };
+
+static struct vx_mutex list_lock = VX_MUTEX_INIT;
 
 static struct vx_file std_files[3];
 static char stdin_buffer[BUFSIZ], stdout_buffer[BUFSIZ];
@@ -57,14 +63,21 @@ static int flush_one(FILE *file) {
 
 int fflush(FILE *file) {
     if (file) {
-        return file->writable ? flush_one(file) : 0;
+        vx_mutex_lock(&file->lock);
+        int result = file->writable ? flush_one(file) : 0;
+        vx_mutex_unlock(&file->lock);
+        return result;
     }
     int result = 0;
+    vx_mutex_lock(&list_lock);
     for (FILE *f = open_files; f; f = f->next) {
+        vx_mutex_lock(&f->lock);
         if (f->writable && flush_one(f)) {
             result = EOF;
         }
+        vx_mutex_unlock(&f->lock);
     }
+    vx_mutex_unlock(&list_lock);
     return result;
 }
 
@@ -82,8 +95,10 @@ static FILE *new_file(int handle, bool readable, bool writable) {
     file->buffering = FULLY_BUFFERED;
     file->buffer = buffer;
     file->size = BUFSIZ;
+    vx_mutex_lock(&list_lock);
     file->next = open_files;
     open_files = file;
+    vx_mutex_unlock(&list_lock);
     return file;
 }
 
@@ -134,12 +149,14 @@ int fclose(FILE *file) {
     if (file >= &std_files[0] && file <= &std_files[2]) {
         return result;
     }
+    vx_mutex_lock(&list_lock);
     for (FILE **link = &open_files; *link; link = &(*link)->next) {
         if (*link == file) {
             *link = file->next;
             break;
         }
     }
+    vx_mutex_unlock(&list_lock);
     vx_close(file->handle);
     free(file->buffer);
     free(file);
@@ -158,7 +175,7 @@ int ferror(FILE *file) {
     return file->error;
 }
 
-int fputc(int c, FILE *file) {
+static int fputc_unlocked(int c, FILE *file) {
     if (!file->writable) {
         file->error = true;
         return EOF;
@@ -177,7 +194,14 @@ int fputc(int c, FILE *file) {
     return (unsigned char)c;
 }
 
-size_t fwrite(const void *buffer, size_t size, size_t count, FILE *file) {
+int fputc(int c, FILE *file) {
+    vx_mutex_lock(&file->lock);
+    int result = fputc_unlocked(c, file);
+    vx_mutex_unlock(&file->lock);
+    return result;
+}
+
+static size_t fwrite_unlocked(const void *buffer, size_t size, size_t count, FILE *file) {
     const char *p = buffer;
     size_t total = size * count;
     if (file->buffering == UNBUFFERED || (file->write_used == 0 && total >= file->size)) {
@@ -193,11 +217,18 @@ size_t fwrite(const void *buffer, size_t size, size_t count, FILE *file) {
         return size ? done / size : 0;
     }
     for (size_t i = 0; i < total; i++) {
-        if (fputc(p[i], file) == EOF) {
+        if (fputc_unlocked(p[i], file) == EOF) {
             return size ? i / size : 0;
         }
     }
     return count;
+}
+
+size_t fwrite(const void *buffer, size_t size, size_t count, FILE *file) {
+    vx_mutex_lock(&file->lock);
+    size_t result = fwrite_unlocked(buffer, size, count, file);
+    vx_mutex_unlock(&file->lock);
+    return result;
 }
 
 int fputs(const char *text, FILE *file) {
@@ -210,10 +241,16 @@ int putchar(int c) {
 }
 
 int puts(const char *text) {
-    return fputs(text, stdout) == 0 && fputc('\n', stdout) != EOF ? 0 : EOF;
+    size_t n = strlen(text);
+    vx_mutex_lock(&stdout->lock);
+    int result = fwrite_unlocked(text, 1, n, stdout) == n && fputc_unlocked('\n', stdout) != EOF
+                     ? 0
+                     : EOF;
+    vx_mutex_unlock(&stdout->lock);
+    return result;
 }
 
-int fgetc(FILE *file) {
+static int fgetc_unlocked(FILE *file) {
     if (!file->readable) {
         file->error = true;
         return EOF;
@@ -237,14 +274,22 @@ int fgetc(FILE *file) {
     return (unsigned char)file->buffer[file->read_pos++];
 }
 
+int fgetc(FILE *file) {
+    vx_mutex_lock(&file->lock);
+    int c = fgetc_unlocked(file);
+    vx_mutex_unlock(&file->lock);
+    return c;
+}
+
 int getchar(void) {
     return fgetc(stdin);
 }
 
 char *fgets(char *line, int size, FILE *file) {
     int n = 0;
+    vx_mutex_lock(&file->lock);
     while (n < size - 1) {
-        int c = fgetc(file);
+        int c = fgetc_unlocked(file);
         if (c == EOF) {
             break;
         }
@@ -253,6 +298,7 @@ char *fgets(char *line, int size, FILE *file) {
             break;
         }
     }
+    vx_mutex_unlock(&file->lock);
     if (n == 0) {
         return NULL;
     }
@@ -263,13 +309,15 @@ char *fgets(char *line, int size, FILE *file) {
 size_t fread(void *buffer, size_t size, size_t count, FILE *file) {
     char *p = buffer;
     size_t total = size * count, done = 0;
+    vx_mutex_lock(&file->lock);
     while (done < total) {
-        int c = fgetc(file);
+        int c = fgetc_unlocked(file);
         if (c == EOF) {
             break;
         }
         p[done++] = (char)c;
     }
+    vx_mutex_unlock(&file->lock);
     return size ? done / size : 0;
 }
 
@@ -284,7 +332,7 @@ struct sink {
 
 static void emit(struct sink *sink, char c) {
     if (sink->file) {
-        fputc(c, sink->file);
+        fputc_unlocked(c, sink->file);
     } else if (sink->count + 1 < sink->size) {
         sink->out[sink->count] = c;
     }
@@ -449,7 +497,10 @@ static int format(struct sink *sink, const char *f, va_list args) {
 
 int vfprintf(FILE *file, const char *f, va_list args) {
     struct sink sink = {.file = file};
-    return format(&sink, f, args);
+    vx_mutex_lock(&file->lock);
+    int result = format(&sink, f, args);
+    vx_mutex_unlock(&file->lock);
+    return result;
 }
 
 int vprintf(const char *f, va_list args) {

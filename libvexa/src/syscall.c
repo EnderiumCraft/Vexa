@@ -100,6 +100,27 @@ long vx_lstat(const char *path, struct vx_stat *stat) {
     return syscall3(VX_SYS_LSTAT, path, strlen(path), stat);
 }
 
+long vx_thread_start(const struct vx_thread_start *start) {
+    return syscall1(VX_SYS_THREAD_CREATE, start);
+}
+
+void vx_thread_exit(int code) {
+    syscall1(VX_SYS_THREAD_EXIT, code);
+    __builtin_unreachable();
+}
+
+long vx_thread_id(void) {
+    return syscall0(VX_SYS_THREAD_ID);
+}
+
+long vx_wait_address(volatile unsigned *address, unsigned expected, long timeout_ms) {
+    return syscall3(VX_SYS_WAIT_ADDRESS, address, expected, timeout_ms);
+}
+
+long vx_wake_address(volatile unsigned *address, long count) {
+    return syscall2(VX_SYS_WAKE_ADDRESS, address, count);
+}
+
 long vx_chdir(const char *path) {
     return syscall2(VX_SYS_CHDIR, path, strlen(path));
 }
@@ -187,6 +208,7 @@ const char *vx_strerror(long error) {
     case VX_ENOTTY: return "not a terminal";
     case VX_ESPIPE: return "can't seek here";
     case VX_ELOOP: return "too many symbolic links";
+    case VX_ETIMEDOUT: return "timed out";
     default: return "error";
     }
 }

@@ -36,6 +36,7 @@ __attribute__((noreturn)) static void ap_main(struct cpu *cpu) {
  * stack and page tables, both of which are about to be reclaimed. */
 static void ap_entry(struct limine_mp_info *info) {
     struct cpu *cpu = (struct cpu *)info->extra_argument;
+    set_gs_base(cpu);
     vmm_activate(NULL);
     uint64_t stack = vmm_alloc_kernel_stack(AP_STACK_SIZE);
     __asm__ volatile(
@@ -62,6 +63,7 @@ void smp_start(struct limine_mp_response *mp) {
         return;
     }
     irq_register(VECTOR_HALT, halt_this_cpu);
+    tlb_init();
 
     uint32_t started = 0;
     for (uint64_t i = 0; i < mp->cpu_count; i++) {
