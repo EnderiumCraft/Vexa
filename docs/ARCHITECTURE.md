@@ -200,12 +200,18 @@ reads partition tables, and calls the drivers (`dev/virtio_blk.c`, `dev/ahci.c`,
   events. A window made with `VX_WINDOW_RESIZABLE` gets `VX_GUI_RESIZE` events and
   answers with `vx_window_resize`, which hands the desktop a new buffer.
 - **X** runs as Linux programs. Xvexa (`third_party/xvexa`) is a kdrive X server
-  built into X.Org's source tree: it opens a desktop window, uses the window's
-  shared buffer as its framebuffer, presents what X damaged, and turns the
-  desktop's key and pointer events into X input (Linux key codes, the `evdev` XKB
-  rules). It talks the desktop protocol itself, so the Linux subsystem needs nothing
-  graphics-specific for it: local sockets, shared file mappings and `poll`.
-  `/linux/usr/bin/xsession` (Ctrl+Alt+X) starts it with an `xterm`. A process's
+  built into X.Org's source tree, and it talks the desktop protocol itself, so the
+  Linux subsystem needs nothing graphics-specific for it: local sockets, shared file
+  mappings and `poll`. It is rootless: the Composite extension draws each top-level X
+  window into a pixmap of its own, and Xvexa copies what X damaged there into that
+  window's desktop window (menus and tooltips, override-redirect windows, are
+  frameless popups). X's screen is as big as the real one, and X windows are kept
+  where the desktop shows them (`DESKTOP_MOVED`), so X coordinates are screen
+  coordinates; pointer events become X events at those coordinates, keys become X
+  key events (Linux key codes, the `evdev` XKB rules), a desktop window's focus is
+  X's input focus, a resize is a `ConfigureWindow`, and the close button sends
+  `WM_DELETE_WINDOW`. (Without `-rootless`, Xvexa shows its whole screen in one
+  window.) `/linux/usr/bin/xsession` (Ctrl+Alt+X) starts it once, then an `xterm`. A process's
   controlling terminal is what `/dev/tty` opens: a pty becomes one when a group
   leader opens it or claims it with `TIOCSCTTY`, and children inherit it.
 

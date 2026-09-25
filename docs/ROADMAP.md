@@ -223,8 +223,8 @@ native track in 0.12.0; in 0.13.0, X and `xterm` run in a window on it.
 - [ ] Linux: the GTK 3 demo (`gtk3-demo`) runs
 - [ ] Linux: Mesa's software renderer (llvmpipe) for OpenGL, since Firefox's WebRender
       can fall back to software rendering anyway
-- [ ] Run X11 windows inside the Vexa compositor (a small X server that draws into
-      Vexa windows), so Linux apps share the screen with native ones
+- [x] Run X11 windows inside the Vexa compositor: Xvexa is rootless, and each X window
+      is a desktop window next to the native ones (0.14.0)
 - [ ] Audio (optional for first light): Intel HDA driver, a native audio interface,
       and an ALSA-compatible layer for Linux programs
 

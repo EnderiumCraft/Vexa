@@ -18,7 +18,7 @@ user mode, files and storage, a userland, threads and dynamic linking, and netwo
 Vexa boots into its own shell, `vsh`, with a set of native programs, and runs Linux
 programs (BusyBox, GNU bash and coreutils, Python 3.12) through the Linux subsystem.
 Phase 8, graphics, is under way: Vexa has its own desktop with terminal windows, and
-runs an X server with `xterm` in a window on it. The kernel:
+runs X programs such as `xterm` in windows of their own on it. The kernel:
 
 - boots through the [Limine](https://github.com/limine-bootloader/limine) bootloader (BIOS and UEFI)
 - runs in 64-bit long mode as a higher-half kernel
@@ -40,7 +40,8 @@ runs an X server with `xterm` in a window on it. The kernel:
   on the screen, with a panel (the Vexa menu, a button per window, a clock), windows
   you move, resize, maximize and minimize, a terminal window and an "About Vexa" window
 - runs the X Window System through the Linux subsystem: Xvexa, an X server (X.Org's,
-  built with musl) whose screen is a window on the desktop, and `xterm` in it
+  built with musl) that shows each X window as a desktop window of its own, with
+  TrueType fonts (FreeType, fontconfig, Xft and DejaVu), and `xterm`
 - has a terminal with line editing, Ctrl-C (or Ctrl-\\) to stop programs and Ctrl-D for
   end of input
 - runs threads with a preemptive scheduler, on every CPU core it finds; a program can
@@ -85,7 +86,7 @@ the `vexa:/>` prompt:
 | `bash` | GNU bash, a Linux program (`exit` to go back); inside it, `ls`, `vi`, `grep`, `ps`, `top`... are BusyBox's |
 | `sh`, `busybox` | BusyBox's shell; `busybox` alone lists its commands |
 | `ln -s`, `cat /proc/meminfo` | symbolic links; `/proc` |
-| `desktop` | the graphical desktop, with a terminal window; the Vexa menu (top left) starts programs, Alt+Tab switches windows, Ctrl+Alt+T opens a terminal, Ctrl+Alt+X starts X with an `xterm` (point at it to type into it), Ctrl+Alt+Q goes back to the text console |
+| `desktop` | the graphical desktop, with a terminal window; the Vexa menu (top left) starts programs, Alt+Tab switches windows, Ctrl+Alt+T opens a terminal, Ctrl+Alt+X opens an `xterm` (an X program), Ctrl+Alt+Q goes back to the text console |
 | `input` | the keyboard and mouse; `input watch 1` shows what the mouse reports |
 | `net` | network interfaces and addresses (Linux: `ifconfig`, `route -n`) |
 | `fetch http://example.com/` | downloads a web page (a Vexa program); `wget` is BusyBox's |
@@ -124,7 +125,8 @@ journal, so pulling the plug mid-write can leave the disk needing a check with
 `e2fsck` on Linux.
 
 Phase 8 is under way: Vexa has a graphical desktop of its own (`desktop`), with terminal
-windows you can drag around, and X runs on it: Ctrl+Alt+X starts Xvexa with an `xterm`.
+windows you can drag, resize, maximize and minimize, and X programs run on it as windows
+of their own: Ctrl+Alt+X opens an `xterm`.
 Next: the Linux display and input interfaces (DRM "dumb buffers", evdev), so that Linux
 graphics programs can also run without X. See [docs/ROADMAP.md](docs/ROADMAP.md) for the
 full plan from here to Firefox.

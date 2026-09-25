@@ -85,11 +85,16 @@ mesonbuild() {
     tidy
 }
 
-# package <name>: builds it unless its stamp is there.
+# package <name> [files...]: builds it unless its stamp is there (and newer
+# than the files).
 package() {
-    if [ -f "$work/.done-$1" ]; then
+    name=$1
+    shift
+    if [ -f "$work/.done-$name" ] &&
+        { [ $# -eq 0 ] || [ -z "$(find "$@" -newer "$work/.done-$name")" ]; }; then
         return
     fi
+    set -- "$name"
     log "$1"
     "build_$1"
     touch "$work/.done-$1"
@@ -322,7 +327,7 @@ package pixman
 package libxkbfile
 package xkbcomp
 package xkeyboardconfig
-package xserver
+package xserver "$vexa/third_party/xvexa"
 package freetype
 package expat
 package fontconfig

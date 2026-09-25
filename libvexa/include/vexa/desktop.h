@@ -28,6 +28,8 @@ enum desktop_message_type {
     DESKTOP_TITLE = 3,   /* window; text = title */
     DESKTOP_DESTROY = 4, /* window */
     DESKTOP_BUFFER = 5,  /* window; a = width, b = height, text = the new buffer file */
+    DESKTOP_MOVE = 6,    /* window; a, b = where its content goes on the screen */
+    DESKTOP_INFO = 7,    /* answered by INFO_REPLY */
     /* Desktop to program. */
     DESKTOP_CREATED = 16, /* window (0 if it failed) */
     DESKTOP_KEY = 17,     /* window; a = key, b = value, c = character */
@@ -36,10 +38,15 @@ enum desktop_message_type {
     DESKTOP_FOCUS = 20,   /* window; a = 1 gained, 0 lost */
     DESKTOP_CONFIGURE = 21, /* window; a = width, b = height: please be this size */
     DESKTOP_RESIZED = 22,   /* window; a = width, b = height (0: the BUFFER failed) */
+    DESKTOP_MOVED = 23,     /* window; a, b = where its content is on the screen now */
+    DESKTOP_INFO_REPLY = 24, /* a, b = the screen's width and height */
 };
 
 /* DESKTOP_CREATE flags. */
 #define DESKTOP_RESIZABLE 0x1
+/* A menu or tooltip: no frame, above other windows, never takes the
+ * keyboard, and not in the panel. It stays where DESKTOP_MOVE puts it. */
+#define DESKTOP_POPUP 0x2
 
 struct desktop_message {
     uint32_t type;

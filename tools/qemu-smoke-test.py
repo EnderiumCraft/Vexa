@@ -188,13 +188,16 @@ LINUX_COMMANDS = [
     # Linux threads (musl's pthreads): clone, futex, thread-local storage, tgkill.
     ("pthread-test", "pthread-test: passed", 60),
     ("pthread-test exit", "exiting while threads spin", 30),
-    # X: the desktop, then Xvexa (an X server in a desktop window) with an
-    # xterm (Ctrl+Alt+X), whose shell gets what's typed into it once the
-    # pointer is over it (X without a window manager: focus follows the mouse).
+    # X: the desktop, then an xterm (Ctrl+Alt+X) through Xvexa, a rootless X
+    # server: the xterm is a desktop window, which has the keyboard, and its
+    # close button (736,88 to 756,110) closes it (WM_DELETE_WINDOW).
     ("desktop", 'desktop: window 1 "Terminal"', 30),
-    ("@sendkey ctrl-alt-x", 'desktop: window 2 "X (:0)"', 60),
-    ("@mouse_move -440 -200", None, 5),
+    ("@sendkey ctrl-alt-x", 'desktop: window 2 "xterm"', 90),
     ("@type echo typed-in-xterm > /dev/console", "typed-in-xterm", 20),
+    ("@mouse_move 53 -150", None, 5),
+    ("@mouse_move 53 -150", None, 5),
+    ("@mouse_button 1", "desktop: asked window 2 to close", 10),
+    ("@mouse_button 0", 'desktop: closed window 2 "xterm"', 30),
     ("@sendkey ctrl-alt-q", "desktop: back to the console", 30),
     # Networking: BSD sockets (with SCM_RIGHTS), wget, ifconfig, ping and
     # Python's urllib, asyncio and multiprocessing pipes.
