@@ -111,10 +111,10 @@ All of these exist today except the compositor, along with `fs/` (file systems) 
 
 ## The Linux subsystem today
 
-`personality/linux/` runs static Linux x86_64 programs, starting with BusyBox. When the
-ELF loader finds no `.note.vexa` note in a program, the process gets the Linux
-personality, and its system calls go to `linux_syscall()`, which translates each one
-into core operations:
+`personality/linux/` runs Linux x86_64 programs, static or dynamically linked (BusyBox
+and bash so far). When the ELF loader finds no `.note.vexa` note in a program, the
+process gets the Linux personality, and its system calls go to `linux_syscall()`, which
+translates each one into core operations:
 
 - **File descriptors are handle numbers.** `open` becomes `vfs_open` plus a handle;
   `dup2`, `fcntl` and close-on-exec work on the same handle table native programs use.
@@ -127,6 +127,14 @@ into core operations:
   kernel while a handler runs, so a program can't hand back a malformed state.
 - **Terminals.** The console terminal already uses Linux's termios flags, so
   `TCGETS`/`TCSETS` pass straight through.
+- **Files live under `/linux`.** Linux programs expect `/lib/ld-musl-x86_64.so.1`,
+  `/bin/sh`, `/usr/bin`... An absolute path from a Linux program is tried under `/linux`
+  first and used as it is otherwise, so Vexa's own `/` stays Vexa's while `/dev`, `/tmp`,
+  `/proc` and `/mnt` are shared. FreeBSD's Linux emulation works the same way. The core
+  only knows this as an optional `translate_path` hook in the personality.
+- **Dynamic linking.** The core's loader honours `PT_INTERP`: it loads the dynamic
+  loader (musl's `libc.so`, at `/linux/lib/ld-musl-x86_64.so.1`) next to the program and
+  starts it with `AT_BASE` set; the loader then maps libraries with `mmap`.
 
 Anything missing returns `ENOSYS` and is logged once, with its arguments:
 `[linux] prog (process 7): system call 41 is not implemented (...)`.

@@ -371,6 +371,17 @@ static int load_script(const char *path, const char *line, char *const *argv, si
     int error = load_program(interp_path, new_argv, new_argc, envp, envc, caller, depth + 1,
                              as_out, entry, stack_pointer, personality, reason);
     kfree(interp_path);
+#ifdef LINUX_COMPAT
+    if (error == -VX_ENOENT && caller != &linux_personality) {
+        /* "#!/bin/sh" from a native program: sh is a Linux program. */
+        interp_path = path_for(&linux_personality, interp);
+        error = interp_path ? load_program(interp_path, new_argv, new_argc, envp, envc, caller,
+                                           depth + 1, as_out, entry, stack_pointer, personality,
+                                           reason)
+                            : -VX_ENOMEM;
+        kfree(interp_path);
+    }
+#endif
     kfree(new_argv);
     return error;
 }

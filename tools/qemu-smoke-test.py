@@ -56,6 +56,9 @@ TYPED_COMMANDS = [
     ("ls /", "README.txt", 10),
     ("ls /bin", "vsh", 10, 2),
     ("cat /etc/motd", "Welcome to Vexa", 10, 2),
+    ("ln -s /etc/motd /tmp/motd-link ; cat /tmp/motd-link", "Welcome to Vexa", 10, 3),
+    ("ls /proc", "meminfo", 10),
+    ("cat /proc/self/status", "Name:\tcat", 10),
     # Pipes, redirection and variables.
     ("echo one two | cat | cat", "one two", 10, 2),
     ("export WHAT=pipes", None, 10),
@@ -113,6 +116,13 @@ LINUX_COMMANDS = [
     ("for i in 1 2 3 4 5 ; do echo n$i ; done | wc -l | sed s/^/lines:/", "lines:5", 20),
     ("/bin/hello", "hi :)", 20, 2),  # A native program, started by a Linux one.
     ("exit", None, 20),
+    # Dynamically linked programs (musl's loader), /proc, scripts, bash.
+    ("busybox free", "Swap:", 20),
+    ("busybox printf '#!/bin/sh\\necho script says $1\\n' > /tmp/s.sh", None, 20),
+    ("/tmp/s.sh hi", "script says hi", 20),
+    ("bash -c 'echo bash $BASH_VERSION'", "bash 5.2", 20),
+    ("bash -c 'f() { echo fn $1 ; } ; a=(x y z) ; f ${a[2]}'", "fn z", 20),
+    ("bash -c 'cat <(echo substituted) | wc -c | sed s/^/count:/'", "count:12", 20),
 ]
 
 # With --disks: one ext2 file system on each kind of disk.

@@ -141,9 +141,19 @@ Linux track:
 - [ ] Threads, thread-local storage, and a core "wait on address" primitive
       (native API first; the Linux subsystem builds `futex` on it)
 - [ ] Shared libraries for native programs (`libvexa.so` and Vexa's own dynamic loader)
-- [ ] Linux: the musl dynamic loader, `clone`, `arch_prctl`, `set_tid_address`,
-      `getrandom`, `/proc/self/maps`, `sched_getaffinity`, `prctl`, rlimits
-- [ ] Linux: run Alpine Linux packages: bash, coreutils, python3
+- [x] Linux: the musl dynamic loader (`PT_INTERP`, `AT_BASE`), and Linux programs'
+      files under `/linux` (tried first, like FreeBSD's Linux emulation)
+- [x] Symbolic links (tmpfs, ext2, initramfs, both system call interfaces), `#!`
+      scripts, `/proc` (`self`, `<pid>/stat|status|cmdline|maps|exe|cwd|fd`, `meminfo`,
+      `stat`, `cpuinfo`, `mounts`...) and `/dev/fd`
+- [x] Linux: BusyBox linked dynamically; GNU bash 5.2 built from source
+      (0.8.0: Alpine's package servers can't be reached from the build machines, so
+      Linux software is built from source for now)
+- [ ] Linux: `clone` for threads, `set_tid_address` clearing, robust futexes;
+      `arch_prctl`, `getrandom`, `sched_getaffinity`, `prctl` and rlimits exist already
+- [ ] Linux: more software: coreutils, python3
+- [ ] Moved here from Phase 5: timers that send signals (`alarm`), non-blocking I/O,
+      file permissions; file-backed memory that's shared rather than copied
 
 **Milestone:** multithreaded programs run on both tracks, including Python.
 
