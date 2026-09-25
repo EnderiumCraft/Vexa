@@ -217,11 +217,16 @@ PACKET command), as `cd0`... with 2048-byte sectors.
   coordinates; pointer events become X events at those coordinates, keys become X
   key events (Linux key codes, the `evdev` XKB rules), a desktop window's focus is
   X's input focus, a resize is a `ConfigureWindow`, and the close button sends
-  `WM_DELETE_WINDOW`. (Without `-rootless`, Xvexa shows its whole screen in one
-  window.) `/linux/usr/bin/xrun <program>` starts it once and runs an X program;
+  `WM_DELETE_WINDOW`. Xvexa also stands in for a window manager: windows that draw
+  their own title bar (`_MOTIF_WM_HINTS` without decorations, as GTK's client-side
+  decorated windows) get undecorated desktop windows, and the requests programs send to
+  the root window for a window manager (`_NET_WM_MOVERESIZE`, `_NET_WM_STATE`,
+  `WM_CHANGE_STATE`, `_NET_ACTIVE_WINDOW`) become `DESKTOP_WM` messages, so GTK's own
+  title bar buttons and dragging work. (Without `-rootless`, Xvexa shows its whole
+  screen in one window.) `/linux/usr/bin/xrun <program>` starts it once and runs an X program;
   `xsession` (Ctrl+Alt+X) is `xrun xterm`. GTK 3 programs run the same way
-  (`xrun gtk3-demo` is in the Vexa menu), with `GTK_CSD=0` (the desktop draws title
-  bars) and `NO_AT_BRIDGE=1` (no accessibility bus yet). The X and GTK stack is built
+  (the Vexa menu lists the programs in `/linux/usr/share/applications`), with
+  `NO_AT_BRIDGE=1` (no accessibility bus yet). The X and GTK stack is built
   by `tools/build-x11.sh` with musl; C++ code that needs no C++ runtime (HarfBuzz) is
   compiled by the host g++ with musl's headers (`tools/musl-cxx-wrapper.sh`). A process's
   controlling terminal is what `/dev/tty` opens: a pty becomes one when a group

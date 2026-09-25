@@ -32,6 +32,8 @@ enum desktop_message_type {
     DESKTOP_INFO = 7,    /* answered by INFO_REPLY */
     DESKTOP_NOTIFY = 8,  /* text = a notification to show for a few seconds */
     DESKTOP_RELOAD = 9,  /* read DESKTOP_CONFIG again */
+    DESKTOP_WM = 10,     /* window; a = DESKTOP_WM_*, b = its argument: what a program
+                            asks of a window manager (X programs, through Xvexa) */
     /* Desktop to program. */
     DESKTOP_CREATED = 16, /* window (0 if it failed) */
     DESKTOP_KEY = 17,     /* window; a = key, b = value, c = character */
@@ -42,6 +44,14 @@ enum desktop_message_type {
     DESKTOP_RESIZED = 22,   /* window; a = width, b = height (0: the BUFFER failed) */
     DESKTOP_MOVED = 23,     /* window; a, b = where its content is on the screen now */
     DESKTOP_INFO_REPLY = 24, /* a, b = the screen's width and height */
+    DESKTOP_STATE = 25,     /* window; a = 1 if maximized, b = 1 if minimized */
+};
+
+/* DESKTOP_WM requests. MOVE and RESIZE start dragging the window with the
+ * pointer, as if by its title bar or edges (b: 1 right edge, 2 bottom). */
+enum {
+    DESKTOP_WM_MAXIMIZE = 1, DESKTOP_WM_RESTORE, DESKTOP_WM_TOGGLE_MAXIMIZED,
+    DESKTOP_WM_MINIMIZE, DESKTOP_WM_MOVE, DESKTOP_WM_RESIZE, DESKTOP_WM_ACTIVATE,
 };
 
 /* DESKTOP_CREATE flags. */
@@ -49,6 +59,9 @@ enum desktop_message_type {
 /* A menu or tooltip: no frame, above other windows, never takes the
  * keyboard, and not in the panel. It stays where DESKTOP_MOVE puts it. */
 #define DESKTOP_POPUP 0x2
+/* A window that draws its own title bar (GTK's client-side decorations):
+ * no frame, but otherwise like any other. */
+#define DESKTOP_UNDECORATED 0x4
 
 struct desktop_message {
     uint32_t type;

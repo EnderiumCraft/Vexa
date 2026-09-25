@@ -69,6 +69,7 @@ struct window {
     int buffer_handle;
     bool resizable, minimized, maximized;
     bool popup; /* A menu or tooltip: no frame, always on top, no keyboard. */
+    bool undecorated; /* It draws its own title bar: no frame. */
     struct rect restore; /* Where it was before it was maximized (content). */
 };
 
@@ -120,7 +121,7 @@ static bool shift, ctrl, alt, caps_lock;
 /* ---- Rectangles and damage ---- */
 
 static struct rect frame_rect(const struct window *w) {
-    if (w->popup) {
+    if (w->popup || w->undecorated) {
         return (struct rect){w->x, w->y, w->content.width, w->content.height};
     }
     return (struct rect){w->x - BORDER, w->y - TITLE_HEIGHT - BORDER,
@@ -132,7 +133,7 @@ static struct rect frame_rect(const struct window *w) {
  * past its right and bottom edges. */
 static struct rect hit_rect(const struct window *w) {
     struct rect r = frame_rect(w);
-    if (w->resizable && !w->maximized && !w->popup) {
+    if (w->resizable && !w->maximized && !w->popup && !w->undecorated) {
         r.width += GRIP;
         r.height += GRIP;
     }
@@ -863,7 +864,7 @@ static void compose(struct rect area) {
         if (w->minimized) {
             continue;
         }
-        if (!w->popup) {
+        if (!w->popup && !w->undecorated) {
             struct rect f = frame_rect(w);
             vx_fill(&view, ox + f.x, oy + f.y, f.width, f.height, COLOR_BORDER);
             draw_title_bar(&view, ox, oy, w);
@@ -995,6 +996,13 @@ static void raise_window(struct window *w) {
     add_damage(frame_rect(w));
 }
 
+/* Tells the program whether its window is maximized or minimized. */
+static void send_state(struct window *w) {
+    struct desktop_message m = {.type = DESKTOP_STATE, .window = (uint32_t)w->id,
+                                .a = w->maximized, .b = w->minimized};
+    send_to(w->client, &m);
+}
+
 /* Tells the program where its window is now. */
 static void send_moved(struct window *w) {
     struct desktop_message m = {.type = DESKTOP_MOVED, .window = (uint32_t)w->id,
@@ -1005,6 +1013,7 @@ static void send_moved(struct window *w) {
 static void activate(struct window *w) {
     if (w->minimized) {
         w->minimized = false;
+        send_state(w);
         add_damage(frame_rect(w));
         add_damage(panel_rect());
     }
@@ -1019,6 +1028,7 @@ static void minimize(struct window *w) {
         return;
     }
     w->minimized = true;
+    send_state(w);
     add_damage(frame_rect(w));
     add_damage(panel_rect());
     if (focused == w) {
@@ -1032,6 +1042,8 @@ static void configure(struct window *w, int width, int height) {
                                 .a = width, .b = height};
     send_to(w->client, &m);
 }
+
+static void send_state(struct window *w);
 
 static void toggle_maximized(struct window *w) {
     if (!w->resizable) {
@@ -1047,12 +1059,17 @@ static void toggle_maximized(struct window *w) {
         w->maximized = true;
         w->restore = (struct rect){w->x, w->y, w->content.width, w->content.height};
         struct rect area = work_area();
+        if (w->undecorated) { /* Its own title bar goes where ours would. */
+            area.y -= TITLE_HEIGHT;
+            area.height += TITLE_HEIGHT;
+        }
         w->x = area.x;
         w->y = area.y;
         configure(w, area.width, area.height);
     }
     add_damage(frame_rect(w));
     send_moved(w);
+    send_state(w);
     printf("desktop: %s window %d\n", w->maximized ? "maximized" : "restored", w->id);
 }
 
@@ -1146,6 +1163,7 @@ static void create_window(int client, struct desktop_message *m) {
         w->client = client;
         w->resizable = m->c & DESKTOP_RESIZABLE;
         w->popup = m->c & DESKTOP_POPUP;
+        w->undecorated = !w->popup && (m->c & DESKTOP_UNDECORATED);
         strncpy(w->title, title, sizeof(w->title) - 1);
         /* Cascade new windows from the top left (popups go where they're told). */
         int n = (w->id - 1) % 8;
@@ -1194,6 +1212,65 @@ static void replace_buffer(int client, struct window *w, struct desktop_message 
         printf("desktop: window %d is now %dx%d\n", w->id, m->a, m->b);
     }
     send_to(client, &reply);
+}
+
+static struct rect outline_damage(void);
+
+/* Starts dragging a window by the pointer. A maximized one first goes back
+ * to its size from before, under the pointer. */
+static void start_move(struct window *w) {
+    if (w->maximized) {
+        int offset_y = pointer_y - w->y;
+        toggle_maximized(w);
+        add_damage(frame_rect(w));
+        w->x = pointer_x - w->restore.width / 2;
+        w->y = pointer_y - offset_y;
+        add_damage(frame_rect(w));
+    }
+    drag = MOVING;
+    dragged = w;
+    drag_dx = pointer_x - w->x;
+    drag_dy = pointer_y - w->y;
+}
+
+/* What a program asks of its window, as of a window manager. */
+static void window_request(struct window *w, int request, int argument) {
+    switch (request) {
+    case DESKTOP_WM_MAXIMIZE:
+    case DESKTOP_WM_RESTORE:
+    case DESKTOP_WM_TOGGLE_MAXIMIZED:
+        if (request == DESKTOP_WM_TOGGLE_MAXIMIZED ||
+            (request == DESKTOP_WM_MAXIMIZE) != w->maximized) {
+            toggle_maximized(w);
+        }
+        break;
+    case DESKTOP_WM_MINIMIZE:
+        minimize(w);
+        break;
+    case DESKTOP_WM_ACTIVATE:
+        activate(w);
+        break;
+    case DESKTOP_WM_MOVE:
+        /* The program saw a press on its own title bar: drag from here, as
+         * long as the button is down. */
+        if ((buttons & 1) && drag == IDLE) {
+            start_move(w);
+            printf("desktop: window %d moves itself\n", w->id);
+        }
+        break;
+    case DESKTOP_WM_RESIZE:
+        if ((buttons & 1) && drag == IDLE && w->resizable) {
+            drag = RESIZING;
+            dragged = w;
+            resize_right = argument & 1;
+            resize_bottom = argument & 2;
+            drag_dx = w->x + w->content.width - pointer_x;
+            drag_dy = w->y + w->content.height - pointer_y;
+            outline = (struct rect){w->x, w->y, w->content.width, w->content.height};
+            add_damage(outline_damage());
+        }
+        break;
+    }
 }
 
 static void drop_client(int client) {
@@ -1253,6 +1330,11 @@ static void client_message(int client) {
             if (w->y != m.b) {
                 send_moved(w);
             }
+        }
+        break;
+    case DESKTOP_WM:
+        if (w) {
+            window_request(w, m.a, m.b);
         }
         break;
     case DESKTOP_NOTIFY:
@@ -1513,10 +1595,7 @@ static void title_click(struct window *w) {
     }
     last_click_window = w;
     last_click_ms = now;
-    drag = MOVING;
-    dragged = w;
-    drag_dx = pointer_x - w->x;
-    drag_dy = pointer_y - w->y;
+    start_move(w);
 }
 
 static void button_event(int bit, bool down) {
@@ -1578,7 +1657,7 @@ static void button_event(int bit, bool down) {
             add_damage(outline_damage());
             return;
         }
-        if (pointer_y < w->y && !w->popup) {
+        if (pointer_y < w->y && !w->popup && !w->undecorated) {
             title_click(w);
             return;
         }
@@ -1635,10 +1714,10 @@ static void pointer_moved(int dx, int dy, int wheel) {
             add_damage(frame_rect(dragged));
             dragged->x = pointer_x - drag_dx;
             dragged->y = pointer_y - drag_dy;
-            if (dragged->y < PANEL_HEIGHT + TITLE_HEIGHT + BORDER) {
-                dragged->y = PANEL_HEIGHT + TITLE_HEIGHT + BORDER; /* Keep the title bar out. */
+            int top = dragged->undecorated ? PANEL_HEIGHT : PANEL_HEIGHT + TITLE_HEIGHT + BORDER;
+            if (dragged->y < top) {
+                dragged->y = top; /* Keep the title bar out from under the panel. */
             }
-            dragged->maximized = false;
             add_damage(frame_rect(dragged));
             enum snap target = snap_target();
             if (target != snap) {

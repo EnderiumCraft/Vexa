@@ -16,6 +16,12 @@
  *    is as big as the real one and X windows are kept where the desktop
  *    shows them, so X coordinates are screen coordinates.
  *
+ *    Xvexa also stands in for a window manager: windows that draw their
+ *    own title bar (GTK's client-side decorations, _MOTIF_WM_HINTS) get
+ *    desktop windows without one, and the requests programs send to the
+ *    window manager (_NET_WM_MOVERESIZE, _NET_WM_STATE, WM_CHANGE_STATE,
+ *    _NET_ACTIVE_WINDOW) go to the desktop.
+ *
  * Either way, the keys and pointer events the desktop sends become X input.
  * Key codes are Linux's, so with the "evdev" XKB rules X's key code is the
  * key code plus 8, as on Linux.
@@ -54,6 +60,8 @@
 #include "propertyst.h"
 #include "scrnintstr.h"
 #include "windowstr.h"
+#include "extnsionst.h"
+#include <X11/Xproto.h>
 #include "xkbsrv.h"
 
 /* ---- The desktop protocol (libvexa/include/vexa/desktop.h) ---- */
@@ -68,6 +76,7 @@ enum desktop_message_type {
     DESKTOP_BUFFER = 5,
     DESKTOP_MOVE = 6,
     DESKTOP_INFO = 7,
+    DESKTOP_WM = 10,
     DESKTOP_CREATED = 16,
     DESKTOP_KEY = 17,
     DESKTOP_POINTER = 18,
@@ -77,10 +86,16 @@ enum desktop_message_type {
     DESKTOP_RESIZED = 22,
     DESKTOP_MOVED = 23,
     DESKTOP_INFO_REPLY = 24,
+    DESKTOP_STATE = 25,
 };
+
+/* DESKTOP_WM requests. */
+enum { WM_MAXIMIZE = 1, WM_RESTORE, WM_TOGGLE_MAXIMIZED, WM_MINIMIZE, WM_MOVE, WM_RESIZE,
+       WM_ACTIVATE };
 
 #define DESKTOP_RESIZABLE 0x1
 #define DESKTOP_POPUP 0x2
+#define DESKTOP_UNDECORATED 0x4
 
 struct desktop_message {
     uint32_t type;
@@ -268,6 +283,31 @@ ask_screen_size(void)
 
 /* ---- Rootless windows ---- */
 
+/* Window manager atoms. */
+static Atom atom_net_wm_moveresize, atom_net_wm_state, atom_maximized_vert,
+    atom_maximized_horz, atom_hidden, atom_wm_change_state, atom_net_active_window,
+    atom_motif_wm_hints, atom_net_supported, atom_net_supporting_wm_check, atom_net_wm_name,
+    atom_utf8_string;
+
+static void
+make_atoms(void)
+{
+#define ATOM(name) MakeAtom(name, strlen(name), TRUE)
+    atom_net_wm_moveresize = ATOM("_NET_WM_MOVERESIZE");
+    atom_net_wm_state = ATOM("_NET_WM_STATE");
+    atom_maximized_vert = ATOM("_NET_WM_STATE_MAXIMIZED_VERT");
+    atom_maximized_horz = ATOM("_NET_WM_STATE_MAXIMIZED_HORZ");
+    atom_hidden = ATOM("_NET_WM_STATE_HIDDEN");
+    atom_wm_change_state = ATOM("WM_CHANGE_STATE");
+    atom_net_active_window = ATOM("_NET_ACTIVE_WINDOW");
+    atom_motif_wm_hints = ATOM("_MOTIF_WM_HINTS");
+    atom_net_supported = ATOM("_NET_SUPPORTED");
+    atom_net_supporting_wm_check = ATOM("_NET_SUPPORTING_WM_CHECK");
+    atom_net_wm_name = ATOM("_NET_WM_NAME");
+    atom_utf8_string = ATOM("UTF8_STRING");
+#undef ATOM
+}
+
 static struct vexa_window *
 find_by_id(uint32_t id)
 {
@@ -370,6 +410,21 @@ present(struct vexa_window *vw, int x, int y, int w, int h)
     send_message(&m);
 }
 
+/* True if the window draws its own title bar (_MOTIF_WM_HINTS says "no
+ * decorations", as GTK's client-side decorated windows do). */
+static Bool
+wants_no_frame(WindowPtr window)
+{
+    PropertyPtr property = NULL;
+
+    if (dixLookupProperty(&property, window, atom_motif_wm_hints, serverClient,
+                          DixReadAccess) != Success || property->format != 32 ||
+        property->size < 3)
+        return FALSE;
+    /* flags, functions, decorations...: bit 1 of flags says decorations is set. */
+    return (((CARD32 *) property->data)[0] & 2) && ((CARD32 *) property->data)[2] == 0;
+}
+
 /* A top-level window was mapped: give it a desktop window. */
 static void
 add_window(WindowPtr window)
@@ -393,7 +448,9 @@ add_window(WindowPtr window)
     }
     window_name(window, vw->title, sizeof(vw->title));
     vw->id = create_window(path, vw->title, vw->width, vw->height,
-                           vw->popup ? DESKTOP_POPUP : DESKTOP_RESIZABLE);
+                           vw->popup ? DESKTOP_POPUP
+                                     : DESKTOP_RESIZABLE |
+                                       (wants_no_frame(window) ? DESKTOP_UNDECORATED : 0));
     if (!vw->id) {
         munmap(vw->pixels, vw->size);
         free(vw);
@@ -548,6 +605,24 @@ configure_window(WindowPtr window, Mask mask, int a, int b)
     ConfigureWindow(window, mask, values, serverClient);
 }
 
+/* Tells the program its window is maximized (or hidden), as a window
+ * manager would: _NET_WM_STATE. */
+static void
+set_wm_state(WindowPtr window, Bool maximized, Bool hidden)
+{
+    Atom atoms[3];
+    int n = 0;
+
+    if (maximized) {
+        atoms[n++] = atom_maximized_vert;
+        atoms[n++] = atom_maximized_horz;
+    }
+    if (hidden)
+        atoms[n++] = atom_hidden;
+    dixChangeWindowProperty(serverClient, window, atom_net_wm_state, XA_ATOM, 32,
+                            PropModeReplace, n, atoms, TRUE);
+}
+
 static void
 raise_window(WindowPtr window)
 {
@@ -674,8 +749,111 @@ handle_message(const struct desktop_message *m)
         if (vw && m->a > 0 && m->b > 0)
             configure_window(vw->window, CWWidth | CWHeight, m->a, m->b);
         break;
+    case DESKTOP_STATE:
+        if (vw)
+            set_wm_state(vw->window, m->a, m->b);
+        break;
     default:
         break;
+    }
+}
+
+static void
+send_wm(struct vexa_window *vw, int request, int argument)
+{
+    struct desktop_message m;
+
+    memset(&m, 0, sizeof(m));
+    m.type = DESKTOP_WM;
+    m.window = vw->id;
+    m.a = request;
+    m.b = argument;
+    send_message(&m);
+}
+
+/* A ClientMessage for the window manager: handled here (TRUE), or not
+ * one of ours. */
+static Bool
+wm_request(const xEvent *event)
+{
+    WindowPtr window;
+    struct vexa_window *vw;
+    Atom type = event->u.clientMessage.u.l.type;
+    INT32 data0 = event->u.clientMessage.u.l.longs0;
+
+    if (dixLookupWindow(&window, event->u.clientMessage.window, serverClient,
+                        DixReadAccess) != Success || !(vw = find_by_window(window)) || vw->popup)
+        return FALSE;
+    if (type == atom_net_wm_moveresize) {
+        /* Direction (data 2): 3 right, 4 bottom right, 5 bottom, 8 move. */
+        INT32 direction = event->u.clientMessage.u.l.longs2;
+
+        if (direction == 8)
+            send_wm(vw, WM_MOVE, 0);
+        else if (direction == 3 || direction == 4 || direction == 5)
+            send_wm(vw, WM_RESIZE, (direction == 3 || direction == 4 ? 1 : 0) |
+                    (direction == 4 || direction == 5 ? 2 : 0));
+        return TRUE;
+    }
+    if (type == atom_net_wm_state) {
+        /* 0 remove, 1 add, 2 toggle; the states in data 1 and 2. */
+        Atom first = event->u.clientMessage.u.l.longs1;
+        Atom second = event->u.clientMessage.u.l.longs2;
+
+        if (first == atom_maximized_vert || first == atom_maximized_horz ||
+            second == atom_maximized_vert || second == atom_maximized_horz)
+            send_wm(vw, data0 == 0 ? WM_RESTORE : data0 == 1 ? WM_MAXIMIZE : WM_TOGGLE_MAXIMIZED, 0);
+        return TRUE;
+    }
+    if (type == atom_wm_change_state) {
+        if (data0 == 3) /* IconicState */
+            send_wm(vw, WM_MINIMIZE, 0);
+        return TRUE;
+    }
+    if (type == atom_net_active_window) {
+        send_wm(vw, WM_ACTIVATE, 0);
+        return TRUE;
+    }
+    return FALSE;
+}
+
+static int (*original_send_event) (ClientPtr client);
+
+/* SendEvent requests: ClientMessages to the root window are for the
+ * window manager, and Xvexa stands in for one. */
+static int
+vexaProcSendEvent(ClientPtr client)
+{
+    REQUEST(xSendEventReq);
+
+    if (client->req_len == bytes_to_int32(sizeof(xSendEventReq)) && !client->swapped &&
+        vexa_screen && stuff->destination == vexa_screen->root->drawable.id &&
+        (stuff->event.u.u.type & 0x7f) == ClientMessage && wm_request(&stuff->event))
+        return Success;
+    return (*original_send_event) (client);
+}
+
+/* The root window says a window manager is here, and what it supports
+ * (the root window is its own "supporting WM check" window). */
+static void
+advertise_wm(WindowPtr root)
+{
+    Atom supported[] = {
+        atom_net_wm_moveresize, atom_net_wm_state, atom_maximized_vert, atom_maximized_horz,
+        atom_hidden, atom_net_active_window, atom_net_supporting_wm_check, atom_net_wm_name,
+    };
+    XID self = root->drawable.id;
+
+    dixChangeWindowProperty(serverClient, root, atom_net_supported, XA_ATOM, 32,
+                            PropModeReplace, sizeof(supported) / sizeof(supported[0]),
+                            supported, TRUE);
+    dixChangeWindowProperty(serverClient, root, atom_net_supporting_wm_check, XA_WINDOW, 32,
+                            PropModeReplace, 1, &self, TRUE);
+    dixChangeWindowProperty(serverClient, root, atom_net_wm_name, atom_utf8_string, 8,
+                            PropModeReplace, 4, "Vexa", TRUE);
+    if (!original_send_event) {
+        original_send_event = ProcVector[X_SendEvent];
+        ProcVector[X_SendEvent] = vexaProcSendEvent;
     }
 }
 
@@ -824,6 +1002,8 @@ vexaRealizeWindow(WindowPtr window)
         /* The root: every window on it is drawn off the screen, into a
          * pixmap of its own. */
         compRedirectSubwindows(serverClient, window, CompositeRedirectManual);
+        make_atoms();
+        advertise_wm(window);
     }
     else if (window->parent == pScreen->root && window->drawable.class == InputOutput &&
              !find_by_window(window)) {

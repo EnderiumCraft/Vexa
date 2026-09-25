@@ -14,7 +14,6 @@ if [ ! -S "$socket" ]; then
     done
 fi
 export DISPLAY="$display"
-# No accessibility bus (D-Bus) yet: GTK needn't look for one. And the
-# desktop draws title bars: GTK needn't draw its own (client-side).
-export NO_AT_BRIDGE=1 GTK_CSD=0
+# No accessibility bus (D-Bus) yet: GTK needn't look for one.
+export NO_AT_BRIDGE=1
 exec "$@"

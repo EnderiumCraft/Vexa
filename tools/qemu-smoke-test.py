@@ -215,8 +215,9 @@ LINUX_COMMANDS = [
     ("@mouse_move 53 -150", None, 5),
     ("@mouse_button 1", "desktop: asked window 2 to close", 10),
     ("@mouse_button 0", 'desktop: closed window 2 "xterm"', 30),
-    # GTK 3: gtk3-demo from the Vexa menu (at 144,138); a click on "Change
-    # Display" in its list shows that demo, which is its title then.
+    # GTK 3: gtk3-demo from the Vexa menu (at 144,138, with GTK's own title
+    # bar); a click on "Change Display" in its list shows that demo, which is
+    # its title then.
     ("@mouse_move -357 -43", None, 5),
     ("@mouse_move -358 -44", None, 5),
     ("@mouse_button 1", "desktop: left button at 31,13", 10),
@@ -227,6 +228,12 @@ LINUX_COMMANDS = [
     ("@mouse_move 181 113", None, 10),
     ("@mouse_button 1", "desktop: left button at 212,308", 10),
     ("@mouse_button 0", 'desktop: window 3 is now called "Change Display"', 60),
+    # GTK draws its own title bar (the desktop draws none for it); its
+    # maximize button asks the desktop, through Xvexa, like a window manager.
+    ("@mouse_move 337 -72", None, 5),
+    ("@mouse_move 338 -72", None, 5),
+    ("@mouse_button 1", "desktop: left button at 887,164", 10),
+    ("@mouse_button 0", "desktop: maximized window 3", 30),
     ("@sendkey ctrl-alt-q", "desktop: back to the console", 30),
     # Networking: BSD sockets (with SCM_RIGHTS), wget, ifconfig, ping and
     # Python's urllib, asyncio and multiprocessing pipes.

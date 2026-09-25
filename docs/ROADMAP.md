@@ -208,7 +208,8 @@ Native track:
 - [x] Desktop apps: Files, a text editor, an image viewer (libvexa decodes PNG, BMP
       and PPM) and Settings (wallpaper, clock, time zone); desktop icons,
       notifications, snapping windows to the edges, Linux programs in the menu from
-      their `.desktop` files (0.15.0)
+      their `.desktop` files; GTK windows with their own title bars, whose buttons and
+      dragging work through Xvexa standing in for a window manager (0.15.0)
 
 Linux track:
 - [x] The X Window System built from source with musl: the X libraries, X.Org's
