@@ -244,8 +244,10 @@ static int unix_bind(struct socket *socket, const struct vx_socket_address *addr
         if (vfs_lstat(path, strlen(path), &stat) == 0) {
             error = -VX_EADDRINUSE;
         } else {
-            error = vfs_open(path, strlen(path), VX_OPEN_READ | VX_OPEN_WRITE | VX_OPEN_CREATE,
-                             &file);
+            error = vfs_mknod(path, strlen(path), VX_TYPE_SOCKET);
+            if (!error) {
+                error = vfs_open(path, strlen(path), VX_OPEN_READ, &file);
+            }
         }
         kfree(path);
         if (error) {

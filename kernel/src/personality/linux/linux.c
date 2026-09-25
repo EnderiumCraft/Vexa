@@ -889,6 +889,7 @@ static uint32_t mode_of(uint32_t type, uint32_t permissions) {
     case VX_TYPE_CHAR_DEVICE: return LINUX_S_IFCHR | permissions;
     case VX_TYPE_BLOCK_DEVICE: return LINUX_S_IFBLK | permissions;
     case VX_TYPE_SYMLINK: return LINUX_S_IFLNK | permissions;
+    case VX_TYPE_SOCKET: return LINUX_S_IFSOCK | permissions;
     default: return LINUX_S_IFREG | permissions;
     }
 }
@@ -1138,6 +1139,7 @@ static uint8_t dirent_type(uint32_t type) {
     case VX_TYPE_CHAR_DEVICE: return LINUX_DT_CHR;
     case VX_TYPE_BLOCK_DEVICE: return LINUX_DT_BLK;
     case VX_TYPE_SYMLINK: return LINUX_DT_LNK;
+    case VX_TYPE_SOCKET: return LINUX_DT_SOCK;
     default: return LINUX_DT_REG;
     }
 }

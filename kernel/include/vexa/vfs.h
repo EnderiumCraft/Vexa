@@ -140,6 +140,8 @@ int vfs_file_chmod(struct file *file, uint32_t mode);
 int vfs_statfs(const char *path, size_t length, uint64_t *total, uint64_t *free,
                const char **fs_name);
 int vfs_mkdir(const char *path, size_t length);
+/* A node of another type: VX_TYPE_SOCKET (a bound local socket's name). */
+int vfs_mknod(const char *path, size_t length, uint32_t type);
 int vfs_remove(const char *path, size_t length);
 int vfs_rename(const char *from, size_t from_length, const char *to, size_t to_length);
 /* A hard link: `to` becomes another name for the file at `from`. */

@@ -481,7 +481,9 @@ int vfs_readlink(const char *path, size_t length, char *buffer, size_t size) {
 
 /* Runs `create` (a directory, or a symbolic link to `target`) or `remove` on
  * the parent directory of `path`. */
-static int modify_parent(const char *path, size_t length, bool create, const char *target) {
+/* Creates a node of type `create` (with `target` for a symbolic link), or
+ * with `create` 0 removes the node at `path`. */
+static int modify_parent(const char *path, size_t length, uint32_t create, const char *target) {
     vfs_lock();
     struct walk walk = {0};
     struct vnode *dir;
@@ -511,8 +513,7 @@ static int modify_parent(const char *path, size_t length, bool create, const cha
                 error = -VX_EEXIST;
             } else if (error == -VX_ENOENT) {
                 struct vnode *created = NULL;
-                error = dir->ops->create(dir, name, name_length,
-                                         target ? VX_TYPE_SYMLINK : VX_TYPE_DIRECTORY, &created);
+                error = dir->ops->create(dir, name, name_length, create, &created);
                 if (!error && target) {
                     size_t target_length = strlen(target);
                     int64_t n = created->ops->write
@@ -543,7 +544,11 @@ static int modify_parent(const char *path, size_t length, bool create, const cha
 }
 
 int vfs_mkdir(const char *path, size_t length) {
-    return modify_parent(path, length, true, NULL);
+    return modify_parent(path, length, VX_TYPE_DIRECTORY, NULL);
+}
+
+int vfs_mknod(const char *path, size_t length, uint32_t type) {
+    return type == VX_TYPE_SOCKET ? modify_parent(path, length, type, NULL) : -VX_EINVAL;
 }
 
 int vfs_symlink(const char *target, const char *path, size_t length) {
@@ -554,11 +559,11 @@ int vfs_symlink(const char *target, const char *path, size_t length) {
     if (target_length > VX_PATH_MAX) {
         return -VX_ENAMETOOLONG;
     }
-    return modify_parent(path, length, true, target);
+    return modify_parent(path, length, VX_TYPE_SYMLINK, target);
 }
 
 int vfs_remove(const char *path, size_t length) {
-    return modify_parent(path, length, false, NULL);
+    return modify_parent(path, length, 0, NULL);
 }
 
 static bool is_dot_or_dotdot(const char *name, size_t length) {

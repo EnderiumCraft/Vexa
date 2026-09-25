@@ -339,6 +339,7 @@ struct vx_tty_size {
 #define VX_TYPE_CHAR_DEVICE 3
 #define VX_TYPE_BLOCK_DEVICE 4
 #define VX_TYPE_SYMLINK 5
+#define VX_TYPE_SOCKET 6 /* The name of a bound local socket. */
 
 #define VX_NAME_MAX 255
 #define VX_PATH_MAX 4096

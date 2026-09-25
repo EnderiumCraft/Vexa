@@ -37,6 +37,7 @@
 #define MODE_BLOCK 0x6000
 #define MODE_FILE 0x8000
 #define MODE_SYMLINK 0xa000
+#define MODE_SOCKET 0xc000
 
 #define FLAG_INDEX 0x1000 /* Hashed directory index: we don't maintain it. */
 
@@ -432,6 +433,7 @@ static uint32_t vnode_type(uint16_t mode) {
     switch (mode & MODE_TYPE_MASK) {
     case MODE_DIR: return VX_TYPE_DIRECTORY;
     case MODE_SYMLINK: return VX_TYPE_SYMLINK;
+    case MODE_SOCKET: return VX_TYPE_SOCKET;
     case MODE_CHAR: return VX_TYPE_CHAR_DEVICE;
     case MODE_BLOCK: return VX_TYPE_BLOCK_DEVICE;
     default: return VX_TYPE_FILE;
@@ -622,7 +624,8 @@ static uint8_t entry_file_type(struct ext2 *fs, uint32_t vx_type) {
     if (!fs->file_types) {
         return 0;
     }
-    return vx_type == VX_TYPE_DIRECTORY ? 2 : vx_type == VX_TYPE_SYMLINK ? 7 : 1;
+    return vx_type == VX_TYPE_DIRECTORY ? 2 : vx_type == VX_TYPE_SYMLINK ? 7
+                                             : vx_type == VX_TYPE_SOCKET  ? 6 : 1;
 }
 
 static int add_entry(struct ext2 *fs, struct ext2_node *dir, const char *name, size_t length,
@@ -682,6 +685,7 @@ static bool read_dir_visitor(struct dir_entry *entry, struct dir_entry *previous
                       : entry->file_type == 7 ? VX_TYPE_SYMLINK
                       : entry->file_type == 3 ? VX_TYPE_CHAR_DEVICE
                       : entry->file_type == 4 ? VX_TYPE_BLOCK_DEVICE
+                      : entry->file_type == 6 ? VX_TYPE_SOCKET
                                               : VX_TYPE_FILE;
     args->out->name_length = entry->name_len;
     memcpy(args->out->name, entry->name, entry->name_len);
@@ -743,6 +747,7 @@ static int ext2_create(struct vnode *dir_vnode, const char *name, size_t length,
     node->number = number;
     node->inode.mode = directory                   ? (MODE_DIR | 0755)
                        : type == VX_TYPE_SYMLINK ? (MODE_SYMLINK | 0777)
+                       : type == VX_TYPE_SOCKET  ? (MODE_SOCKET | 0755)
                                                  : (MODE_FILE | 0644);
     node->inode.atime = node->inode.ctime = node->inode.mtime = now;
     node->inode.links_count = directory ? 2 : 1;

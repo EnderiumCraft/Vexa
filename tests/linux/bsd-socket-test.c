@@ -189,6 +189,10 @@ static void test_udp(void) {
     CHECK(recvfrom(b, buffer, sizeof(buffer), 0, (struct sockaddr *)&from, &length) == 3 &&
               from.sin_addr.s_addr == htonl(INADDR_LOOPBACK),
           "recvfrom");
+    /* The second datagram may still be on its way (loopback goes through the
+     * network thread): wait for it, then ask its size. */
+    struct pollfd p = {b, POLLIN, 0};
+    CHECK(poll(&p, 1, 5000) == 1, "poll for the second datagram");
     int pending = 0;
     CHECK(ioctl(b, FIONREAD, &pending) == 0 && pending == 4, "FIONREAD");
     CHECK(recv(b, buffer, 2, 0) == 2, "a datagram cut short");

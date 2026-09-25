@@ -295,12 +295,14 @@
 #define LINUX_S_IFBLK 0060000
 #define LINUX_S_IFREG 0100000
 #define LINUX_S_IFLNK 0120000
+#define LINUX_S_IFSOCK 0140000
 
 #define LINUX_DT_CHR 2
 #define LINUX_DT_DIR 4
 #define LINUX_DT_BLK 6
 #define LINUX_DT_REG 8
 #define LINUX_DT_LNK 10
+#define LINUX_DT_SOCK 12
 
 struct linux_stat {
     uint64_t dev;
