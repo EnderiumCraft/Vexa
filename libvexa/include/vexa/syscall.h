@@ -26,6 +26,11 @@ long vx_read_dir(int handle, struct vx_dir_entry *entries, size_t count);
 long vx_mkdir(const char *path);
 long vx_remove(const char *path);
 long vx_rename(const char *from, const char *to);
+/* Symbolic links: make one, read where it points (not NUL-terminated;
+ * returns the length), or describe the link itself instead of its target. */
+long vx_symlink(const char *target, const char *path);
+long vx_readlink(const char *path, char *buffer, size_t size);
+long vx_lstat(const char *path, struct vx_stat *stat);
 long vx_chdir(const char *path);
 long vx_getcwd(char *buffer, size_t size);
 long vx_pipe(int handles[2]);

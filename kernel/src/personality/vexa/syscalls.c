@@ -112,7 +112,7 @@ static struct file *get_file(int64_t handle, uint32_t rights, int *error) {
 static int64_t sys_open(uint64_t path, uint64_t length, uint64_t flags, uint64_t a3) {
     (void)a3;
     const uint64_t known = VX_OPEN_READ | VX_OPEN_WRITE | VX_OPEN_CREATE | VX_OPEN_TRUNCATE |
-                           VX_OPEN_APPEND;
+                           VX_OPEN_APPEND | VX_OPEN_NO_FOLLOW;
     if (flags & ~known) {
         return -VX_EINVAL;
     }
@@ -327,6 +327,67 @@ static int64_t sys_rename(uint64_t from, uint64_t from_length, uint64_t to, uint
         kfree(kto);
     }
     kfree(kfrom);
+    return error;
+}
+
+static int64_t sys_symlink(uint64_t target, uint64_t target_length, uint64_t path,
+                           uint64_t length) {
+    if (target_length == 0 || target_length > VX_PATH_MAX) {
+        return target_length ? -VX_ENAMETOOLONG : -VX_ENOENT;
+    }
+    char *ktarget = kmalloc(target_length + 1);
+    if (!ktarget) {
+        return -VX_ENOMEM;
+    }
+    if (!copy_from_user(ktarget, target, target_length)) {
+        kfree(ktarget);
+        return -VX_EFAULT;
+    }
+    ktarget[target_length] = '\0';
+    char *kpath;
+    int error = copy_path(path, length, &kpath);
+    if (!error) {
+        error = strlen(ktarget) != target_length ? -VX_EINVAL
+                                                 : vfs_symlink(ktarget, kpath, strlen(kpath));
+        kfree(kpath);
+    }
+    kfree(ktarget);
+    return error;
+}
+
+static int64_t sys_readlink(uint64_t path, uint64_t length, uint64_t buffer, uint64_t size) {
+    if (!user_range_ok(buffer, size)) {
+        return -VX_EFAULT;
+    }
+    char *kpath;
+    int error = copy_path(path, length, &kpath);
+    if (error) {
+        return error;
+    }
+    size_t max = size < VX_PATH_MAX ? size : VX_PATH_MAX;
+    char *target = kmalloc(max + 1);
+    int64_t result = target ? vfs_readlink(kpath, strlen(kpath), target, max) : -VX_ENOMEM;
+    if (result > 0 && !copy_to_user(buffer, target, result)) {
+        result = -VX_EFAULT;
+    }
+    kfree(target);
+    kfree(kpath);
+    return result;
+}
+
+static int64_t sys_lstat(uint64_t path, uint64_t length, uint64_t out, uint64_t a3) {
+    (void)a3;
+    char *kpath;
+    int error = copy_path(path, length, &kpath);
+    if (error) {
+        return error;
+    }
+    struct vx_stat stat = {0};
+    error = vfs_lstat(kpath, strlen(kpath), &stat);
+    kfree(kpath);
+    if (!error && !copy_to_user(out, &stat, sizeof(stat))) {
+        error = -VX_EFAULT;
+    }
     return error;
 }
 
@@ -678,6 +739,9 @@ static const syscall_fn syscalls[] = {
     [VX_SYS_KERNEL_COMMAND] = sys_kernel_command,
     [VX_SYS_RENAME] = sys_rename,
     [VX_SYS_HANDLE_PROCESS_ID] = sys_handle_process_id,
+    [VX_SYS_SYMLINK] = sys_symlink,
+    [VX_SYS_READLINK] = sys_readlink,
+    [VX_SYS_LSTAT] = sys_lstat,
 };
 
 static void vexa_syscall(struct interrupt_frame *frame) {

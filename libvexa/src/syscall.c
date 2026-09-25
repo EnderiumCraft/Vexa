@@ -87,6 +87,19 @@ long vx_rename(const char *from, const char *to) {
     return syscall4(VX_SYS_RENAME, (long)from, (long)strlen(from), (long)to, (long)strlen(to));
 }
 
+long vx_symlink(const char *target, const char *path) {
+    return syscall4(VX_SYS_SYMLINK, (long)target, (long)strlen(target), (long)path,
+                    (long)strlen(path));
+}
+
+long vx_readlink(const char *path, char *buffer, size_t size) {
+    return syscall4(VX_SYS_READLINK, (long)path, (long)strlen(path), (long)buffer, (long)size);
+}
+
+long vx_lstat(const char *path, struct vx_stat *stat) {
+    return syscall3(VX_SYS_LSTAT, path, strlen(path), stat);
+}
+
 long vx_chdir(const char *path) {
     return syscall2(VX_SYS_CHDIR, path, strlen(path));
 }
@@ -173,6 +186,7 @@ const char *vx_strerror(long error) {
     case VX_E2BIG: return "arguments too long";
     case VX_ENOTTY: return "not a terminal";
     case VX_ESPIPE: return "can't seek here";
+    case VX_ELOOP: return "too many symbolic links";
     default: return "error";
     }
 }

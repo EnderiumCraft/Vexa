@@ -77,12 +77,20 @@ static int list(const char *path, bool with_title) {
         if (long_format) {
             char full[512];
             snprintf(full, sizeof(full), "%s/%s", path, name);
-            if (vx_stat(full, &st) == 0 && st.type == VX_TYPE_FILE) {
+            if (entries[i].type != VX_TYPE_SYMLINK && vx_stat(full, &st) == 0 &&
+                st.type == VX_TYPE_FILE) {
                 print_size(st.size);
             } else {
                 printf("%10s  ", type_name(entries[i].type));
             }
-            printf("%s%s\n", name, entries[i].type == VX_TYPE_DIRECTORY ? "/" : "");
+            if (entries[i].type == VX_TYPE_SYMLINK) {
+                char target[512];
+                long n = vx_readlink(full, target, sizeof(target) - 1);
+                target[n > 0 ? n : 0] = '\0';
+                printf("%s -> %s\n", name, target);
+            } else {
+                printf("%s%s\n", name, entries[i].type == VX_TYPE_DIRECTORY ? "/" : "");
+            }
         } else {
             /* Directories are marked with a slash; names in columns of 20. */
             char shown[300];

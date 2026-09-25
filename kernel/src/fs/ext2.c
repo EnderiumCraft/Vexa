@@ -390,7 +390,19 @@ static bool free_tree(struct ext2 *fs, struct ext2_node *node, uint32_t block, i
 }
 
 /* Frees every block from file block `keep` on. */
+/* A "fast" symbolic link keeps its target in the block pointers, not in blocks. */
+static bool is_fast_symlink(const struct ext2_node *node) {
+    return (node->inode.mode & MODE_TYPE_MASK) == MODE_SYMLINK && node->inode.blocks == 0;
+}
+
 static void free_blocks_from(struct ext2 *fs, struct ext2_node *node, uint64_t keep) {
+    if (is_fast_symlink(node)) {
+        if (keep == 0) {
+            memset(node->inode.block, 0, sizeof(node->inode.block));
+            write_inode(fs, node);
+        }
+        return;
+    }
     for (uint32_t i = 0; i < DIRECT_BLOCKS; i++) {
         if (i >= keep && node->inode.block[i]) {
             free_block(fs, node->inode.block[i]);
@@ -609,7 +621,7 @@ static uint8_t entry_file_type(struct ext2 *fs, uint32_t vx_type) {
     if (!fs->file_types) {
         return 0;
     }
-    return vx_type == VX_TYPE_DIRECTORY ? 2 : 1;
+    return vx_type == VX_TYPE_DIRECTORY ? 2 : vx_type == VX_TYPE_SYMLINK ? 7 : 1;
 }
 
 static int add_entry(struct ext2 *fs, struct ext2_node *dir, const char *name, size_t length,
@@ -728,7 +740,9 @@ static int ext2_create(struct vnode *dir_vnode, const char *name, size_t length,
         return -VX_ENOMEM;
     }
     node->number = number;
-    node->inode.mode = directory ? (MODE_DIR | 0755) : (MODE_FILE | 0644);
+    node->inode.mode = directory                   ? (MODE_DIR | 0755)
+                       : type == VX_TYPE_SYMLINK ? (MODE_SYMLINK | 0777)
+                                                 : (MODE_FILE | 0644);
     node->inode.atime = node->inode.ctime = node->inode.mtime = now;
     node->inode.links_count = directory ? 2 : 1;
     vnode_init(&node->vnode, fs->mount, type, &ext2_ops);
@@ -915,7 +929,7 @@ static int64_t ext2_read(struct vnode *vnode, void *buffer, size_t size, uint64_
     if (size > vnode->size - offset) {
         size = vnode->size - offset;
     }
-    if (vnode->type == VX_TYPE_SYMLINK && vnode->size < sizeof(node->inode.block)) {
+    if (is_fast_symlink(node)) {
         memcpy(buffer, (uint8_t *)node->inode.block + offset, size); /* A "fast" symlink. */
         return (int64_t)size;
     }
@@ -938,6 +952,16 @@ static int64_t ext2_read(struct vnode *vnode, void *buffer, size_t size, uint64_
 static int64_t ext2_write(struct vnode *vnode, const void *buffer, size_t size, uint64_t offset) {
     struct ext2 *fs = fs_of(vnode);
     struct ext2_node *node = node_of(vnode);
+    if (vnode->type == VX_TYPE_SYMLINK && offset == 0 && vnode->size == 0 &&
+        size < sizeof(node->inode.block)) {
+        /* A short link target fits in the inode itself (a "fast" symlink). */
+        memcpy(node->inode.block, buffer, size);
+        set_size(node, size);
+        node->inode.mtime = node->inode.ctime = (uint32_t)time_now();
+        vnode->modified = node->inode.mtime;
+        write_inode(fs, node);
+        return (int64_t)size;
+    }
     size_t done = 0;
     int error = 0;
     while (done < size) {

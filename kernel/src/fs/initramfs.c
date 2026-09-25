@@ -46,7 +46,7 @@ static size_t field_length(const char *field, size_t max) {
 
 int initramfs_unpack(const void *data, size_t size) {
     const uint8_t *pos = data, *end = pos + size;
-    int files = 0, directories = 0;
+    int files = 0, directories = 0, links = 0;
     char path[VX_PATH_MAX];
 
     while (pos + sizeof(struct ustar_header) <= end) {
@@ -92,6 +92,17 @@ int initramfs_unpack(const void *data, size_t size) {
                     kprintf("[initramfs] mkdir failed: %s\n", vfs_error_name(error));
                 }
                 directories++;
+            } else if (header->type == '2') {
+                char target[sizeof(header->link_name) + 1];
+                size_t target_length = field_length(header->link_name, sizeof(header->link_name));
+                memcpy(target, header->link_name, target_length);
+                target[target_length] = '\0';
+                int error = vfs_symlink(target, name, length);
+                if (error) {
+                    kprintf("[initramfs] could not make a symbolic link: %s\n",
+                            vfs_error_name(error));
+                }
+                links++;
             } else if (header->type == '0' || header->type == '\0') {
                 struct file *file;
                 int error = vfs_open(name, length,
@@ -111,6 +122,7 @@ int initramfs_unpack(const void *data, size_t size) {
         }
         pos = contents + ((file_size + 511) & ~511ULL);
     }
-    kprintf("[initramfs] unpacked %d files in %d directories\n", files, directories);
+    kprintf("[initramfs] unpacked %d files, %d directories and %d symbolic links\n", files,
+            directories, links);
     return 0;
 }

@@ -100,6 +100,13 @@ struct mount *vfs_mounts(void); /* The list of mounts (read with vfs_lock held).
 /* Operations by path. Paths are (pointer, length) pairs. */
 int vfs_open(const char *path, size_t length, uint32_t flags, struct file **out);
 int vfs_stat(const char *path, size_t length, struct vx_stat *stat);
+/* Like vfs_stat, but describes a symbolic link itself rather than its target. */
+int vfs_lstat(const char *path, size_t length, struct vx_stat *stat);
+/* Makes a symbolic link at `path` pointing to `target`. */
+int vfs_symlink(const char *target, const char *path, size_t length);
+/* Copies a link's target (not NUL-terminated); returns its length, or
+ * -VX_EINVAL if `path` isn't a symbolic link. */
+int vfs_readlink(const char *path, size_t length, char *buffer, size_t size);
 int vfs_mkdir(const char *path, size_t length);
 int vfs_remove(const char *path, size_t length);
 int vfs_rename(const char *from, size_t from_length, const char *to, size_t to_length);

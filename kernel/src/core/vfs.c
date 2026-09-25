@@ -115,18 +115,57 @@ static bool next_component(const char **path, const char *end, const char **name
     return true;
 }
 
+/* Linux's limit too: a path may pass through at most this many symbolic links. */
+#define MAX_SYMLINKS 40
+
+/* State for one path walk. Following a symbolic link rewrites the path into a
+ * new buffer, which lives here until walk_done() (names returned by resolve()
+ * may point into it). */
+struct walk {
+    char *owned;
+    int links;
+};
+
+static void walk_done(struct walk *walk) {
+    kfree(walk->owned);
+    walk->owned = NULL;
+}
+
+/* Reads a symbolic link's target into a new NUL-terminated buffer. */
+static int read_link(struct vnode *link, char **out, size_t *length) {
+    if (link->size == 0 || link->size > VX_PATH_MAX || !link->ops->read) {
+        return link->size > VX_PATH_MAX ? -VX_ENAMETOOLONG : -VX_EIO;
+    }
+    char *target = kmalloc(link->size + 1);
+    if (!target) {
+        return -VX_ENOMEM;
+    }
+    int64_t n = link->ops->read(link, target, link->size, 0);
+    if (n <= 0) {
+        kfree(target);
+        return n < 0 ? (int)n : -VX_EIO;
+    }
+    target[n] = '\0';
+    *out = target;
+    *length = (size_t)n;
+    return 0;
+}
+
 /* Resolves a path. With `parent` set, stops before the last component and
  * returns the directory plus the last name in *name and *name_length (which
- * is empty for "/"). Returned vnodes carry a reference. */
-static int resolve(const char *path, size_t length, bool parent, struct vnode **out,
-                   const char **name, size_t *name_length) {
+ * is empty for "/"). Symbolic links along the way are followed, and the last
+ * component too if `follow` is set. Returned vnodes carry a reference; call
+ * walk_done() once *name isn't needed any more. */
+static int resolve(struct walk *walk, const char *path, size_t length, bool parent, bool follow,
+                   struct vnode **out, const char **name, size_t *name_length) {
     if (!root_mount) {
         return -VX_ENOENT;
     }
+restart:
     if (length > VX_PATH_MAX) {
         return -VX_ENAMETOOLONG;
     }
-    const char *end = path + length;
+    const char *start = path, *end = path + length;
     struct vnode *vnode = root_mount->root;
     vnode_ref(vnode);
 
@@ -145,10 +184,43 @@ static int resolve(const char *path, size_t length, bool parent, struct vnode **
         }
         struct vnode *child;
         int error = lookup_step(vnode, component, component_length, &child);
-        vnode_put(vnode);
         if (error) {
+            vnode_put(vnode);
             return error;
         }
+        if (child->type == VX_TYPE_SYMLINK && (more || follow)) {
+            /* Replace this component with the link's target and start over:
+             * absolute targets from the root, relative ones from here. */
+            char *target;
+            size_t target_length;
+            error = ++walk->links > MAX_SYMLINKS ? -VX_ELOOP
+                                                 : read_link(child, &target, &target_length);
+            vnode_put(child);
+            vnode_put(vnode);
+            if (error) {
+                return error;
+            }
+            size_t prefix = target[0] == '/' ? 0 : (size_t)(component - start);
+            const char *rest = more ? next : end;
+            size_t rest_length = (size_t)(end - rest);
+            char *joined = kmalloc(prefix + target_length + 1 + rest_length + 1);
+            if (!joined) {
+                kfree(target);
+                return -VX_ENOMEM;
+            }
+            memcpy(joined, start, prefix);
+            memcpy(joined + prefix, target, target_length);
+            joined[prefix + target_length] = '/';
+            memcpy(joined + prefix + target_length + 1, rest, rest_length);
+            length = prefix + target_length + 1 + rest_length;
+            joined[length] = '\0';
+            kfree(target);
+            kfree(walk->owned);
+            walk->owned = joined;
+            path = joined;
+            goto restart;
+        }
+        vnode_put(vnode);
         vnode = child;
         component = next;
         component_length = next_length;
@@ -190,7 +262,9 @@ int vfs_mount(const char *fs, struct block_device *device, const char *source, c
     struct vnode *mountpoint = NULL;
     int error = 0;
     if (root_mount) {
-        error = resolve(path, strlen(path), false, &mountpoint, NULL, NULL);
+        struct walk walk = {0};
+        error = resolve(&walk, path, strlen(path), false, true, &mountpoint, NULL, NULL);
+        walk_done(&walk);
         if (!error && mountpoint->type != VX_TYPE_DIRECTORY) {
             error = -VX_ENOTDIR;
         } else if (!error && (mountpoint->mounted_here || mountpoint == root_mount->root)) {
@@ -261,23 +335,31 @@ int vfs_open(const char *path, size_t length, uint32_t flags, struct file **out)
         return -VX_ENOMEM;
     }
     vfs_lock();
-    struct vnode *dir, *vnode = NULL;
-    const char *name;
-    size_t name_length;
-    int error = resolve(path, length, true, &dir, &name, &name_length);
-    if (!error) {
-        if (name_length == 0) {
-            vnode = dir; /* The path was "/" (or all slashes). */
-        } else {
-            error = lookup_step(dir, name, name_length, &vnode);
-            if (error == -VX_ENOENT && (flags & VX_OPEN_CREATE)) {
-                error = dir->mount->read_only ? -VX_EROFS
-                        : name_length > VX_NAME_MAX ? -VX_ENAMETOOLONG
-                        : !dir->ops->create ? -VX_EROFS
-                        : dir->ops->create(dir, name, name_length, VX_TYPE_FILE, &vnode);
-            }
+    struct walk walk = {0};
+    struct vnode *vnode = NULL;
+    int error = resolve(&walk, path, length, false, !(flags & VX_OPEN_NO_FOLLOW), &vnode,
+                        NULL, NULL);
+    if (error == -VX_ENOENT && (flags & VX_OPEN_CREATE)) {
+        /* Create it, in its (existing) parent directory. */
+        struct vnode *dir;
+        const char *name;
+        size_t name_length;
+        vnode = NULL;
+        error = resolve(&walk, path, length, true, true, &dir, &name, &name_length);
+        if (!error) {
+            error = name_length == 0 || dir->type != VX_TYPE_DIRECTORY ? -VX_ENOENT
+                    : dir->mount->read_only                            ? -VX_EROFS
+                    : name_length > VX_NAME_MAX                        ? -VX_ENAMETOOLONG
+                    : !dir->ops->create                                ? -VX_EROFS
+                    : dir->ops->create(dir, name, name_length, VX_TYPE_FILE, &vnode);
             vnode_put(dir);
         }
+    } else if (error) {
+        vnode = NULL;
+    }
+    walk_done(&walk);
+    if (!error && vnode->type == VX_TYPE_SYMLINK) {
+        error = -VX_ELOOP; /* Opened with VX_OPEN_NO_FOLLOW. */
     }
     if (!error && vnode->type == VX_TYPE_DIRECTORY && writes(flags)) {
         error = -VX_EISDIR;
@@ -316,10 +398,12 @@ static void fill_stat(struct vnode *vnode, struct vx_stat *stat) {
     stat->modified = vnode->modified;
 }
 
-int vfs_stat(const char *path, size_t length, struct vx_stat *stat) {
+static int stat_path(const char *path, size_t length, bool follow, struct vx_stat *stat) {
     vfs_lock();
+    struct walk walk = {0};
     struct vnode *vnode;
-    int error = resolve(path, length, false, &vnode, NULL, NULL);
+    int error = resolve(&walk, path, length, false, follow, &vnode, NULL, NULL);
+    walk_done(&walk);
     if (!error) {
         fill_stat(vnode, stat);
         vnode_put(vnode);
@@ -328,14 +412,48 @@ int vfs_stat(const char *path, size_t length, struct vx_stat *stat) {
     return error;
 }
 
-/* Runs `create` or `remove` on the parent directory of `path`. */
-static int modify_parent(const char *path, size_t length, bool create) {
+int vfs_stat(const char *path, size_t length, struct vx_stat *stat) {
+    return stat_path(path, length, true, stat);
+}
+
+int vfs_lstat(const char *path, size_t length, struct vx_stat *stat) {
+    return stat_path(path, length, false, stat);
+}
+
+int vfs_readlink(const char *path, size_t length, char *buffer, size_t size) {
     vfs_lock();
+    struct walk walk = {0};
+    struct vnode *vnode;
+    int error = resolve(&walk, path, length, false, false, &vnode, NULL, NULL);
+    walk_done(&walk);
+    int result = error;
+    if (!error) {
+        char *target;
+        size_t target_length;
+        result = vnode->type != VX_TYPE_SYMLINK ? -VX_EINVAL
+                                                : read_link(vnode, &target, &target_length);
+        if (result == 0) {
+            result = (int)(target_length < size ? target_length : size);
+            memcpy(buffer, target, result);
+            kfree(target);
+        }
+        vnode_put(vnode);
+    }
+    vfs_unlock();
+    return result;
+}
+
+/* Runs `create` (a directory, or a symbolic link to `target`) or `remove` on
+ * the parent directory of `path`. */
+static int modify_parent(const char *path, size_t length, bool create, const char *target) {
+    vfs_lock();
+    struct walk walk = {0};
     struct vnode *dir;
     const char *name;
     size_t name_length;
-    int error = resolve(path, length, true, &dir, &name, &name_length);
+    int error = resolve(&walk, path, length, true, true, &dir, &name, &name_length);
     if (error) {
+        walk_done(&walk);
         vfs_unlock();
         return error;
     }
@@ -356,9 +474,23 @@ static int modify_parent(const char *path, size_t length, bool create) {
                 vnode_put(existing);
                 error = -VX_EEXIST;
             } else if (error == -VX_ENOENT) {
-                struct vnode *created;
-                error = dir->ops->create(dir, name, name_length, VX_TYPE_DIRECTORY, &created);
-                if (!error) {
+                struct vnode *created = NULL;
+                error = dir->ops->create(dir, name, name_length,
+                                         target ? VX_TYPE_SYMLINK : VX_TYPE_DIRECTORY, &created);
+                if (!error && target) {
+                    size_t target_length = strlen(target);
+                    int64_t n = created->ops->write
+                                    ? created->ops->write(created, target, target_length, 0)
+                                    : -VX_EROFS;
+                    if (n != (int64_t)target_length) {
+                        /* Couldn't store the target: take the link away again. */
+                        error = n < 0 ? (int)n : -VX_ENOSPC;
+                        vnode_put(created);
+                        created = NULL;
+                        dir->ops->remove(dir, name, name_length);
+                    }
+                }
+                if (created && !error) {
                     vnode_put(created);
                 }
             }
@@ -369,16 +501,28 @@ static int modify_parent(const char *path, size_t length, bool create) {
         }
     }
     vnode_put(dir);
+    walk_done(&walk);
     vfs_unlock();
     return error;
 }
 
 int vfs_mkdir(const char *path, size_t length) {
-    return modify_parent(path, length, true);
+    return modify_parent(path, length, true, NULL);
+}
+
+int vfs_symlink(const char *target, const char *path, size_t length) {
+    size_t target_length = strlen(target);
+    if (target_length == 0) {
+        return -VX_ENOENT;
+    }
+    if (target_length > VX_PATH_MAX) {
+        return -VX_ENAMETOOLONG;
+    }
+    return modify_parent(path, length, true, target);
 }
 
 int vfs_remove(const char *path, size_t length) {
-    return modify_parent(path, length, false);
+    return modify_parent(path, length, false, NULL);
 }
 
 static bool is_dot_or_dotdot(const char *name, size_t length) {
@@ -395,9 +539,10 @@ int vfs_rename(const char *from, size_t from_length, const char *to, size_t to_l
     struct vnode *old_dir = NULL, *new_dir = NULL, *moving = NULL;
     const char *old_name, *new_name;
     size_t old_length, new_length;
-    int error = resolve(from, from_length, true, &old_dir, &old_name, &old_length);
+    struct walk old_walk = {0}, new_walk = {0};
+    int error = resolve(&old_walk, from, from_length, true, true, &old_dir, &old_name, &old_length);
     if (!error) {
-        error = resolve(to, to_length, true, &new_dir, &new_name, &new_length);
+        error = resolve(&new_walk, to, to_length, true, true, &new_dir, &new_name, &new_length);
     }
     if (!error && (old_length == 0 || new_length == 0 || is_dot_or_dotdot(old_name, old_length) ||
                    is_dot_or_dotdot(new_name, new_length))) {
@@ -433,6 +578,8 @@ int vfs_rename(const char *from, size_t from_length, const char *to, size_t to_l
     if (new_dir) {
         vnode_put(new_dir);
     }
+    walk_done(&old_walk);
+    walk_done(&new_walk);
     vfs_unlock();
     return error;
 }
@@ -556,6 +703,7 @@ const char *vfs_error_name(int error) {
     case VX_ENOMEM: return "out of memory";
     case VX_EROFS: return "read-only file system";
     case VX_EBUSY: return "busy";
+    case VX_ELOOP: return "too many symbolic links";
     case VX_EINVAL: return "invalid argument";
     case VX_EFAULT: return "bad address";
     default: return "error";

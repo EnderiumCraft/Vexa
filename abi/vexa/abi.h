@@ -50,6 +50,9 @@
 #define VX_SYS_CLOSE_ALL 29      /* reserved */
 #define VX_SYS_RENAME 30   /* vx_rename(from, from_length, to, to_length) */
 #define VX_SYS_HANDLE_PROCESS_ID 31 /* vx_handle_process_id(process handle) -> its id */
+#define VX_SYS_SYMLINK 32  /* vx_symlink(target, target_length, path, path_length) */
+#define VX_SYS_READLINK 33 /* vx_readlink(path, path_length, buffer, size) -> length */
+#define VX_SYS_LSTAT 34    /* vx_lstat(path, length, struct vx_stat *): the link itself */
 
 #define VX_MAP_WRITE 0x1
 #define VX_MAP_EXEC 0x2
@@ -125,6 +128,7 @@ struct vx_process_info {
 #define VX_OPEN_CREATE 0x4   /* Create the file if it doesn't exist. */
 #define VX_OPEN_TRUNCATE 0x8 /* Empty the file first. */
 #define VX_OPEN_APPEND 0x10  /* Every write goes to the end. */
+#define VX_OPEN_NO_FOLLOW 0x20 /* Fail with VX_ELOOP if the path is a symbolic link. */
 
 #define VX_SEEK_SET 0
 #define VX_SEEK_CURRENT 1
@@ -181,6 +185,7 @@ struct vx_dir_entry {
 #define VX_E2BIG 25        /* Arguments and environment too large. */
 #define VX_ENOTTY 26       /* Not a terminal. */
 #define VX_ESPIPE 27       /* Can't seek on a pipe or terminal. */
+#define VX_ELOOP 28        /* Too many symbolic links (or one where none may be). */
 
 /* Every Vexa program carries an ELF note with this name and type, holding the
  * ABI version as a 32-bit integer. The kernel uses it to tell native programs

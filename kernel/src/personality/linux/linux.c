@@ -126,6 +126,7 @@ static const uint8_t errno_of_vx[] = {
     [VX_EINTR] = LE_EINTR, [VX_EPIPE] = LE_EPIPE, [VX_ECHILD] = LE_ECHILD,
     [VX_ESRCH] = LE_ESRCH, [VX_EAGAIN] = LE_EAGAIN, [VX_ENOEXEC] = LE_ENOEXEC,
     [VX_E2BIG] = LE_E2BIG, [VX_ENOTTY] = LE_ENOTTY, [VX_ESPIPE] = LE_ESPIPE,
+    [VX_ELOOP] = LE_ELOOP,
 };
 
 /* Converts a core result (negative VX_E* on failure) into a Linux one. */
@@ -477,7 +478,8 @@ static int64_t do_openat(int64_t dirfd, uint64_t user_path, uint64_t flags) {
     }
     vx_flags |= (flags & LINUX_O_CREAT ? VX_OPEN_CREATE : 0) |
                 (flags & LINUX_O_TRUNC ? VX_OPEN_TRUNCATE : 0) |
-                (flags & LINUX_O_APPEND ? VX_OPEN_APPEND : 0);
+                (flags & LINUX_O_APPEND ? VX_OPEN_APPEND : 0) |
+                (flags & LINUX_O_NOFOLLOW ? VX_OPEN_NO_FOLLOW : 0);
     struct vx_stat stat;
     int exists = vfs_stat(path, strlen(path), &stat);
     if ((flags & LINUX_O_CREAT) && (flags & LINUX_O_EXCL) && exists == 0) {
@@ -745,14 +747,14 @@ static void fill_stat(const struct vx_stat *vx, struct linux_stat *st) {
     }
 }
 
-static int64_t stat_path(int64_t dirfd, uint64_t user_path, uint64_t out) {
+static int64_t stat_path(int64_t dirfd, uint64_t user_path, uint64_t out, bool follow) {
     char *path;
     int64_t error = path_at(dirfd, user_path, &path);
     if (error) {
         return error;
     }
     struct vx_stat vx;
-    error = vfs_stat(path, strlen(path), &vx);
+    error = follow ? vfs_stat(path, strlen(path), &vx) : vfs_lstat(path, strlen(path), &vx);
     kfree(path);
     if (error) {
         return lx(error);
@@ -786,7 +788,12 @@ static int64_t stat_fd(int64_t fd, uint64_t out) {
 
 static int64_t sys_stat(struct interrupt_frame *f, uint64_t path, uint64_t out, uint64_t a2,
                         uint64_t a3, uint64_t a4, uint64_t a5) {
-    return stat_path(LINUX_AT_FDCWD, path, out);
+    return stat_path(LINUX_AT_FDCWD, path, out, true);
+}
+
+static int64_t sys_lstat(struct interrupt_frame *f, uint64_t path, uint64_t out, uint64_t a2,
+                         uint64_t a3, uint64_t a4, uint64_t a5) {
+    return stat_path(LINUX_AT_FDCWD, path, out, false);
 }
 
 static int64_t sys_fstat(struct interrupt_frame *f, uint64_t fd, uint64_t out, uint64_t a2,
@@ -799,11 +806,17 @@ static int64_t sys_newfstatat(struct interrupt_frame *f, uint64_t dirfd, uint64_
     if (flags & LINUX_AT_EMPTY_PATH) {
         char first;
         if (copy_from_user(&first, path, 1) && first == '\0') {
-            return (int)dirfd == LINUX_AT_FDCWD ? stat_path(dirfd, (uint64_t)".", out)
-                                                : stat_fd(dirfd, out);
+            if ((int)dirfd != LINUX_AT_FDCWD) {
+                return stat_fd(dirfd, out);
+            }
+            struct vx_stat vx;
+            int64_t error = lx(vfs_stat(me()->cwd, strlen(me()->cwd), &vx));
+            struct linux_stat st;
+            fill_stat(&vx, &st);
+            return error ? error : copy_to_user(out, &st, sizeof(st)) ? 0 : -LE_EFAULT;
         }
     }
-    return stat_path((int)dirfd, path, out);
+    return stat_path((int)dirfd, path, out, !(flags & LINUX_AT_SYMLINK_NOFOLLOW));
 }
 
 static int64_t access_at(int64_t dirfd, uint64_t user_path) {
@@ -828,19 +841,64 @@ static int64_t sys_faccessat(struct interrupt_frame *f, uint64_t dirfd, uint64_t
     return access_at((int)dirfd, path);
 }
 
-static int64_t readlink_at(int64_t dirfd, uint64_t user_path) {
-    int64_t error = access_at(dirfd, user_path);
-    return error ? error : -LE_EINVAL; /* There are no symbolic links yet. */
+static int64_t readlink_at(int64_t dirfd, uint64_t user_path, uint64_t buffer, uint64_t size) {
+    if ((int64_t)size <= 0) {
+        return -LE_EINVAL;
+    }
+    char *path;
+    int64_t error = path_at(dirfd, user_path, &path);
+    if (error) {
+        return error;
+    }
+    size_t max = size < VX_PATH_MAX ? size : VX_PATH_MAX;
+    char *target = kmalloc(max);
+    int64_t result = target ? lx(vfs_readlink(path, strlen(path), target, max)) : -LE_ENOMEM;
+    if (result > 0 && !copy_to_user(buffer, target, result)) {
+        result = -LE_EFAULT;
+    }
+    kfree(target);
+    kfree(path);
+    return result;
 }
 
 static int64_t sys_readlink(struct interrupt_frame *f, uint64_t path, uint64_t buffer,
                             uint64_t size, uint64_t a3, uint64_t a4, uint64_t a5) {
-    return readlink_at(LINUX_AT_FDCWD, path);
+    return readlink_at(LINUX_AT_FDCWD, path, buffer, size);
 }
 
 static int64_t sys_readlinkat(struct interrupt_frame *f, uint64_t dirfd, uint64_t path,
                               uint64_t buffer, uint64_t size, uint64_t a4, uint64_t a5) {
-    return readlink_at((int)dirfd, path);
+    return readlink_at((int)dirfd, path, buffer, size);
+}
+
+static int64_t symlink_at(uint64_t user_target, int64_t dirfd, uint64_t user_path) {
+    char *target = kmalloc(VX_PATH_MAX + 1);
+    if (!target) {
+        return -LE_ENOMEM;
+    }
+    int64_t length = copy_string_from_user(target, user_target, VX_PATH_MAX + 1);
+    if (length <= 0) {
+        kfree(target);
+        return length < 0 ? -LE_EFAULT : -LE_ENOENT;
+    }
+    char *path;
+    int64_t error = path_at(dirfd, user_path, &path);
+    if (!error) {
+        error = lx(vfs_symlink(target, path, strlen(path)));
+        kfree(path);
+    }
+    kfree(target);
+    return error;
+}
+
+static int64_t sys_symlink(struct interrupt_frame *f, uint64_t target, uint64_t path,
+                           uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5) {
+    return symlink_at(target, LINUX_AT_FDCWD, path);
+}
+
+static int64_t sys_symlinkat(struct interrupt_frame *f, uint64_t target, uint64_t dirfd,
+                             uint64_t path, uint64_t a3, uint64_t a4, uint64_t a5) {
+    return symlink_at(target, (int)dirfd, path);
 }
 
 static uint8_t dirent_type(uint32_t type) {
@@ -2289,7 +2347,7 @@ static const linux_fn syscalls[] = {
     CALL(close, sys_close),
     CALL(stat, sys_stat),
     CALL(fstat, sys_fstat),
-    CALL(lstat, sys_stat),
+    CALL(lstat, sys_lstat),
     CALL(poll, sys_poll),
     CALL(lseek, sys_lseek),
     CALL(mmap, sys_mmap),
@@ -2343,7 +2401,7 @@ static const linux_fn syscalls[] = {
     CALL(creat, sys_creat),
     CALL(link, sys_not_permitted),
     CALL(unlink, sys_unlink),
-    CALL(symlink, sys_not_permitted),
+    CALL(symlink, sys_symlink),
     CALL(readlink, sys_readlink),
     CALL(chmod, sys_accept_quietly),
     CALL(fchmod, sys_accept_quietly),
@@ -2416,7 +2474,7 @@ static const linux_fn syscalls[] = {
     CALL(unlinkat, sys_unlinkat),
     CALL(renameat, sys_renameat),
     CALL(linkat, sys_not_permitted),
-    CALL(symlinkat, sys_not_permitted),
+    CALL(symlinkat, sys_symlinkat),
     CALL(readlinkat, sys_readlinkat),
     CALL(fchmodat, sys_accept_quietly),
     CALL(faccessat, sys_faccessat),
