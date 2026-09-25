@@ -47,8 +47,20 @@
 #define LINUX_SYS_getpid 39
 #define LINUX_SYS_sendfile 40
 #define LINUX_SYS_socket 41
+#define LINUX_SYS_connect 42
+#define LINUX_SYS_accept 43
+#define LINUX_SYS_sendto 44
+#define LINUX_SYS_recvfrom 45
+#define LINUX_SYS_sendmsg 46
+#define LINUX_SYS_recvmsg 47
+#define LINUX_SYS_shutdown 48
+#define LINUX_SYS_bind 49
+#define LINUX_SYS_listen 50
 #define LINUX_SYS_getsockname 51
 #define LINUX_SYS_getpeername 52
+#define LINUX_SYS_socketpair 53
+#define LINUX_SYS_setsockopt 54
+#define LINUX_SYS_getsockopt 55
 #define LINUX_SYS_clone 56
 #define LINUX_SYS_fork 57
 #define LINUX_SYS_vfork 58
@@ -177,6 +189,9 @@
 #define LINUX_SYS_rseq 334
 #define LINUX_SYS_close_range 436
 #define LINUX_SYS_faccessat2 439
+#define LINUX_SYS_accept4 288
+#define LINUX_SYS_recvmmsg 299
+#define LINUX_SYS_sendmmsg 307
 #define LINUX_SYSCALL_LIMIT 512
 
 /* ---- Error numbers ---- */
@@ -213,7 +228,25 @@
 #define LE_ENOTEMPTY 39
 #define LE_ELOOP 40
 #define LE_ENOTSOCK 88
+#define LE_EDESTADDRREQ 89
+#define LE_EMSGSIZE 90
+#define LE_EPROTOTYPE 91
+#define LE_ENOPROTOOPT 92
+#define LE_EPROTONOSUPPORT 93
+#define LE_EOPNOTSUPP 95
+#define LE_EAFNOSUPPORT 97
+#define LE_EADDRINUSE 98
+#define LE_EADDRNOTAVAIL 99
+#define LE_ENETUNREACH 101
+#define LE_ECONNABORTED 103
+#define LE_ECONNRESET 104
+#define LE_EISCONN 106
+#define LE_ENOTCONN 107
 #define LE_ETIMEDOUT 110
+#define LE_ECONNREFUSED 111
+#define LE_EHOSTUNREACH 113
+#define LE_EALREADY 114
+#define LE_EINPROGRESS 115
 
 /* ---- Files ---- */
 
@@ -460,6 +493,126 @@ struct linux_siginfo {
     int32_t code;
     int32_t pad;
     uint8_t fields[112];
+};
+
+/* ---- Sockets ---- */
+
+#define LINUX_AF_UNSPEC 0
+#define LINUX_AF_UNIX 1
+#define LINUX_AF_INET 2
+#define LINUX_SOCK_TYPE_MASK 0xf
+#define LINUX_SOCK_NONBLOCK 04000
+#define LINUX_SOCK_CLOEXEC 02000000
+
+#define LINUX_MSG_OOB 0x1
+#define LINUX_MSG_PEEK 0x2
+#define LINUX_MSG_CTRUNC 0x8
+#define LINUX_MSG_TRUNC 0x20
+#define LINUX_MSG_DONTWAIT 0x40
+#define LINUX_MSG_EOR 0x80
+#define LINUX_MSG_WAITALL 0x100
+#define LINUX_MSG_NOSIGNAL 0x4000
+#define LINUX_MSG_MORE 0x8000
+#define LINUX_MSG_WAITFORONE 0x10000
+#define LINUX_MSG_CMSG_CLOEXEC 0x40000000
+
+#define LINUX_SOL_SOCKET 1
+#define LINUX_SO_REUSEADDR 2
+#define LINUX_SO_TYPE 3
+#define LINUX_SO_ERROR 4
+#define LINUX_SO_BROADCAST 6
+#define LINUX_SO_SNDBUF 7
+#define LINUX_SO_RCVBUF 8
+#define LINUX_SO_KEEPALIVE 9
+#define LINUX_SO_LINGER 13
+#define LINUX_SO_REUSEPORT 15
+#define LINUX_SO_PASSCRED 16
+#define LINUX_SO_PEERCRED 17
+#define LINUX_SO_RCVTIMEO 20
+#define LINUX_SO_SNDTIMEO 21
+#define LINUX_SO_ACCEPTCONN 30
+#define LINUX_SO_PROTOCOL 38
+#define LINUX_SO_DOMAIN 39
+#define LINUX_SCM_RIGHTS 1
+
+#define LINUX_IPPROTO_IP 0
+#define LINUX_IPPROTO_TCP 6
+#define LINUX_TCP_NODELAY 1
+#define LINUX_TCP_MAXSEG 2
+
+#define LINUX_SIOCGIFNAME 0x8910
+#define LINUX_SIOCGIFCONF 0x8912
+#define LINUX_SIOCGIFFLAGS 0x8913
+#define LINUX_SIOCGIFADDR 0x8915
+#define LINUX_SIOCGIFDSTADDR 0x8917
+#define LINUX_SIOCGIFBRDADDR 0x8919
+#define LINUX_SIOCGIFNETMASK 0x891b
+#define LINUX_SIOCGIFMETRIC 0x891d
+#define LINUX_SIOCGIFMTU 0x8921
+#define LINUX_SIOCGIFHWADDR 0x8927
+#define LINUX_SIOCGIFINDEX 0x8933
+#define LINUX_SIOCGIFTXQLEN 0x8942
+#define LINUX_IFF_UP 0x1
+#define LINUX_IFF_BROADCAST 0x2
+#define LINUX_IFF_LOOPBACK 0x8
+#define LINUX_IFF_RUNNING 0x40
+#define LINUX_IFF_MULTICAST 0x1000
+
+struct linux_iovec {
+    uint64_t base;
+    uint64_t length;
+};
+
+struct linux_msghdr {
+    uint64_t name;
+    uint32_t name_length;
+    uint32_t pad;
+    uint64_t iov;
+    uint64_t iov_count;
+    uint64_t control;
+    uint64_t control_length;
+    int32_t flags;
+    int32_t pad2;
+};
+
+struct linux_mmsghdr {
+    struct linux_msghdr header;
+    uint32_t length;
+    uint32_t pad;
+};
+
+struct linux_cmsghdr {
+    uint64_t length; /* Header and data. */
+    int32_t level;
+    int32_t type;
+};
+
+struct linux_ucred {
+    int32_t pid;
+    uint32_t uid, gid;
+};
+
+struct linux_linger {
+    int32_t on, seconds;
+};
+
+struct linux_ifreq {
+    char name[16];
+    union {
+        struct {
+            uint16_t family;
+            uint8_t data[14];
+        } address;
+        int16_t flags;
+        int32_t value;
+        uint8_t pad[24];
+    };
+};
+
+struct linux_ifconf {
+    int32_t length;
+    int32_t pad;
+    uint64_t buffer;
 };
 
 #endif

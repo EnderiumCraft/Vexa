@@ -49,11 +49,13 @@ static void put_string(struct sink *sink, const char *s) {
 }
 
 static void put_unsigned(struct sink *sink, uint64_t value, unsigned base, int min_digits) {
-    static const char digits[] = "0123456789abcdef";
+    static const char digits[] = "0123456789abcdef0123456789ABCDEF";
+    unsigned offset = base > 16 ? 16 : 0; /* Base 32 here means "16, in capitals". */
+    base -= offset;
     char buf[32];
     int i = 0;
     do {
-        buf[i++] = digits[value % base];
+        buf[i++] = digits[offset + value % base];
         value /= base;
     } while (value);
     while (i < min_digits) {
@@ -107,6 +109,10 @@ static void format(struct sink *sink, const char *fmt, va_list args) {
             break;
         case 'x':
             put_unsigned(sink, is_long ? va_arg(args, uint64_t) : va_arg(args, unsigned), 16,
+                         width ? width : 1);
+            break;
+        case 'X':
+            put_unsigned(sink, is_long ? va_arg(args, uint64_t) : va_arg(args, unsigned), 32,
                          width ? width : 1);
             break;
         case 'p':

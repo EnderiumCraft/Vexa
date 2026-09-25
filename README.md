@@ -47,9 +47,13 @@ way: programs on both sides can now use threads. The kernel:
   and MBR partition tables, and reads and writes ext2 file systems
 - has symbolic links, `#!` scripts, and `/proc` (in Linux's format, so `ps` and `top`
   work)
+- is on the network: a virtio-net driver, its own TCP/IP stack (Ethernet, ARP, IPv4,
+  ICMP, UDP, TCP) with a DHCP client and a loopback interface, and sockets for both
+  kinds of programs, including local (Unix domain) sockets that can pass open files
+  between processes
 - runs Linux programs through an optional Linux subsystem, static or dynamically linked
   (with musl's loader): `fork`, `execve`, signal handlers, terminal control and about
-  150 system calls in all. Linux programs find their files under `/linux` first.
+  190 system calls in all. Linux programs find their files under `/linux` first.
 
 At boot, `vinit` (the first program) starts `vsh`, the Vexa shell. Some things to try at
 the `vexa:/>` prompt:
@@ -72,6 +76,9 @@ the `vexa:/>` prompt:
 | `bash` | GNU bash, a Linux program (`exit` to go back); inside it, `ls`, `vi`, `grep`, `ps`, `top`... are BusyBox's |
 | `sh`, `busybox` | BusyBox's shell; `busybox` alone lists its commands |
 | `ln -s`, `cat /proc/meminfo` | symbolic links; `/proc` |
+| `net` | network interfaces and addresses (Linux: `ifconfig`, `route -n`) |
+| `fetch http://example.com/` | downloads a web page (a Vexa program); `wget` is BusyBox's |
+| `socket-test`, `bsd-socket-test` | checks sockets: a Vexa program and a Linux one |
 
 The kernel's built-in command line (the kernel monitor) is still there for when
 something is broken: pick it in the boot menu, and Vexa starts it instead of `vinit`.
@@ -80,6 +87,13 @@ If Vexa has trouble on a machine, pick **safe mode** in the boot menu. It ignore
 and uses only the oldest, most widely supported interrupt and timer hardware. The
 kernel options behind it (`acpi=off`, `noapic`) can also be set in `limine.conf`, as can
 `nosmp` to use only the first CPU core.
+
+### Network
+
+`make run` gives Vexa a virtio network card behind QEMU's user-mode NAT: DHCP hands out
+10.0.2.15, the router is 10.0.2.2 (which is also your machine), and DNS goes through
+10.0.2.3. Try `net`, `fetch http://example.com/`, or `wget -O - http://example.com/`.
+There is no HTTPS yet (no TLS library), and no IPv6.
 
 ### Disks
 
@@ -98,8 +112,9 @@ ext4 disks are refused (Vexa doesn't support their extra features yet), and ext2
 journal, so pulling the plug mid-write can leave the disk needing a check with
 `e2fsck` on Linux.
 
-Phase 6 is done: native programs use a shared `libvexa.so`, and the Linux subsystem runs
-threaded programs, GNU coreutils and Python 3.12. Next, Phase 7: networking. See [docs/ROADMAP.md](docs/ROADMAP.md) for the full
+Phase 7 is done: Vexa has a TCP/IP stack, and both native programs and Linux ones
+(BusyBox `wget`, Python's `urllib` and `asyncio`) use the network. Next, Phase 8:
+graphics and input. See [docs/ROADMAP.md](docs/ROADMAP.md) for the full
 plan from here to Firefox.
 
 ## Download
@@ -157,13 +172,15 @@ kernel/
   src/kmain.c        kernel entry point and boot sequence
   src/arch/x86_64/   per-CPU setup, interrupts, APIC and 8259 PIC, timer, FPU state,
                      system call entry, context switch, starting other CPUs
+  src/net/           network stack: interfaces, ARP, IPv4, ICMP, UDP, TCP, DHCP, sockets,
+                     local sockets
   src/core/          memory (pmm, vmm, address spaces, heap), scheduler, processes,
                      signals, pipes, handles, VFS,
                      block cache and partitions, ELF loader, ACPI, init, kernel monitor
   src/personality/vexa/  the native Vexa system calls
   src/personality/linux/ the Linux subsystem (optional: LINUX_COMPAT)
   src/dev/           serial, framebuffer, text console, terminal, font, PS/2 keyboard, clock,
-                     PCI, virtio-blk, AHCI, NVMe
+                     PCI, virtio-blk, virtio-net, AHCI, NVMe
   src/lib/           string functions, kprintf, panic
   src/fs/            ext2, tmpfs, devfs, initramfs unpacking
 abi/vexa/abi.h       system call numbers and error codes, shared by kernel and libvexa

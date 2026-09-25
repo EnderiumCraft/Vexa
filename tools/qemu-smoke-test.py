@@ -7,11 +7,18 @@ Usage: tools/qemu-smoke-test.py [--iso PATH] [--uefi] [--smp N] [--memory SIZE] 
 With --disks, attaches the test disks from `make test-disks` (copies, so the
 originals stay pristine), runs file commands on them, and checks each with
 e2fsck afterwards.
+
+The guest gets a network card behind QEMU's user-mode NAT, and the test serves
+a few files over HTTP on this machine (10.0.2.2 as the guest sees it) for the
+guest to download.
                                 [--screenshot out.png] [--keep-log]
 
 Exits non-zero if an expected message is missing or the kernel panics.
 """
 import argparse
+import functools
+import hashlib
+import http.server
 import os
 import shutil
 import socket
@@ -19,6 +26,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import zlib
 
@@ -100,6 +108,11 @@ TYPED_COMMANDS = [
     ("sys mem", "heap ", 10),
     ("sys threads", "idle", 10),
     ("sys memtest", "memtest: passed", 180),
+    # Networking: DHCP, sockets over loopback, and a download from this machine
+    # (@URL@ is the test's HTTP server).
+    ("net", "address 10.0.2.15", 10),
+    ("socket-test", "socket-test: passed", 60),
+    ("fetch @URL@/hello.txt", "Hello from the test's web server", 30),
     ("Hello Vexa", "Hello: command not found", 10),
 ]
 
@@ -137,6 +150,14 @@ LINUX_COMMANDS = [
     # Linux threads (musl's pthreads): clone, futex, thread-local storage, tgkill.
     ("pthread-test", "pthread-test: passed", 60),
     ("pthread-test exit", "exiting while threads spin", 30),
+    # Networking: BSD sockets (with SCM_RIGHTS), wget, ifconfig, ping and
+    # Python's urllib, asyncio and multiprocessing pipes.
+    ("bsd-socket-test", "bsd-socket-test: passed", 60),
+    ("wget -q -O /tmp/data.bin @URL@/data.bin", None, 60),
+    ("sha1sum /tmp/data.bin", "@SHA1@", 30),
+    ("ifconfig eth0", "inet addr:10.0.2.15", 20),
+    ("ping -c 2 127.0.0.1", "2 packets received", 30),
+    ("python-net-test.py @URL@/data.bin @SHA1@", "python-net-test: passed", 300),
 ]
 
 # With --disks: one ext2 file system on each kind of disk.
@@ -257,6 +278,27 @@ def ppm_to_png(ppm_path, png_path):
         f.write(chunk(b"IEND", b""))
 
 
+class QuietHandler(http.server.SimpleHTTPRequestHandler):
+    def log_message(self, *args):
+        pass
+
+
+def start_web_server(directory):
+    """Serves `directory` on a free port of this machine; returns the URL the
+    guest uses for it, and the SHA-1 of data.bin."""
+    with open(os.path.join(directory, "hello.txt"), "w") as f:
+        f.write("Hello from the test's web server\n")
+    # A megabyte that isn't all the same byte, so corruption would show.
+    data = b"".join(hashlib.sha256(str(i).encode()).digest() for i in range(32768))
+    with open(os.path.join(directory, "data.bin"), "wb") as f:
+        f.write(data)
+    handler = functools.partial(QuietHandler, directory=directory)
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    # QEMU's user-mode network shows this machine to the guest as 10.0.2.2.
+    return "http://10.0.2.2:%d" % server.server_address[1], hashlib.sha1(data).hexdigest()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--screenshot", help="save a PNG of the screen at the end")
@@ -282,8 +324,15 @@ def main():
         "qemu-system-x86_64", "-M", "q35", "-m", args.memory, "-smp", str(args.smp),
         "-cdrom", args.iso, "-boot", "d", "-serial", "file:" + log_path, "-display", "none",
         "-no-reboot", "-monitor", "unix:" + mon_path + ",server,nowait",
+        # A network card behind QEMU's user-mode NAT: DHCP gives 10.0.2.15,
+        # and 10.0.2.2 is this machine. (With -nic instead of -device, QEMU's
+        # q35 card has no MSI-X, and Vexa would poll it.)
+        "-netdev", "user,id=net0", "-device", "virtio-net-pci,netdev=net0",
     ]
     disks = []
+    www = os.path.join(tmp, "www")
+    os.mkdir(www)
+    url, sha1 = start_web_server(www)
     commands = list(TYPED_COMMANDS)
     if not args.no_linux:
         at = next(i for i, c in enumerate(commands) if c[0] == "ps")
@@ -295,6 +344,9 @@ def main():
             command += [a.format(copy) for a in qemu_args]
             disks.append((copy, offset))
         commands[-1:-1] = DISK_COMMANDS
+    def fill(text):
+        return text.replace("@URL@", url).replace("@SHA1@", sha1) if text else text
+    commands = [(fill(c), fill(e), *rest) for c, e, *rest in commands]
     if args.uefi:
         command += ["-bios", OVMF]
     if args.cpu:

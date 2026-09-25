@@ -60,6 +60,21 @@
 #define VX_SYS_WAKE_ADDRESS 39  /* vx_wake_address(address, count) -> how many woke */
 #define VX_SYS_PROTECT 40       /* vx_protect(address, size, VX_MAP_* flags) */
 
+/* Networking and local sockets (see "Sockets" below). */
+#define VX_SYS_SOCKET 41   /* vx_socket(VX_AF_*, VX_SOCK_* type and flags, protocol) -> handle */
+#define VX_SYS_BIND 42     /* vx_bind(handle, const struct vx_socket_address *, length) */
+#define VX_SYS_LISTEN 43   /* vx_listen(handle, backlog) */
+#define VX_SYS_ACCEPT 44   /* vx_accept(handle, struct vx_socket_address *peer or NULL,
+                              VX_SOCK_NONBLOCK) -> handle */
+#define VX_SYS_CONNECT 45  /* vx_connect(handle, const struct vx_socket_address *, length) */
+#define VX_SYS_SEND 46     /* vx_send(handle, struct vx_message *) -> bytes sent */
+#define VX_SYS_RECEIVE 47  /* vx_receive(handle, struct vx_message *) -> bytes received */
+#define VX_SYS_SHUTDOWN 48 /* vx_shutdown(handle, VX_SHUT_*) */
+#define VX_SYS_SOCKET_ADDRESS 49 /* vx_socket_address(handle, peer, struct vx_socket_address *) */
+#define VX_SYS_SOCKET_PAIR 50    /* vx_socket_pair(VX_AF_UNIX, type, int handles[2]) */
+#define VX_SYS_POLL 51     /* vx_poll(struct vx_poll *, count, timeout_ms or -1) -> ready count */
+#define VX_SYS_NET_INFO 52 /* vx_net_info(struct vx_net_interface *, count) -> interfaces */
+
 #define VX_MAP_WRITE 0x1
 #define VX_MAP_EXEC 0x2
 
@@ -126,6 +141,90 @@ struct vx_process_info {
     unsigned int state;   /* 0 running, 1 exited */
     unsigned long long memory; /* Bytes of memory in use. */
     char name[32];
+};
+
+/* ---- Sockets ----
+ * The constants and address layouts are the same as Linux's (AF_INET,
+ * SOCK_STREAM, struct sockaddr_in...), in network byte order. */
+#define VX_AF_UNIX 1 /* Local sockets, named by a path. */
+#define VX_AF_INET 2 /* IPv4 */
+
+#define VX_SOCK_STREAM 1
+#define VX_SOCK_DGRAM 2
+#define VX_SOCK_RAW 3 /* VX_AF_INET with VX_IPPROTO_ICMP only. */
+#define VX_SOCK_SEQPACKET 5
+#define VX_SOCK_TYPE_MASK 0xf
+#define VX_SOCK_NONBLOCK 0x800 /* Calls return -VX_EAGAIN instead of waiting. */
+#define VX_SOCK_CLOEXEC 0x80000
+
+#define VX_IPPROTO_ICMP 1
+#define VX_IPPROTO_TCP 6
+#define VX_IPPROTO_UDP 17
+
+/* vx_message flags. */
+#define VX_MSG_PEEK 0x2       /* Receive without taking the data. */
+#define VX_MSG_TRUNC 0x20     /* Set on return: a datagram was longer than the buffer. */
+#define VX_MSG_DONTWAIT 0x40  /* Don't wait, this once. */
+#define VX_MSG_WAITALL 0x100  /* Wait until the buffer is full (streams). */
+#define VX_MSG_NOSIGNAL 0x4000 /* No SIGPIPE when the other side is gone. */
+
+#define VX_SHUT_READ 0
+#define VX_SHUT_WRITE 1
+#define VX_SHUT_BOTH 2
+
+struct vx_inet_address {
+    unsigned short family;  /* VX_AF_INET */
+    unsigned short port;    /* Network byte order. */
+    unsigned int address;   /* Network byte order: 10.0.2.15 is bytes 10, 0, 2, 15. */
+    unsigned char zero[8];
+};
+
+struct vx_unix_address {
+    unsigned short family;  /* VX_AF_UNIX */
+    char path[108];         /* NUL-terminated; a leading NUL means an abstract name. */
+};
+
+struct vx_socket_address {
+    union {
+        unsigned short family;
+        struct vx_inet_address inet;
+        struct vx_unix_address local;
+        unsigned char storage[128];
+    };
+};
+
+struct vx_message {
+    void *data;
+    unsigned long size;
+    unsigned int flags;          /* VX_MSG_*; vx_receive may add VX_MSG_TRUNC. */
+    unsigned int address_length; /* vx_send: of *address; vx_receive: set to it. */
+    struct vx_socket_address *address; /* The destination, or the sender; may be NULL. */
+};
+
+/* vx_poll: which handles are ready. `events` and `ready` use VX_POLL_*. */
+#define VX_POLL_READ 0x1   /* Something to read (or the end). */
+#define VX_POLL_WRITE 0x4  /* Writing wouldn't wait. */
+#define VX_POLL_ERROR 0x8  /* Always reported. */
+#define VX_POLL_HANGUP 0x10 /* The other end is gone. Always reported. */
+
+struct vx_poll {
+    int handle;
+    unsigned short events;
+    unsigned short ready;
+};
+
+#define VX_NET_UP 0x1
+#define VX_NET_LOOPBACK 0x2
+#define VX_NET_DHCP 0x4 /* Configured by DHCP. */
+
+struct vx_net_interface {
+    char name[8];
+    unsigned char mac[6];
+    unsigned short reserved;
+    unsigned int flags; /* VX_NET_* */
+    unsigned int mtu;
+    unsigned int address, netmask, gateway, dns; /* Network byte order; 0 if none. */
+    unsigned long long rx_packets, rx_bytes, tx_packets, tx_bytes, rx_dropped, tx_dropped;
 };
 
 /* vx_open flags. A handle can only be used the ways it was opened for. */
@@ -208,6 +307,24 @@ struct vx_dir_entry {
 #define VX_ESPIPE 27       /* Can't seek on a pipe or terminal. */
 #define VX_ELOOP 28        /* Too many symbolic links (or one where none may be). */
 #define VX_ETIMEDOUT 29    /* A wait ran out of time. */
+#define VX_ENOTSOCK 30     /* Not a socket. */
+#define VX_EAFNOSUPPORT 31 /* That address family isn't supported. */
+#define VX_EPROTONOSUPPORT 32 /* That protocol isn't supported. */
+#define VX_EOPNOTSUPP 33   /* Not something this kind of socket does. */
+#define VX_EADDRINUSE 34   /* The address (port or path) is taken. */
+#define VX_EADDRNOTAVAIL 35 /* Not one of this machine's addresses. */
+#define VX_ENETUNREACH 36  /* No route to that network. */
+#define VX_ECONNREFUSED 37 /* Nobody is listening there. */
+#define VX_ECONNRESET 38   /* The other side reset the connection. */
+#define VX_ENOTCONN 39     /* Not connected. */
+#define VX_EISCONN 40      /* Already connected. */
+#define VX_EINPROGRESS 41  /* Connecting has started (non-blocking). */
+#define VX_EALREADY 42     /* Already connecting. */
+#define VX_EMSGSIZE 43     /* Too large for one datagram. */
+#define VX_EDESTADDRREQ 44 /* Where to? (no destination given). */
+#define VX_ENOPROTOOPT 45  /* No such socket option. */
+#define VX_ECONNABORTED 46 /* The connection went away before it was accepted. */
+#define VX_EHOSTUNREACH 47 /* The host can't be reached. */
 
 /* Every Vexa program carries an ELF note with this name and type, holding the
  * ABI version as a 32-bit integer. The kernel uses it to tell native programs

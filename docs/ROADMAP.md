@@ -168,14 +168,20 @@ Linux track:
 
 ## Phase 7: Networking
 
-- [ ] virtio-net (QEMU) and Intel e1000 drivers
-- [ ] TCP/IP stack: Ethernet, ARP, IPv4, ICMP, UDP, TCP; DHCP client (IPv6 later)
-- [ ] Native socket API in the core; the Linux subsystem maps BSD sockets onto it
-- [ ] Local sockets that can pass handles between processes (Linux: Unix domain
-      sockets with `SCM_RIGHTS`). X11 and Firefox's multi-process IPC both depend on it
-- [ ] DNS resolver in `libvexa`; Linux programs read `/etc/resolv.conf`
+- [x] virtio-net driver (QEMU), with MSI-X interrupts (0.11.0); Intel e1000 still to come
+- [x] TCP/IP stack: Ethernet, ARP, IPv4, ICMP, UDP, TCP; DHCP client; loopback (0.11.0).
+      IPv6, IP fragments, window scaling and congestion control come later
+- [x] Native socket API in the core (`vx_socket`, `vx_send`, `vx_poll`...); the Linux
+      subsystem maps BSD sockets onto it (`sendmsg`, `accept4`, options, `SIOCGIF*`)
+- [x] Local sockets that can pass handles between processes (Linux: Unix domain
+      sockets with `SCM_RIGHTS`), by path, abstract name or `socketpair`
+- [x] DNS resolver in `libvexa`; Linux programs read `/etc/resolv.conf`, which links to
+      `/proc/net/resolv.conf` (the name server DHCP gave us)
+- [x] Non-blocking I/O (`O_NONBLOCK`, `FIONBIO`) for sockets and pipes
+- [ ] HTTPS: a TLS library (BearSSL or mbedTLS) for `fetch`, and OpenSSL for Linux programs
 
 **Milestone:** a native Vexa program fetches a web page, and so does Linux `wget`.
+Reached in 0.11.0 (`fetch`, BusyBox `wget`, and Python's `urllib`).
 
 ## Phase 8: Graphics and input
 

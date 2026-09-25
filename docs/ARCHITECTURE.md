@@ -153,8 +153,9 @@ boots such a kernel to check native Vexa never depends on it.
 ## Handles and files today
 
 A process refers to kernel objects through **handles**: small numbers in its handle
-table, each with the rights it was opened with (read, write). Open files, pipes and
-processes are objects so far; sockets will be another. The Linux subsystem maps Unix
+table, each with the rights it was opened with (read, write). Open files, pipes,
+processes and sockets are objects; an object can be non-blocking (Linux's
+`O_NONBLOCK`), which every handle to it shares. The Linux subsystem maps Unix
 file descriptors onto the same table.
 
 Files live in one tree managed by the **VFS** (`core/vfs.c`). File systems plug in
@@ -167,6 +168,35 @@ underneath it:
 Disks sit behind the block layer (`core/block.c`), which caches them in 4 KiB chunks,
 reads partition tables, and calls the drivers (`dev/virtio_blk.c`, `dev/ahci.c`,
 `dev/nvme.c`).
+
+## Networking today
+
+`net/` is Vexa's own TCP/IP stack; `dev/virtio_net.c` is the one network card driver so
+far.
+
+- **One lock and one thread.** All protocol state is under `net_lock`, a sleeping
+  mutex. A card's interrupt only wakes the network thread, which takes received frames
+  from the drivers, passes them up (Ethernet, ARP, IPv4, then ICMP, UDP or TCP) and runs
+  the timers: TCP retransmissions, ARP retries and DHCP. System calls take the lock for
+  their part and never wait while holding it.
+- **Interfaces.** `lo` (127.0.0.1), and a card per `ethN`, configured by DHCP. Routing
+  is "the interface's own subnet, else its router". What the stack knows shows in
+  `/proc/net/dev`, `route` and `resolv.conf`.
+- **TCP** keeps 64 KiB send and receive buffers per connection, retransmits from the
+  oldest unacknowledged byte with a doubling timeout, and drops segments that arrive
+  out of order (the sender repeats them). No congestion control or window scaling yet.
+- **Sockets** (`core/socket.h`) are objects shared by both personalities: `VX_AF_INET`
+  (TCP, UDP, raw ICMP for `ping`) and `VX_AF_UNIX`. Addresses use Linux's layouts, so
+  the Linux subsystem mostly handles calling conventions: iovecs, address lengths,
+  control messages, options.
+- **Local sockets** queue what is sent as chunks at the receiver. A chunk can carry
+  objects (`SCM_RIGHTS`), each with a reference, so a descriptor sent by one process
+  becomes a new handle in the other. A named socket's path is a file; connecting looks
+  the socket up by that file.
+- **Names.** `libvexa`'s `vx_resolve` reads `/etc/hosts`, then asks the name server
+  DHCP gave us. Linux programs use musl's resolver and `/etc/resolv.conf`.
+- **Waiting.** `poll`, `select` and `epoll` (and `vx_poll`) check objects' readiness
+  every few milliseconds rather than being woken; good enough for now.
 
 ## Threads today
 

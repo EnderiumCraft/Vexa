@@ -182,6 +182,54 @@ long vx_kernel_command(const char *command) {
     return syscall2(VX_SYS_KERNEL_COMMAND, command, strlen(command));
 }
 
+int vx_socket(int family, int type, int protocol) {
+    return (int)syscall3(VX_SYS_SOCKET, family, type, protocol);
+}
+
+long vx_bind(int handle, const struct vx_socket_address *address, size_t length) {
+    return syscall3(VX_SYS_BIND, handle, address, length);
+}
+
+long vx_listen(int handle, int backlog) {
+    return syscall2(VX_SYS_LISTEN, handle, backlog);
+}
+
+int vx_accept(int handle, struct vx_socket_address *peer, unsigned flags) {
+    return (int)syscall3(VX_SYS_ACCEPT, handle, peer, flags);
+}
+
+long vx_connect(int handle, const struct vx_socket_address *address, size_t length) {
+    return syscall3(VX_SYS_CONNECT, handle, address, length);
+}
+
+long vx_send(int handle, struct vx_message *message) {
+    return syscall2(VX_SYS_SEND, handle, message);
+}
+
+long vx_receive(int handle, struct vx_message *message) {
+    return syscall2(VX_SYS_RECEIVE, handle, message);
+}
+
+long vx_shutdown(int handle, int how) {
+    return syscall2(VX_SYS_SHUTDOWN, handle, how);
+}
+
+long vx_socket_address(int handle, int peer, struct vx_socket_address *address) {
+    return syscall3(VX_SYS_SOCKET_ADDRESS, handle, peer, address);
+}
+
+long vx_socket_pair(int family, int type, int handles[2]) {
+    return syscall3(VX_SYS_SOCKET_PAIR, family, type, handles);
+}
+
+long vx_poll(struct vx_poll *handles, size_t count, long timeout_ms) {
+    return syscall3(VX_SYS_POLL, handles, count, timeout_ms);
+}
+
+long vx_net_info(struct vx_net_interface *interfaces, size_t count) {
+    return syscall2(VX_SYS_NET_INFO, interfaces, count);
+}
+
 const char *vx_strerror(long error) {
     switch (-error) {
     case VX_ENOSYS: return "not supported";
@@ -213,6 +261,24 @@ const char *vx_strerror(long error) {
     case VX_ESPIPE: return "can't seek here";
     case VX_ELOOP: return "too many symbolic links";
     case VX_ETIMEDOUT: return "timed out";
+    case VX_ENOTSOCK: return "not a socket";
+    case VX_EAFNOSUPPORT: return "address family not supported";
+    case VX_EPROTONOSUPPORT: return "protocol not supported";
+    case VX_EOPNOTSUPP: return "not supported by this socket";
+    case VX_EADDRINUSE: return "address in use";
+    case VX_EADDRNOTAVAIL: return "address not available";
+    case VX_ENETUNREACH: return "network unreachable";
+    case VX_ECONNREFUSED: return "connection refused";
+    case VX_ECONNRESET: return "connection reset";
+    case VX_ENOTCONN: return "not connected";
+    case VX_EISCONN: return "already connected";
+    case VX_EINPROGRESS: return "connecting";
+    case VX_EALREADY: return "already connecting";
+    case VX_EMSGSIZE: return "message too long";
+    case VX_EDESTADDRREQ: return "no destination";
+    case VX_ENOPROTOOPT: return "no such option";
+    case VX_ECONNABORTED: return "connection aborted";
+    case VX_EHOSTUNREACH: return "host unreachable";
     default: return "error";
     }
 }

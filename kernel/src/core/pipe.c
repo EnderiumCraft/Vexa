@@ -66,6 +66,9 @@ static int64_t pipe_read(struct object *object, void *buffer, size_t size) {
     if (size == 0) {
         return 0;
     }
+    if ((object->flags & OBJECT_NONBLOCK) && !readable(pipe)) {
+        return -VX_EAGAIN;
+    }
     int error = wait_queue_wait_interruptible(&pipe->can_read, readable, pipe);
     if (error) {
         return error;
@@ -86,6 +89,9 @@ static int64_t pipe_write(struct object *object, const void *buffer, size_t size
     struct pipe *pipe = ((struct pipe_end *)object)->pipe;
     size_t done = 0;
     while (done < size) {
+        if ((object->flags & OBJECT_NONBLOCK) && !writable(pipe)) {
+            return done ? (int64_t)done : -VX_EAGAIN;
+        }
         int error = wait_queue_wait_interruptible(&pipe->can_write, writable, pipe);
         if (error) {
             return done ? (int64_t)done : error;

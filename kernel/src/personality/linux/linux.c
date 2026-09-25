@@ -13,6 +13,7 @@
 #include <vexa/random.h>
 #include <vexa/sched.h>
 #include <vexa/signal.h>
+#include <vexa/socket.h>
 #include <vexa/string.h>
 #include <vexa/tty.h>
 #include <vexa/uaccess.h>
@@ -20,6 +21,7 @@
 #include <vexa/vfs.h>
 
 #include "linux.h"
+#include "sockets.h"
 
 /*
  * The Linux personality: runs unmodified Linux x86_64 programs (for now,
@@ -136,7 +138,15 @@ static const uint8_t errno_of_vx[] = {
     [VX_EINTR] = LE_EINTR, [VX_EPIPE] = LE_EPIPE, [VX_ECHILD] = LE_ECHILD,
     [VX_ESRCH] = LE_ESRCH, [VX_EAGAIN] = LE_EAGAIN, [VX_ENOEXEC] = LE_ENOEXEC,
     [VX_E2BIG] = LE_E2BIG, [VX_ENOTTY] = LE_ENOTTY, [VX_ESPIPE] = LE_ESPIPE,
-    [VX_ELOOP] = LE_ELOOP,
+    [VX_ELOOP] = LE_ELOOP, [VX_ETIMEDOUT] = LE_ETIMEDOUT, [VX_ENOTSOCK] = LE_ENOTSOCK,
+    [VX_EAFNOSUPPORT] = LE_EAFNOSUPPORT, [VX_EPROTONOSUPPORT] = LE_EPROTONOSUPPORT,
+    [VX_EOPNOTSUPP] = LE_EOPNOTSUPP, [VX_EADDRINUSE] = LE_EADDRINUSE,
+    [VX_EADDRNOTAVAIL] = LE_EADDRNOTAVAIL, [VX_ENETUNREACH] = LE_ENETUNREACH,
+    [VX_ECONNREFUSED] = LE_ECONNREFUSED, [VX_ECONNRESET] = LE_ECONNRESET,
+    [VX_ENOTCONN] = LE_ENOTCONN, [VX_EISCONN] = LE_EISCONN, [VX_EINPROGRESS] = LE_EINPROGRESS,
+    [VX_EALREADY] = LE_EALREADY, [VX_EMSGSIZE] = LE_EMSGSIZE,
+    [VX_EDESTADDRREQ] = LE_EDESTADDRREQ, [VX_ENOPROTOOPT] = LE_ENOPROTOOPT,
+    [VX_ECONNABORTED] = LE_ECONNABORTED, [VX_EHOSTUNREACH] = LE_EHOSTUNREACH,
 };
 
 /* Converts a core result (negative VX_E* on failure) into a Linux one. */
@@ -149,6 +159,10 @@ static int64_t lx(int64_t result) {
         return -(int64_t)errno_of_vx[code];
     }
     return -LE_EINVAL;
+}
+
+int64_t linux_errno(int64_t result) {
+    return lx(result);
 }
 
 /* ---- Paths ----
@@ -288,6 +302,9 @@ static bool is_terminal(struct object *object) {
 /* ---- Reading and writing ---- */
 
 static int64_t read_object(struct object *object, uint64_t buffer, uint64_t size) {
+    if (socket_of(object)) {
+        return linux_socket_io(object, buffer, size, false);
+    }
     if (!object->type->read) {
         return -LE_EINVAL;
     }
@@ -321,6 +338,9 @@ static int64_t read_object(struct object *object, uint64_t buffer, uint64_t size
 }
 
 static int64_t write_object(struct object *object, uint64_t buffer, uint64_t size) {
+    if (socket_of(object)) {
+        return linux_socket_io(object, buffer, size, true);
+    }
     if (!object->type->write) {
         return -LE_EINVAL;
     }
@@ -392,11 +412,6 @@ static int64_t sys_write(struct interrupt_frame *f, uint64_t fd, uint64_t buffer
     return result;
 }
 
-struct linux_iovec {
-    uint64_t base;
-    uint64_t length;
-};
-
 static int64_t vector_io(uint64_t fd, uint64_t iov, uint64_t count, bool writing) {
     if (count > 1024) {
         return -LE_EINVAL;
@@ -406,11 +421,17 @@ static int64_t vector_io(uint64_t fd, uint64_t iov, uint64_t count, bool writing
     if (!object) {
         return error;
     }
+    if (socket_of(object)) {
+        /* One message, not one per buffer (a datagram stays whole). */
+        object_put(object);
+        struct linux_msghdr m = {.iov = iov, .iov_count = count};
+        return writing ? linux_socket_sendmsg(fd, &m, 0) : linux_socket_recvmsg(fd, &m, 0);
+    }
     int64_t total = 0;
     for (uint64_t i = 0; i < count; i++) {
         struct linux_iovec v;
         if (!copy_from_user(&v, iov + i * sizeof(v), sizeof(v)) ||
-            !user_range_ok(v.base, v.length)) {
+            (v.length && !user_range_ok(v.base, v.length))) {
             total = total ? total : -LE_EFAULT;
             break;
         }
@@ -608,6 +629,9 @@ static int64_t do_openat(int64_t dirfd, uint64_t user_path, uint64_t flags, uint
     if (exists && (flags & LINUX_O_CREAT)) {
         vfs_file_chmod(file, (uint32_t)mode & ~umask_now() & 07777); /* A new file. */
     }
+    if (flags & LINUX_O_NONBLOCK) {
+        file->object.flags |= OBJECT_NONBLOCK;
+    }
     uint32_t rights = (vx_flags & VX_OPEN_READ ? HANDLE_RIGHT_READ : 0) |
                       (vx_flags & (VX_OPEN_WRITE | VX_OPEN_APPEND) ? HANDLE_RIGHT_WRITE : 0);
     int fd = handle_add(me()->handles, &file->object, rights);
@@ -738,6 +762,14 @@ static int64_t sys_dup3(struct interrupt_frame *f, uint64_t old, uint64_t new, u
     return dup_to(old, new, flags);
 }
 
+static void set_nonblocking(struct object *object, bool on) {
+    if (on) {
+        __atomic_or_fetch(&object->flags, OBJECT_NONBLOCK, __ATOMIC_RELAXED);
+    } else {
+        __atomic_and_fetch(&object->flags, ~(uint32_t)OBJECT_NONBLOCK, __ATOMIC_RELAXED);
+    }
+}
+
 static int64_t sys_fcntl(struct interrupt_frame *f, uint64_t fd, uint64_t command, uint64_t arg,
                          uint64_t a3, uint64_t a4, uint64_t a5) {
     struct handle_table *handles = me()->handles;
@@ -769,11 +801,23 @@ static int64_t sys_fcntl(struct interrupt_frame *f, uint64_t fd, uint64_t comman
             (((struct file *)object)->flags & VX_OPEN_APPEND)) {
             result |= LINUX_O_APPEND;
         }
+        if (object->flags & OBJECT_NONBLOCK) {
+            result |= LINUX_O_NONBLOCK;
+        }
         object_put(object);
         return result;
     }
-    case LINUX_F_SETFL:
-        return 0; /* Non-blocking mode and friends aren't supported; accept quietly. */
+    case LINUX_F_SETFL: {
+        /* Only non-blocking mode can change (O_APPEND is set at open). */
+        uint32_t rights;
+        struct object *object = handle_get_any(handles, (int)fd, &rights);
+        if (!object) {
+            return -LE_EBADF;
+        }
+        set_nonblocking(object, arg & LINUX_O_NONBLOCK);
+        object_put(object);
+        return 0;
+    }
     case LINUX_F_GETLK: {
         int16_t unlocked = LINUX_F_UNLCK; /* l_type is the first field of struct flock. */
         return copy_to_user(arg, &unlocked, sizeof(unlocked)) ? 0 : -LE_EFAULT;
@@ -813,6 +857,10 @@ static int64_t make_pipe(uint64_t out, uint64_t flags) {
     if (flags & LINUX_O_CLOEXEC) {
         handle_set_flags(me()->handles, fds[0], HANDLE_FLAG_CLOSE_ON_EXEC);
         handle_set_flags(me()->handles, fds[1], HANDLE_FLAG_CLOSE_ON_EXEC);
+    }
+    if (flags & LINUX_O_NONBLOCK) {
+        set_nonblocking(read_end, true);
+        set_nonblocking(write_end, true);
     }
     if (!copy_to_user(out, fds, sizeof(fds))) {
         handle_close(me()->handles, fds[0]);
@@ -1404,11 +1452,6 @@ static int64_t sys_not_permitted(struct interrupt_frame *f, uint64_t a0, uint64_
     return -LE_EPERM;
 }
 
-static int64_t sys_not_a_socket(struct interrupt_frame *f, uint64_t a0, uint64_t a1,
-                                uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5) {
-    return -LE_ENOTSOCK; /* No sockets until Phase 7, so no handle is one. */
-}
-
 static int64_t sys_no_such_call_quietly(struct interrupt_frame *f, uint64_t a0, uint64_t a1,
                                         uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5) {
     return -LE_ENOSYS; /* Programs are known to fall back to something else. */
@@ -1426,6 +1469,25 @@ static int64_t sys_ioctl(struct interrupt_frame *f, uint64_t fd, uint64_t reques
     struct object *object = handle_get_any(me()->handles, (int)fd, &rights);
     if (!object) {
         return -LE_EBADF;
+    }
+    if (request == LINUX_FIONBIO) {
+        int on;
+        bool ok = copy_from_user(&on, arg, sizeof(on));
+        if (ok) {
+            set_nonblocking(object, on != 0);
+        }
+        object_put(object);
+        return ok ? 0 : -LE_EFAULT;
+    }
+    if (socket_of(object)) {
+        int64_t result = linux_socket_ioctl(object, request, arg);
+        object_put(object);
+        return result;
+    }
+    if (request == LINUX_FIONREAD && object->type == &pipe_read_type) {
+        int ready = (object->type->poll(object) & OBJECT_READABLE) ? 1 : 0;
+        object_put(object);
+        return copy_to_user(arg, &ready, sizeof(ready)) ? 0 : -LE_EFAULT;
     }
     bool terminal = is_terminal(object);
     object_put(object);
@@ -3172,9 +3234,24 @@ static const linux_fn syscalls[] = {
     CALL(rt_sigtimedwait, sys_rt_sigtimedwait),
     CALL(getpid, sys_getpid),
     CALL(sendfile, sys_sendfile),
-    CALL(socket, sys_no_such_call_quietly),
-    CALL(getsockname, sys_not_a_socket),
-    CALL(getpeername, sys_not_a_socket),
+    CALL(socket, linux_sys_socket),
+    CALL(socketpair, linux_sys_socketpair),
+    CALL(bind, linux_sys_bind),
+    CALL(connect, linux_sys_connect),
+    CALL(listen, linux_sys_listen),
+    CALL(accept, linux_sys_accept),
+    CALL(accept4, linux_sys_accept4),
+    CALL(getsockname, linux_sys_getsockname),
+    CALL(getpeername, linux_sys_getpeername),
+    CALL(shutdown, linux_sys_shutdown),
+    CALL(sendto, linux_sys_sendto),
+    CALL(recvfrom, linux_sys_recvfrom),
+    CALL(sendmsg, linux_sys_sendmsg),
+    CALL(recvmsg, linux_sys_recvmsg),
+    CALL(sendmmsg, linux_sys_sendmmsg),
+    CALL(recvmmsg, linux_sys_recvmmsg),
+    CALL(setsockopt, linux_sys_setsockopt),
+    CALL(getsockopt, linux_sys_getsockopt),
     CALL(clone, sys_clone),
     CALL(fork, sys_fork),
     CALL(vfork, sys_fork),

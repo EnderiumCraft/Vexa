@@ -28,14 +28,19 @@ struct object_type {
 #define OBJECT_ERROR 0x008    /* E.g. a pipe with no reader left. */
 #define OBJECT_HANGUP 0x010   /* The other end is gone. */
 
+/* Object flags: shared by every handle to the object (Linux: file status flags). */
+#define OBJECT_NONBLOCK 0x1 /* Reads and writes that would wait fail with -VX_EAGAIN. */
+
 struct object {
     const struct object_type *type;
     uint32_t refs;
+    uint32_t flags; /* OBJECT_NONBLOCK */
 };
 
 static inline void object_init(struct object *object, const struct object_type *type) {
     object->type = type;
     object->refs = 1;
+    object->flags = 0;
 }
 
 static inline void object_ref(struct object *object) {

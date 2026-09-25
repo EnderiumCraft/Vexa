@@ -13,6 +13,8 @@
 CC      ?= cc
 LD      ?= ld
 QEMU    ?= qemu-system-x86_64
+# A network card behind QEMU's NAT (the guest gets 10.0.2.15 by DHCP).
+QEMU_NET ?= -netdev user,id=net0 -device virtio-net-pci,netdev=net0
 LIMINE_BRANCH := v9.x-binary
 
 BUILD   := build
@@ -413,16 +415,16 @@ $(SAFE_ISO): $(KERNEL) $(INITRAMFS) $(BUILD)/limine.conf limine/limine
 	$(call make_iso,$(BUILD)/limine-safe-mode.conf,$@)
 
 run: $(ISO)
-	$(QEMU) -M q35 -m 512M -cdrom $(ISO) -serial stdio -no-reboot
+	$(QEMU) -M q35 -m 512M -cdrom $(ISO) -serial stdio -no-reboot $(QEMU_NET)
 
 # Like run, with a virtio disk mounted at /mnt/vda1. It keeps what you write;
 # delete build/my-disk.img to start over.
 run-disk: $(ISO) $(MY_DISK)
-	$(QEMU) -M q35 -m 512M -cdrom $(ISO) -boot d -serial stdio -no-reboot \
+	$(QEMU) -M q35 -m 512M -cdrom $(ISO) -boot d -serial stdio -no-reboot $(QEMU_NET) \
 		-drive file=$(MY_DISK),if=virtio,format=raw
 
 run-nographic: $(ISO)
-	$(QEMU) -M q35 -m 512M -cdrom $(ISO) -nographic -no-reboot
+	$(QEMU) -M q35 -m 512M -cdrom $(ISO) -nographic -no-reboot $(QEMU_NET)
 
 test: $(ISO) $(SAFE_ISO) $(TEST_DISKS)
 	tools/qemu-smoke-test.py --disks $(BUILD)/disks

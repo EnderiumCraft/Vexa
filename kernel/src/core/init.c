@@ -7,6 +7,7 @@
 #include <vexa/kprintf.h>
 #include <vexa/mm.h>
 #include <vexa/modules.h>
+#include <vexa/net.h>
 #include <vexa/monitor.h>
 #include <vexa/sched.h>
 #include <vexa/storage.h>
@@ -88,6 +89,8 @@ void init_thread(void *unused) {
     vfs_chmod("/run/shm", 8, 01777);
 
     storage_init();
+    net_init();
+    virtio_net_init();
 
     kprintf("\nVexa kernel initialized.\n");
     /* Normally the rest of the system is user programs, starting with vinit.

@@ -9,7 +9,9 @@
 #include <vexa/object.h>
 #include <vexa/pipe.h>
 #include <vexa/process.h>
+#include <vexa/net.h>
 #include <vexa/sched.h>
+#include <vexa/socket.h>
 #include <vexa/string.h>
 #include <vexa/tty.h>
 #include <vexa/uaccess.h>
@@ -750,6 +752,325 @@ static int64_t sys_wake_address(uint64_t address, uint64_t count, uint64_t a2, u
                       FUTEX_ANY);
 }
 
+/* ---- Sockets ---- */
+
+#define MESSAGE_MAX (256 * 1024) /* Bytes moved by one vx_send or vx_receive. */
+
+/* The socket behind a handle (with a reference), or NULL with *error set. */
+static struct socket *get_socket(uint64_t handle, int *error) {
+    uint32_t rights;
+    struct object *object = handle_get_any(me()->handles, (int)handle, &rights);
+    if (!object) {
+        *error = -VX_EBADF;
+        return NULL;
+    }
+    struct socket *socket = socket_of(object);
+    if (!socket) {
+        object_put(object);
+        *error = -VX_ENOTSOCK;
+    }
+    return socket;
+}
+
+static int copy_address_in(uint64_t address, uint64_t length, struct vx_socket_address *out) {
+    if (length > sizeof(*out)) {
+        return -VX_EINVAL;
+    }
+    memset(out, 0, sizeof(*out));
+    return copy_from_user(out, address, length) ? 0 : -VX_EFAULT;
+}
+
+static int64_t add_socket(struct socket *socket) {
+    int handle = handle_add(me()->handles, &socket->object, HANDLE_RIGHT_READ | HANDLE_RIGHT_WRITE);
+    if (handle < 0) {
+        object_put(&socket->object);
+    }
+    return handle;
+}
+
+static int64_t sys_socket(uint64_t family, uint64_t type, uint64_t protocol, uint64_t a3) {
+    (void)a3;
+    struct socket *socket;
+    int error = socket_create((int)family, (int)type, (int)protocol, &socket);
+    return error ? error : add_socket(socket);
+}
+
+static int64_t sys_bind(uint64_t handle, uint64_t address, uint64_t length, uint64_t a3) {
+    (void)a3;
+    struct vx_socket_address kernel_address;
+    int error = copy_address_in(address, length, &kernel_address);
+    struct socket *socket = error ? NULL : get_socket(handle, &error);
+    if (!socket) {
+        return error;
+    }
+    error = socket_bind(socket, &kernel_address, length);
+    object_put(&socket->object);
+    return error;
+}
+
+static int64_t sys_listen(uint64_t handle, uint64_t backlog, uint64_t a2, uint64_t a3) {
+    (void)a2, (void)a3;
+    int error;
+    struct socket *socket = get_socket(handle, &error);
+    if (!socket) {
+        return error;
+    }
+    error = socket_listen(socket, (int)backlog);
+    object_put(&socket->object);
+    return error;
+}
+
+static int64_t sys_accept(uint64_t handle, uint64_t peer, uint64_t flags, uint64_t a3) {
+    (void)a3;
+    if (flags & ~(uint64_t)(VX_SOCK_NONBLOCK | VX_SOCK_CLOEXEC)) {
+        return -VX_EINVAL;
+    }
+    int error;
+    struct socket *socket = get_socket(handle, &error);
+    if (!socket) {
+        return error;
+    }
+    struct socket *new_socket;
+    error = socket_accept(socket, &new_socket, (int)flags);
+    object_put(&socket->object);
+    if (error) {
+        return error;
+    }
+    if (peer) {
+        struct vx_socket_address address;
+        size_t length = 0;
+        memset(&address, 0, sizeof(address));
+        socket_address(new_socket, true, &address, &length);
+        if (!copy_to_user(peer, &address, sizeof(address))) {
+            object_put(&new_socket->object);
+            return -VX_EFAULT;
+        }
+    }
+    return add_socket(new_socket);
+}
+
+static int64_t sys_connect(uint64_t handle, uint64_t address, uint64_t length, uint64_t a3) {
+    (void)a3;
+    struct vx_socket_address kernel_address;
+    int error = copy_address_in(address, length, &kernel_address);
+    struct socket *socket = error ? NULL : get_socket(handle, &error);
+    if (!socket) {
+        return error;
+    }
+    error = socket_connect(socket, &kernel_address, length);
+    object_put(&socket->object);
+    return error;
+}
+
+static int64_t sys_send(uint64_t handle, uint64_t user_message, uint64_t a2, uint64_t a3) {
+    (void)a2, (void)a3;
+    struct vx_message m;
+    if (!copy_from_user(&m, user_message, sizeof(m))) {
+        return -VX_EFAULT;
+    }
+    if (!user_range_ok((uint64_t)m.data, m.size)) {
+        return -VX_EFAULT;
+    }
+    struct vx_socket_address address;
+    int error = m.address ? copy_address_in((uint64_t)m.address, m.address_length, &address) : 0;
+    struct socket *socket = error ? NULL : get_socket(handle, &error);
+    if (!socket) {
+        return error;
+    }
+    size_t size = m.size < MESSAGE_MAX ? m.size : MESSAGE_MAX;
+    void *buffer = kmalloc(size + 1);
+    int64_t result = buffer ? 0 : -VX_ENOMEM;
+    if (buffer && !copy_from_user(buffer, (uint64_t)m.data, size)) {
+        result = -VX_EFAULT;
+    }
+    if (!result) {
+        struct socket_message message = {
+            .data = buffer,
+            .size = size,
+            .flags = (int)m.flags,
+            .address = m.address ? &address : NULL,
+            .address_length = m.address_length,
+        };
+        result = socket_send(socket, &message);
+    }
+    kfree(buffer);
+    object_put(&socket->object);
+    return result;
+}
+
+static int64_t sys_receive(uint64_t handle, uint64_t user_message, uint64_t a2, uint64_t a3) {
+    (void)a2, (void)a3;
+    struct vx_message m;
+    if (!copy_from_user(&m, user_message, sizeof(m))) {
+        return -VX_EFAULT;
+    }
+    if (!user_range_ok((uint64_t)m.data, m.size)) {
+        return -VX_EFAULT;
+    }
+    int error;
+    struct socket *socket = get_socket(handle, &error);
+    if (!socket) {
+        return error;
+    }
+    size_t size = m.size < MESSAGE_MAX ? m.size : MESSAGE_MAX;
+    void *buffer = kmalloc(size + 1);
+    struct vx_socket_address address;
+    memset(&address, 0, sizeof(address));
+    struct socket_message message = {
+        .data = buffer,
+        .size = size,
+        .flags = (int)m.flags,
+        .address = m.address ? &address : NULL,
+    };
+    int64_t result = buffer ? socket_receive(socket, &message) : -VX_ENOMEM;
+    if (result > 0 && !copy_to_user((uint64_t)m.data, buffer,
+                                    (size_t)result < size ? (size_t)result : size)) {
+        result = -VX_EFAULT;
+    }
+    if (result >= 0) {
+        m.flags = (unsigned int)message.flags;
+        m.address_length = (unsigned int)message.address_length;
+        if ((m.address && !copy_to_user((uint64_t)m.address, &address, sizeof(address))) ||
+            !copy_to_user(user_message, &m, sizeof(m))) {
+            result = -VX_EFAULT;
+        }
+    }
+    kfree(buffer);
+    object_put(&socket->object);
+    return result;
+}
+
+static int64_t sys_shutdown(uint64_t handle, uint64_t how, uint64_t a2, uint64_t a3) {
+    (void)a2, (void)a3;
+    int error;
+    struct socket *socket = get_socket(handle, &error);
+    if (!socket) {
+        return error;
+    }
+    error = socket_shutdown(socket, (int)how);
+    object_put(&socket->object);
+    return error;
+}
+
+static int64_t sys_socket_address(uint64_t handle, uint64_t peer, uint64_t out, uint64_t a3) {
+    (void)a3;
+    int error;
+    struct socket *socket = get_socket(handle, &error);
+    if (!socket) {
+        return error;
+    }
+    struct vx_socket_address address;
+    memset(&address, 0, sizeof(address));
+    size_t length = 0;
+    error = socket_address(socket, peer != 0, &address, &length);
+    object_put(&socket->object);
+    if (error) {
+        return error;
+    }
+    return copy_to_user(out, &address, sizeof(address)) ? (int64_t)length : -VX_EFAULT;
+}
+
+static int64_t sys_socket_pair(uint64_t family, uint64_t type, uint64_t out, uint64_t a3) {
+    (void)a3;
+    struct socket *pair[2];
+    int error = socket_create_pair((int)family, (int)type, 0, pair);
+    if (error) {
+        return error;
+    }
+    int handles[2];
+    handles[0] = (int)add_socket(pair[0]);
+    if (handles[0] < 0) {
+        object_put(&pair[1]->object);
+        return handles[0];
+    }
+    handles[1] = (int)add_socket(pair[1]);
+    if (handles[1] < 0) {
+        handle_close(me()->handles, handles[0]);
+        return handles[1];
+    }
+    if (!copy_to_user(out, handles, sizeof(handles))) {
+        handle_close(me()->handles, handles[0]);
+        handle_close(me()->handles, handles[1]);
+        return -VX_EFAULT;
+    }
+    return 0;
+}
+
+#define POLL_MAX 256
+
+static int64_t poll_check(struct vx_poll *polls, uint64_t count) {
+    int64_t ready = 0;
+    for (uint64_t i = 0; i < count; i++) {
+        uint32_t rights;
+        struct object *object = handle_get_any(me()->handles, polls[i].handle, &rights);
+        uint32_t bits = VX_POLL_ERROR;
+        if (object) {
+            bits = object->type->poll ? object->type->poll(object)
+                                      : OBJECT_READABLE | OBJECT_WRITABLE;
+            object_put(object);
+        }
+        polls[i].ready = (unsigned short)(bits & (polls[i].events | VX_POLL_ERROR |
+                                                  VX_POLL_HANGUP));
+        ready += polls[i].ready != 0;
+    }
+    return ready;
+}
+
+static int64_t sys_poll(uint64_t user_polls, uint64_t count, uint64_t timeout_ms, uint64_t a3) {
+    (void)a3;
+    if (count > POLL_MAX) {
+        return -VX_EINVAL;
+    }
+    struct vx_poll *polls = kmalloc(count * sizeof(*polls) + 1);
+    if (!polls) {
+        return -VX_ENOMEM;
+    }
+    int64_t result = -VX_EFAULT;
+    if (copy_from_user(polls, user_polls, count * sizeof(*polls))) {
+        int64_t timeout = (int64_t)timeout_ms;
+        uint64_t start = timer_ms();
+        for (;;) {
+            result = poll_check(polls, count);
+            uint64_t waited = timer_ms() - start;
+            if (result || (timeout >= 0 && waited >= (uint64_t)timeout)) {
+                break;
+            }
+            /* Readiness isn't signalled yet: check again every few ms. */
+            uint64_t step = 5;
+            if (timeout >= 0 && (uint64_t)timeout - waited < step) {
+                step = (uint64_t)timeout - waited;
+            }
+            if (thread_sleep_ms_interruptible(step)) {
+                result = -VX_EINTR;
+                break;
+            }
+        }
+        if (result >= 0 && !copy_to_user(user_polls, polls, count * sizeof(*polls))) {
+            result = -VX_EFAULT;
+        }
+    }
+    kfree(polls);
+    return result;
+}
+
+#define NET_INFO_MAX 8
+
+static int64_t sys_net_info(uint64_t out, uint64_t count, uint64_t a2, uint64_t a3) {
+    (void)a2, (void)a3;
+    struct vx_net_interface *list = kmalloc(NET_INFO_MAX * sizeof(*list));
+    if (!list) {
+        return -VX_ENOMEM;
+    }
+    int total = net_snapshot(list, NET_INFO_MAX);
+    uint64_t n = (uint64_t)total < count ? (uint64_t)total : count;
+    if (n > NET_INFO_MAX) {
+        n = NET_INFO_MAX;
+    }
+    int64_t result = copy_to_user(out, list, n * sizeof(*list)) ? total : -VX_EFAULT;
+    kfree(list);
+    return result;
+}
+
 static int64_t sys_kernel_command(uint64_t text, uint64_t length, uint64_t a2, uint64_t a3) {
     (void)a2, (void)a3;
     char line[128];
@@ -805,6 +1126,18 @@ static const syscall_fn syscalls[] = {
     [VX_SYS_WAIT_ADDRESS] = sys_wait_address,
     [VX_SYS_WAKE_ADDRESS] = sys_wake_address,
     [VX_SYS_PROTECT] = sys_protect,
+    [VX_SYS_SOCKET] = sys_socket,
+    [VX_SYS_BIND] = sys_bind,
+    [VX_SYS_LISTEN] = sys_listen,
+    [VX_SYS_ACCEPT] = sys_accept,
+    [VX_SYS_CONNECT] = sys_connect,
+    [VX_SYS_SEND] = sys_send,
+    [VX_SYS_RECEIVE] = sys_receive,
+    [VX_SYS_SHUTDOWN] = sys_shutdown,
+    [VX_SYS_SOCKET_ADDRESS] = sys_socket_address,
+    [VX_SYS_SOCKET_PAIR] = sys_socket_pair,
+    [VX_SYS_POLL] = sys_poll,
+    [VX_SYS_NET_INFO] = sys_net_info,
 };
 
 static void vexa_syscall(struct interrupt_frame *frame) {

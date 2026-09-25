@@ -4,6 +4,7 @@
 #include <vexa/fs.h>
 #include <vexa/kprintf.h>
 #include <vexa/mm.h>
+#include <vexa/net.h>
 #include <vexa/object.h>
 #include <vexa/pipe.h>
 #include <vexa/process.h>
@@ -20,6 +21,9 @@
  *   /proc/self                  link to the reader's own /proc/<pid>
  *   /proc/<pid>/stat, status, cmdline, comm, maps, exe, cwd, fd/
  *   /proc/meminfo, uptime, loadavg, stat, cpuinfo, version, mounts, filesystems
+ *   /proc/net/dev, route         network interfaces and routes, as Linux shows them
+ *   /proc/net/resolv.conf        the name servers DHCP gave us (/etc/resolv.conf
+ *                                links here; Linux has no such file)
  *
  * Vnodes are made on lookup and freed on release; a file's text is generated
  * afresh on every read.
@@ -34,6 +38,8 @@ enum proc_kind {
     PROC_PID_LINK, /* exe, cwd */
     PROC_FD_DIR,
     PROC_FD_LINK,
+    PROC_NET_DIR,
+    PROC_NET_FILE, /* A file under /proc/net */
 };
 
 struct text {
@@ -394,6 +400,70 @@ struct global_entry {
     global_generator generate;
 };
 
+/* ---- /proc/net ---- */
+
+static int interfaces(struct vx_net_interface *list) {
+    int count = net_snapshot(list, 8);
+    return count < 8 ? count : 8;
+}
+
+static void gen_net_dev(struct text *text) {
+    struct vx_net_interface list[8];
+    int count = interfaces(list);
+    text_printf(text, "Inter-|   Receive                                                |  Transmit\n"
+                      " face |bytes    packets errs drop fifo frame compressed multicast|bytes    "
+                      "packets errs drop fifo colls carrier compressed\n");
+    for (int i = 0; i < count; i++) {
+        struct vx_net_interface *n = &list[i];
+        text_printf(text, "%s: %lu %lu 0 %lu 0 0 0 0 %lu %lu 0 %lu 0 0 0 0\n",
+                    n->name, (uint64_t)n->rx_bytes, (uint64_t)n->rx_packets,
+                    (uint64_t)n->rx_dropped, (uint64_t)n->tx_bytes, (uint64_t)n->tx_packets,
+                    (uint64_t)n->tx_dropped);
+    }
+}
+
+static void route_line(struct text *text, const char *name, uint32_t destination,
+                       uint32_t gateway, unsigned flags, uint32_t mask) {
+    /* Addresses as the 32-bit numbers in memory, in hex (that's Linux's format). */
+    text_printf(text, "%s\t%08X\t%08X\t%04X\t0\t0\t0\t%08X\t0\t0\t0\n", name, destination,
+                gateway, flags, mask);
+}
+
+static void gen_net_route(struct text *text) {
+    struct vx_net_interface list[8];
+    int count = interfaces(list);
+    text_printf(text, "Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\t\tMTU"
+                      "\tWindow\tIRTT\n");
+    for (int i = 0; i < count; i++) {
+        struct vx_net_interface *n = &list[i];
+        if ((n->flags & VX_NET_LOOPBACK) || !n->address) {
+            continue;
+        }
+        if (n->gateway) {
+            route_line(text, n->name, 0, n->gateway, 0x3, 0); /* Up, via a gateway. */
+        }
+        route_line(text, n->name, n->address & n->netmask, 0, 0x1, n->netmask);
+    }
+}
+
+static void gen_net_resolv(struct text *text) {
+    struct vx_net_interface list[8];
+    int count = interfaces(list);
+    for (int i = 0; i < count; i++) {
+        if (list[i].dns) {
+            const uint8_t *b = (const uint8_t *)&list[i].dns;
+            text_printf(text, "nameserver %u.%u.%u.%u\n", b[0], b[1], b[2], b[3]);
+        }
+    }
+}
+
+static const struct global_entry net_entries[] = {
+    {"dev", gen_net_dev},
+    {"route", gen_net_route},
+    {"resolv.conf", gen_net_resolv},
+};
+#define NET_ENTRY_COUNT (int)(sizeof(net_entries) / sizeof(net_entries[0]))
+
 static const struct global_entry global_entries[] = {
     {"meminfo", gen_meminfo},   {"uptime", gen_uptime},   {"loadavg", gen_loadavg},
     {"stat", gen_stat_global},  {"cpuinfo", gen_cpuinfo}, {"version", gen_version},
@@ -413,6 +483,7 @@ static struct proc_node *new_node(enum proc_kind kind, uint32_t pid, int index) 
         [PROC_GLOBAL] = VX_TYPE_FILE,        [PROC_PID_DIR] = VX_TYPE_DIRECTORY,
         [PROC_PID_FILE] = VX_TYPE_FILE,      [PROC_PID_LINK] = VX_TYPE_SYMLINK,
         [PROC_FD_DIR] = VX_TYPE_DIRECTORY,   [PROC_FD_LINK] = VX_TYPE_SYMLINK,
+        [PROC_NET_DIR] = VX_TYPE_DIRECTORY,  [PROC_NET_FILE] = VX_TYPE_FILE,
     };
     struct proc_node *node = kzalloc(sizeof(*node));
     if (!node) {
@@ -523,6 +594,9 @@ static int proc_lookup(struct vnode *dir, const char *name, size_t length, struc
         if (names_equal(name, length, "self")) {
             return finish_node(new_node(PROC_SELF, 0, 0), out);
         }
+        if (names_equal(name, length, "net")) {
+            return finish_node(new_node(PROC_NET_DIR, 0, 0), out);
+        }
         for (int i = 0; i < GLOBAL_ENTRY_COUNT; i++) {
             if (names_equal(name, length, global_entries[i].name)) {
                 return finish_node(new_node(PROC_GLOBAL, 0, i), out);
@@ -546,6 +620,13 @@ static int proc_lookup(struct vnode *dir, const char *name, size_t length, struc
     case PROC_FD_DIR:
         if (parse_number(name, length, &number) && number < HANDLE_MAX) {
             return finish_node(new_node(PROC_FD_LINK, parent->pid, (int)number), out);
+        }
+        return -VX_ENOENT;
+    case PROC_NET_DIR:
+        for (int i = 0; i < NET_ENTRY_COUNT; i++) {
+            if (names_equal(name, length, net_entries[i].name)) {
+                return finish_node(new_node(PROC_NET_FILE, 0, i), out);
+            }
         }
         return -VX_ENOENT;
     default:
@@ -577,12 +658,17 @@ static int proc_read_dir(struct vnode *dir, uint64_t *cookie, struct vx_dir_entr
     struct proc_node *node = node_of(dir);
     char name[16];
     if (node->kind == PROC_ROOT) {
-        /* self, the global files, then one directory per process. */
+        /* self, net, the global files, then one directory per process. */
         uint64_t i = (*cookie)++;
         if (i == 0) {
             set_entry(entry, "self", VX_TYPE_SYMLINK, 2);
             return 1;
         }
+        if (i == 1) {
+            set_entry(entry, "net", VX_TYPE_DIRECTORY, (uint64_t)PROC_NET_DIR << 10);
+            return 1;
+        }
+        i--;
         if (i - 1 < (uint64_t)GLOBAL_ENTRY_COUNT) {
             set_entry(entry, global_entries[i - 1].name, VX_TYPE_FILE, 3 + i);
             return 1;
@@ -616,6 +702,14 @@ static int proc_read_dir(struct vnode *dir, uint64_t *cookie, struct vx_dir_entr
         set_entry(entry, e->name, type, ((uint64_t)node->pid << 16) | *cookie);
         return 1;
     }
+    if (node->kind == PROC_NET_DIR) {
+        if (*cookie >= (uint64_t)NET_ENTRY_COUNT) {
+            return 0;
+        }
+        uint64_t i = (*cookie)++;
+        set_entry(entry, net_entries[i].name, VX_TYPE_FILE, ((uint64_t)PROC_NET_FILE << 10) | i);
+        return 1;
+    }
     if (node->kind == PROC_FD_DIR) {
         struct process *me = process_current();
         if (!me || me->id != node->pid) {
@@ -647,6 +741,8 @@ static int64_t proc_read(struct vnode *vnode, void *buffer, size_t size, uint64_
         kfree(target);
     } else if (node->kind == PROC_GLOBAL) {
         global_entries[node->index].generate(&text);
+    } else if (node->kind == PROC_NET_FILE) {
+        net_entries[node->index].generate(&text);
     } else if (node->kind == PROC_PID_FILE) {
         struct process *process = process_find(node->pid);
         if (!process) {

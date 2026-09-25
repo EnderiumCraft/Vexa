@@ -4,7 +4,7 @@
 #include <stdarg.h>
 #include <stddef.h>
 
-/* Supports %s %c %d %i %u %x %p %%, the 'l' length modifier, and a
+/* Supports %s %c %d %i %u %x %X %p %%, the 'l' length modifier, and a
  * zero-padded width for numbers (%02u). */
 void kprintf(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 void kvprintf(const char *fmt, va_list args);
