@@ -182,6 +182,8 @@
 #define LINUX_SYS_epoll_ctl 233
 #define LINUX_SYS_epoll_pwait 281
 #define LINUX_SYS_epoll_create1 291
+#define LINUX_SYS_eventfd 284
+#define LINUX_SYS_eventfd2 290
 #define LINUX_SYS_epoll_pwait2 441
 #define LINUX_SYS_fadvise64 221
 #define LINUX_SYS_copy_file_range 326

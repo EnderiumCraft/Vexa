@@ -142,10 +142,10 @@ TYPED_COMMANDS = [
     ("@mouse_move -299 -187", None, 5),
     ("@mouse_button 1", "desktop: left button at 31,13", 10),
     ("@mouse_button 0", None, 5),
-    ("@mouse_move 0 77", None, 5),
+    ("@mouse_move 0 101", None, 5),
     ("@mouse_button 1", 'desktop: window 3 "About Vexa"', 20),
     ("@mouse_button 0", None, 5),
-    ("@mouse_move 463 37", None, 5),
+    ("@mouse_move 463 13", None, 5),
     ("@mouse_button 1", "desktop: asked window 3 to close", 10),
     ("@mouse_button 0", "desktop: closed window 3", 10),
     ("@sendkey ctrl-alt-q", "desktop: back to the console", 20),
@@ -198,6 +198,18 @@ LINUX_COMMANDS = [
     ("@mouse_move 53 -150", None, 5),
     ("@mouse_button 1", "desktop: asked window 2 to close", 10),
     ("@mouse_button 0", 'desktop: closed window 2 "xterm"', 30),
+    # GTK 3: gtk3-demo from the Vexa menu (at 144,138); a click on "Change
+    # Display" in its list shows that demo, which is its title then.
+    ("@mouse_move -357 -43", None, 5),
+    ("@mouse_move -358 -44", None, 5),
+    ("@mouse_button 1", "desktop: left button at 31,13", 10),
+    ("@mouse_button 0", None, 5),
+    ("@mouse_move 0 77", None, 5),
+    ("@mouse_button 1", "desktop: left button at 31,90", 10),
+    ("@mouse_button 0", "desktop: window 3", 300),
+    ("@mouse_move 181 218", None, 10),
+    ("@mouse_button 1", "desktop: left button at 212,308", 10),
+    ("@mouse_button 0", 'desktop: window 3 is now called "Change Display"', 60),
     ("@sendkey ctrl-alt-q", "desktop: back to the console", 30),
     # Networking: BSD sockets (with SCM_RIGHTS), wget, ifconfig, ping and
     # Python's urllib, asyncio and multiprocessing pipes.

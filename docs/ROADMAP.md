@@ -220,7 +220,8 @@ native track in 0.12.0; in 0.13.0, X and `xterm` run in a window on it.
 
 - [x] Linux: fontconfig and FreeType render text in X clients: Xft, DejaVu, and xterm
       with TrueType fonts (0.14.0)
-- [ ] Linux: the GTK 3 demo (`gtk3-demo`) runs
+- [x] Linux: the GTK 3 demo (`gtk3-demo`) runs, from the Vexa menu (0.14.0): GLib,
+      cairo, Pango, HarfBuzz, gdk-pixbuf, ATK and GTK 3 built with musl
 - [ ] Linux: Mesa's software renderer (llvmpipe) for OpenGL, since Firefox's WebRender
       can fall back to software rendering anyway
 - [x] Run X11 windows inside the Vexa compositor: Xvexa is rootless, and each X window

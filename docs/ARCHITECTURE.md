@@ -211,7 +211,12 @@ reads partition tables, and calls the drivers (`dev/virtio_blk.c`, `dev/ahci.c`,
   key events (Linux key codes, the `evdev` XKB rules), a desktop window's focus is
   X's input focus, a resize is a `ConfigureWindow`, and the close button sends
   `WM_DELETE_WINDOW`. (Without `-rootless`, Xvexa shows its whole screen in one
-  window.) `/linux/usr/bin/xsession` (Ctrl+Alt+X) starts it once, then an `xterm`. A process's
+  window.) `/linux/usr/bin/xrun <program>` starts it once and runs an X program;
+  `xsession` (Ctrl+Alt+X) is `xrun xterm`. GTK 3 programs run the same way
+  (`xrun gtk3-demo` is in the Vexa menu), with `GTK_CSD=0` (the desktop draws title
+  bars) and `NO_AT_BRIDGE=1` (no accessibility bus yet). The X and GTK stack is built
+  by `tools/build-x11.sh` with musl; C++ code that needs no C++ runtime (HarfBuzz) is
+  compiled by the host g++ with musl's headers (`tools/musl-cxx-wrapper.sh`). A process's
   controlling terminal is what `/dev/tty` opens: a pty becomes one when a group
   leader opens it or claims it with `TIOCSCTTY`, and children inherit it.
 

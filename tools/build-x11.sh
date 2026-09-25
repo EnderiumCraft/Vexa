@@ -31,7 +31,9 @@ mkdir -p "$work" "$sysroot"
 # Only musl and what's built here: no host headers or libraries.
 export MUSL_CC="${MUSL_CC:-musl-gcc}"
 export CC="$here/musl-cc-wrapper.sh"
+export CXX="$here/musl-cxx-wrapper.sh" # Only for C++ that needs no C++ runtime (HarfBuzz).
 export CFLAGS="-O2 -fPIC -I$sysroot/usr/include -isystem $headers"
+export CXXFLAGS="$CFLAGS"
 export CPPFLAGS="-I$sysroot/usr/include -isystem $headers"
 export LDFLAGS="-L$sysroot/usr/lib -Wl,-rpath-link,$sysroot/usr/lib"
 export PKG_CONFIG_LIBDIR="$sysroot/usr/lib/pkgconfig:$sysroot/usr/share/pkgconfig"
@@ -312,6 +314,156 @@ build_xterm() {
         --with-terminal-type=xterm LIBS=-ltinfow
 }
 
+# ---- The GTK 3 stack ----
+
+build_libxfixes() {
+    unpack libxfixes_6.0.0.orig.tar.gz libXfixes-6.0.0
+    autotools
+}
+
+build_libxi() {
+    unpack libxi_1.8.1.orig.tar.gz libXi-1.8.1
+    autotools --disable-docs --disable-specs --without-xmlto --without-fop --without-asciidoc
+}
+
+build_libxrandr() {
+    unpack libxrandr_1.5.2.orig.tar.gz libXrandr-1.5.2
+    autotools
+}
+
+build_libxcursor() {
+    unpack libxcursor_1.2.1.orig.tar.gz libXcursor-1.2.1
+    autotools
+}
+
+build_libxdamage() {
+    unpack libxdamage_1.1.6.orig.tar.gz libXdamage-1.1.6
+    autotools
+}
+
+build_libxcomposite() {
+    unpack libxcomposite_0.4.5.orig.tar.gz libXcomposite-0.4.5
+    autotools --disable-doc --without-xmlto
+}
+
+build_libxinerama() {
+    unpack libxinerama_1.1.4.orig.tar.gz libXinerama-1.1.4
+    autotools
+}
+
+build_libffi() {
+    unpack libffi-3.4.6.tar.gz libffi-3.4.6
+    autotools --disable-docs --disable-multi-os-directory
+}
+
+build_pcre2() {
+    unpack pcre2_10.42.orig.tar.gz pcre2-10.42
+    autotools --enable-unicode --enable-jit=no
+}
+
+build_glib() {
+    unpack glib2.0_2.80.0.orig.tar.xz glib-2.80.0
+    mesonbuild -Dtests=false -Dintrospection=disabled -Dnls=disabled -Dlibmount=disabled \
+        -Dselinux=disabled -Dxattr=false -Dman-pages=disabled -Ddocumentation=false \
+        -Dsysprof=disabled -Dlibelf=disabled -Ddtrace=false -Dsystemtap=false
+    # Code generators the next packages run while building: those are the
+    # build machine's (the same GLib version), not these musl programs.
+    for tool in glib-compile-resources glib-compile-schemas glib-mkenums glib-genmarshal \
+        gdbus-codegen; do
+        ln -sf "$(command -v $tool)" "$sysroot/usr/bin/$tool"
+    done
+}
+
+build_libpng() {
+    unpack libpng1.6_1.6.43.orig.tar.gz libpng-1.6.43
+    autotools --disable-tests --disable-tools
+}
+
+build_fribidi() {
+    unpack fribidi_1.0.13.orig.tar.xz fribidi-1.0.13
+    mesonbuild -Ddocs=false -Dtests=false -Dbin=false
+}
+
+build_harfbuzz() {
+    unpack harfbuzz_8.3.0.orig.tar.xz harfbuzz-8.3.0
+    mesonbuild -Dtests=disabled -Ddocs=disabled -Dcairo=disabled -Dglib=enabled \
+        -Dfreetype=enabled -Dicu=disabled -Dgobject=disabled -Dintrospection=disabled \
+        -Dutilities=disabled -Dbenchmark=disabled
+}
+
+build_cairo() {
+    unpack cairo_1.18.0.orig.tar.xz cairo-1.18.0
+    mesonbuild -Dtests=disabled -Dxlib=enabled -Dxcb=enabled -Dpng=enabled \
+        -Dfreetype=enabled -Dfontconfig=enabled -Dglib=enabled -Dzlib=enabled \
+        -Dspectre=disabled -Dsymbol-lookup=disabled -Dgtk2-utils=disabled
+}
+
+build_pango() {
+    unpack "pango1.0_1.52.1+ds.orig.tar.xz" pango-1.52.1
+    mesonbuild -Dintrospection=disabled -Dxft=enabled -Dfreetype=enabled -Dcairo=enabled \
+        -Dfontconfig=enabled -Dsysprof=disabled -Dlibthai=disabled -Dgtk_doc=false
+}
+
+build_gdkpixbuf() {
+    unpack "gdk-pixbuf_2.42.10+dfsg.orig.tar.xz" gdk-pixbuf-2.42.10
+    # The loaders are built in, so no loaders cache is needed.
+    mesonbuild -Dpng=enabled -Djpeg=disabled -Dtiff=disabled -Dbuiltin_loaders=all -Dintrospection=disabled -Dman=false -Dgtk_doc=false \
+        -Dinstalled_tests=false -Dtests=false -Dgio_sniffing=false
+}
+
+build_libepoxy() {
+    # OpenGL is looked up when a program asks for it (there is none yet).
+    unpack libepoxy_1.5.10.orig.tar.gz libepoxy-1.5.10
+    mesonbuild -Dglx=yes -Degl=no -Dx11=true -Dtests=false -Ddocs=false
+}
+
+build_dbus() {
+    # The library: GTK's accessibility bridge links with it. There is no bus
+    # to talk to yet (NO_AT_BRIDGE=1 keeps it quiet).
+    unpack dbus_1.14.10.orig.tar.xz dbus-1.14.10
+    autotools --disable-systemd --without-x --disable-tests --disable-xml-docs \
+        --disable-doxygen-docs --disable-selinux --disable-libaudit --disable-apparmor \
+        --disable-ducktype-docs
+}
+
+build_atspi() {
+    unpack at-spi2-core_2.52.0.orig.tar.xz at-spi2-core-2.52.0
+    # libxml2 is only for its tests.
+    sed -i "s/^libxml_dep = dependency('libxml-2.0', version: libxml_req_version)/libxml_dep = dependency('libxml-2.0', required: false)/" meson.build
+    sed -i "s/^  subdir('tests')/  # subdir('tests')/" meson.build
+    # Configure runs a test program that needs libdbus (found through an
+    # rpath on the build machine; meaningless on Vexa).
+    LDFLAGS="$LDFLAGS -Wl,-rpath,$sysroot/usr/lib" mesonbuild -Dx11=disabled -Dintrospection=disabled -Ddocs=false -Duse_systemd=false
+}
+
+build_gtk3() {
+    unpack "gtk+3.0_3.24.41.orig.tar.xz" gtk+-3.24.41
+    # The build runs gdk-pixbuf-pixdata (and some of its own programs): musl
+    # programs, which musl's loader can run here with the sysroot's libraries.
+    cat > "$work/run-musl" <<RUN
+#!/bin/sh
+exec /lib/ld-musl-x86_64.so.1 --library-path "$sysroot/usr/lib" "\$@"
+RUN
+    chmod +x "$work/run-musl"
+    printf '#!/bin/sh\nexec "%s" "%s" "$@"\n' "$work/run-musl" "$sysroot/usr/bin/gdk-pixbuf-pixdata" \
+        > "$work/gdk-pixbuf-pixdata"
+    chmod +x "$work/gdk-pixbuf-pixdata"
+    export GDK_PIXBUF_PIXDATA="$work/gdk-pixbuf-pixdata"
+    mesonbuild -Dx11_backend=true -Dwayland_backend=false -Dbroadway_backend=false \
+        -Dprint_backends=file -Dcolord=no -Dintrospection=false -Ddemos=true \
+        -Dexamples=false -Dtests=false -Dinstalled_tests=false -Dxinerama=yes \
+        -Dgtk_doc=false -Dman=false -Dcloudproviders=false -Dtracker3=false
+    # The settings schemas (GSettings), compiled once here.
+    glib-compile-schemas "$sysroot/usr/share/glib-2.0/schemas"
+}
+
+build_hicolor() {
+    unpack hicolor-icon-theme_0.17.orig.tar.xz hicolor-icon-theme-0.17
+    ./configure --prefix=/usr > configure.log 2>&1
+    make install DESTDIR="$sysroot" > install.log 2>&1
+}
+
+
 package xorgproto
 package libxau
 package libmd
@@ -342,4 +494,26 @@ package libxpm
 package libxaw
 package ncurses
 package xterm
+package libxfixes
+package libxi
+package libxrandr
+package libxcursor
+package libxdamage
+package libxcomposite
+package libxinerama
+package libffi
+package pcre2
+package glib
+package libpng
+package fribidi
+package harfbuzz
+package cairo
+package pango
+package gdkpixbuf
+package libepoxy
+package dbus
+package atspi
+package gtk3
+package hicolor
+
 log "done"

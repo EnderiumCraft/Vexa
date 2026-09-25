@@ -1,6 +1,7 @@
 # The X Window System sources tools/build-x11.sh builds, with their SHA-256.
 # From Ubuntu's archive (the original upstream tarballs, *.orig.tar.*), and
-# upstream releases where those are git snapshots (expat) or font sources (DejaVu).
+# upstream releases where those are git snapshots (expat, libffi) or font sources
+# (DejaVu).
 4f6b9b4faf91e5df8265b71843a91fc73dc895be6210c84117a996545df296ce https://archive.ubuntu.com/ubuntu/pool/main/x/xorgproto/xorgproto_2024.1.orig.tar.gz
 3a321aaceb803577a4776a5efe78836eb095a9e44bbc7a465d29463e1a14f189 https://archive.ubuntu.com/ubuntu/pool/main/libx/libxau/libxau_1.0.11.orig.tar.gz
 1bd6aa42275313af3141c7cf2e5b964e8b1fd488025caf2f971f43b00776b332 https://archive.ubuntu.com/ubuntu/pool/main/libm/libmd/libmd_1.1.0.orig.tar.xz
@@ -31,3 +32,24 @@ e280541f4f601b8586bec305976c873fd641607f9bc4254bf661034dcccac4e9 https://archive
 0fff64125819c02d1102b6236f3d7d861a07b5216d8eea336c3811d31494ecf7 https://archive.ubuntu.com/ubuntu/pool/main/libx/libxrender/libxrender_0.9.12.orig.tar.gz
 b7e59f69e0bbabe9438088775f7e5a7c16a572e58b11f9722519385d38192df5 https://archive.ubuntu.com/ubuntu/pool/main/x/xft/xft_2.3.6.orig.tar.gz
 fa9ca4d13871dd122f61258a80d01751d603b4d3ee14095d65453b4e846e17d7 https://github.com/dejavu-fonts/dejavu-fonts/releases/download/version_2_37/dejavu-fonts-ttf-2.37.tar.bz2
+b0dea9df23c863a7a50e825440f3ebffabd65df1497108e5d437747843895a4e https://github.com/libffi/libffi/releases/download/v3.4.6/libffi-3.4.6.tar.gz
+c33b418e3b936ee3153de2c61cc638e7e4fe3156022a5c77d0711bcbb9d64f1f https://archive.ubuntu.com/ubuntu/pool/main/p/pcre2/pcre2_10.42.orig.tar.gz
+8228a92f92a412160b139ae68b6345bd28f24434a7b5af150ebe21ff587a561d https://archive.ubuntu.com/ubuntu/pool/main/g/glib2.0/glib2.0_2.80.0.orig.tar.xz
+fecc95b46cf05e8e3fc8a414750e0ba5aad00d89e9fdf175e94ff041caf1a03a https://archive.ubuntu.com/ubuntu/pool/main/libp/libpng1.6/libpng1.6_1.6.43.orig.tar.gz
+7fa16c80c81bd622f7b198d31356da139cc318a63fc7761217af4130903f54a2 https://archive.ubuntu.com/ubuntu/pool/main/f/fribidi/fribidi_1.0.13.orig.tar.xz
+109501eaeb8bde3eadb25fab4164e993fbace29c3d775bcaa1c1e58e2f15f847 https://archive.ubuntu.com/ubuntu/pool/main/h/harfbuzz/harfbuzz_8.3.0.orig.tar.xz
+243a0736b978a33dee29f9cca7521733b78a65b5418206fef7bd1c3d4cf10b64 https://archive.ubuntu.com/ubuntu/pool/main/c/cairo/cairo_1.18.0.orig.tar.xz
+12d67d8182cbb2ae427406df9bab5ce2ff5619102bf2a0fc6331d80a9914b139 https://archive.ubuntu.com/ubuntu/pool/main/p/pango1.0/pango1.0_1.52.1+ds.orig.tar.xz
+46663e445468e92f4a0ca876b02aed4f8758595ee3acfaa6ef3ba2b29e1c1930 https://archive.ubuntu.com/ubuntu/pool/main/g/gdk-pixbuf/gdk-pixbuf_2.42.10+dfsg.orig.tar.xz
+0ac3fc8320c8d01fa147c272ba7fa03806389c6b03d3c406d0823e30e35ff5ab https://archive.ubuntu.com/ubuntu/pool/main/a/at-spi2-core/at-spi2-core_2.52.0.orig.tar.xz
+a7ced37f4102b745ac86d6a70a9da399cc139ff168ba6b8002b4d8d43c900c15 https://archive.ubuntu.com/ubuntu/pool/main/libe/libepoxy/libepoxy_1.5.10.orig.tar.gz
+47da61487af3087a94bc49296fd025ca0bc02f96ef06c556e7c8988bd651b6fa https://archive.ubuntu.com/ubuntu/pool/main/g/gtk+3.0/gtk+3.0_3.24.41.orig.tar.xz
+3b5f47c223e4b63d7f7fe758886b8bf665b20a7edb6962c423892fd150e326ea https://archive.ubuntu.com/ubuntu/pool/main/libx/libxi/libxi_1.8.1.orig.tar.gz
+3f10813ab355e7a09f17e147d61b0ce090d898a5ea5b5519acd0ef68675dcf8e https://archive.ubuntu.com/ubuntu/pool/main/libx/libxrandr/libxrandr_1.5.2.orig.tar.gz
+77f96b9ad0a3c422cfa826afabaf1e02b9bfbfc8908c5fa1a45094faad074b98 https://archive.ubuntu.com/ubuntu/pool/main/libx/libxcursor/libxcursor_1.2.1.orig.tar.gz
+2afcc139eb6eb926ffe344494b1fc023da25def42874496e6e6d3aa8acef8595 https://archive.ubuntu.com/ubuntu/pool/main/libx/libxdamage/libxdamage_1.1.6.orig.tar.gz
+82045da5625350838390c9440598b90d69c882c324ca92f73af9f0e992cb57c7 https://archive.ubuntu.com/ubuntu/pool/main/libx/libxfixes/libxfixes_6.0.0.orig.tar.gz
+581c7fc0f41a99af38b1c36b9be64bc13ef3f60091cd3f01105bbc7c01617d6c https://archive.ubuntu.com/ubuntu/pool/main/libx/libxcomposite/libxcomposite_0.4.5.orig.tar.gz
+64de45e18cc76b8e703cb09b3c9d28bd16e3d05d5cd99f2d630de2d62c3acc18 https://archive.ubuntu.com/ubuntu/pool/main/libx/libxinerama/libxinerama_1.1.4.orig.tar.gz
+ba1f21d2bd9d339da2d4aa8780c09df32fea87998b73da24f49ab9df1e36a50f https://archive.ubuntu.com/ubuntu/pool/main/d/dbus/dbus_1.14.10.orig.tar.xz
+317484352271d18cbbcfac3868eab798d67fff1b8402e740baa6ff41d588a9d8 https://archive.ubuntu.com/ubuntu/pool/main/h/hicolor-icon-theme/hicolor-icon-theme_0.17.orig.tar.xz

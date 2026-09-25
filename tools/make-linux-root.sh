@@ -47,10 +47,21 @@ cp -a "$python/usr/." "$root/usr/"
 # the keyboard descriptions, xterm, fonts, and a few terminal descriptions.
 cp -a "$x11"/usr/lib/*.so* "$root/usr/lib/"
 cp -a "$x11/usr/lib/X11" "$root/usr/lib/"
-for program in Xvexa xkbcomp xterm resize tput fc-list fc-match fc-cache fc-query; do
+for program in Xvexa xkbcomp xterm resize tput fc-list fc-match fc-cache fc-query \
+    gtk3-demo gtk3-widget-factory gtk3-icon-browser gtk-query-settings; do
     rm -f "$root/usr/bin/$program" # Not through a BusyBox link: that would overwrite BusyBox.
     cp "$x11/usr/bin/$program" "$root/usr/bin/"
 done
+# GTK 3: its modules, the settings schemas (compiled), the hicolor icon theme,
+# and a settings file.
+cp -a "$x11/usr/lib/gtk-3.0" "$root/usr/lib/"
+mkdir -p "$root/usr/share/glib-2.0" "$root/usr/share/icons" "$root/etc/gtk-3.0"
+cp -a "$x11/usr/share/glib-2.0/schemas" "$root/usr/share/glib-2.0/"
+cp -a "$x11/usr/share/icons/hicolor" "$root/usr/share/icons/"
+cp "$(dirname "$0")/linux-files/gtk-settings.ini" "$root/etc/gtk-3.0/settings.ini"
+# The libraries lose their symbol tables (not needed to run them), which
+# keeps the in-memory file system smaller.
+find "$root/usr/lib" -name '*.so*' -type f -exec strip --strip-unneeded {} + 2>/dev/null || true
 mkdir -p "$root/usr/share/X11"
 cp -a "$x11/usr/share/X11/locale" "$x11/usr/share/X11/XErrorDB" "$root/usr/share/X11/"
 # A real directory: an absolute link would point outside /linux.
@@ -59,7 +70,7 @@ cp -a "$x11/usr/share/xkeyboard-config-2" "$root/usr/share/X11/xkb"
 mkdir -p "$root/etc" "$root/usr/share/fonts" "$root/var/cache/fontconfig"
 cp -rL "$x11/etc/fonts" "$root/etc/"
 cp -a "$x11/usr/share/fonts/dejavu" "$root/usr/share/fonts/"
-cp "$(dirname "$0")/linux-files/xsession" "$root/usr/bin/xsession"
+cp "$(dirname "$0")/linux-files/xsession" "$(dirname "$0")/linux-files/xrun" "$root/usr/bin/"
 for entry in x/xterm x/xterm-256color x/xterm-color v/vt100 v/vt220 l/linux d/dumb; do
     mkdir -p "$root/usr/share/terminfo/$(dirname $entry)"
     cp -L "$x11/usr/share/terminfo/$entry" "$root/usr/share/terminfo/$entry"

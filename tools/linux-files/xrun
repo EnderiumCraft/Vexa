@@ -1,0 +1,20 @@
+#!/bin/sh
+# xrun <program> [arguments...]: runs an X program on the Vexa desktop,
+# starting the X server (Xvexa, rootless: every X window is a desktop window)
+# if it isn't running yet. It keeps running for later X programs
+# (DISPLAY=:0) until the desktop exits.
+display=${DISPLAY:-:0}
+socket=/tmp/.X11-unix/X${display#:}
+if [ ! -S "$socket" ]; then
+    Xvexa "$display" -rootless -noreset &
+    # Wait for the server's socket.
+    for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+        [ -S "$socket" ] && break
+        sleep 0.5
+    done
+fi
+export DISPLAY="$display"
+# No accessibility bus (D-Bus) yet: GTK needn't look for one. And the
+# desktop draws title bars: GTK needn't draw its own (client-side).
+export NO_AT_BRIDGE=1 GTK_CSD=0
+exec "$@"

@@ -41,7 +41,8 @@ runs X programs such as `xterm` in windows of their own on it. The kernel:
   you move, resize, maximize and minimize, a terminal window and an "About Vexa" window
 - runs the X Window System through the Linux subsystem: Xvexa, an X server (X.Org's,
   built with musl) that shows each X window as a desktop window of its own, with
-  TrueType fonts (FreeType, fontconfig, Xft and DejaVu), and `xterm`
+  TrueType fonts (FreeType, fontconfig, Xft and DejaVu), `xterm`, and GTK 3 programs
+  (GLib, cairo, Pango and HarfBuzz, gdk-pixbuf): `gtk3-demo` is in the Vexa menu
 - has a terminal with line editing, Ctrl-C (or Ctrl-\\) to stop programs and Ctrl-D for
   end of input
 - runs threads with a preemptive scheduler, on every CPU core it finds; a program can
@@ -160,6 +161,7 @@ You need a Linux host (or WSL) with:
 | musl C compiler and Linux headers (for BusyBox and bash) | `musl-tools`, `linux-libc-dev` |
 | curl (downloads bash's source once) | `curl` |
 | Meson, Ninja, pkg-config, bison and gperf (for X) | `meson`, `ninja-build`, `pkg-config`, `bison`, `gperf` |
+| GLib's code generators (for GTK) | `libglib2.0-dev-bin`, `gtk-update-icon-cache` |
 
 ```sh
 make                # builds build/vexa.iso (fetches Limine on first run)
@@ -241,8 +243,12 @@ also includes. Every release on the Releases page carries the matching GPL sourc
 The X Window System in the ISO (the X.Org server 21.1 with Xvexa, libX11, libxcb and
 the other X libraries, pixman, xkbcomp and xkeyboard-config, Xft and fontconfig with
 expat, xterm 330 and ncurses 6.6) is under the MIT license and similar permissive
-licenses; the exact upstream tarballs are listed in `third_party/x11-sources.txt`, and
-the few changes made while building them (adding Xvexa to the server, `openpty` for
+licenses. So are cairo (MPL-1.1 or LGPL-2.1, used under the MPL), HarfBuzz, fribidi
+(LGPL-2.1), pixman, libpng, libepoxy, libffi and PCRE2 (BSD); GTK 3, GLib, Pango,
+gdk-pixbuf, ATK and at-spi2-core are under the LGPL-2.1 (or later), and D-Bus under the
+AFL-2.1 or GPL-2.0; they are linked dynamically and unmodified, and every release
+carries their sources. The exact upstream tarballs of all of these are listed in
+`third_party/x11-sources.txt`, and the few changes made while building them (adding Xvexa to the server, `openpty` for
 xterm on musl) are in `tools/build-x11.sh`. Xvexa itself is `third_party/xvexa/xvexa.c`.
 Portions of this software are copyright © The FreeType Project (www.freetype.org), used
 under the FreeType License. The DejaVu fonts are under the Bitstream Vera license (their

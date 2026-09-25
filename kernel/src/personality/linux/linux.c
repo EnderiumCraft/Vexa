@@ -1777,6 +1777,132 @@ static int64_t sys_pselect6(struct interrupt_frame *f, uint64_t count, uint64_t 
     return do_select(count, sets, ms);
 }
 
+/* ---- eventfd: a counter to wait on (GLib's main loop wakes itself with one) ---- */
+
+#define LINUX_EFD_SEMAPHORE 0x1
+#define EVENTFD_MAX 0xfffffffffffffffeULL
+
+struct eventfd {
+    struct object object;
+    struct spinlock lock;
+    uint64_t count;
+    bool semaphore; /* Reads take 1 at a time. */
+    struct wait_queue readers, writers;
+};
+
+static bool eventfd_has_count(void *arg) {
+    return ((struct eventfd *)arg)->count > 0;
+}
+
+static bool eventfd_has_room(void *arg) {
+    return ((struct eventfd *)arg)->count < EVENTFD_MAX;
+}
+
+static int64_t eventfd_read(struct object *object, void *buffer, size_t size) {
+    struct eventfd *e = (struct eventfd *)object;
+    if (size < 8) {
+        return -VX_EINVAL;
+    }
+    for (;;) {
+        uint64_t flags = spin_lock_irqsave(&e->lock);
+        if (e->count > 0) {
+            uint64_t value = e->semaphore ? 1 : e->count;
+            e->count -= value;
+            spin_unlock_irqrestore(&e->lock, flags);
+            memcpy(buffer, &value, 8);
+            wait_queue_wake_all(&e->writers);
+            return 8;
+        }
+        spin_unlock_irqrestore(&e->lock, flags);
+        if (object->flags & OBJECT_NONBLOCK) {
+            return -VX_EAGAIN;
+        }
+        int error = wait_queue_wait_interruptible(&e->readers, eventfd_has_count, e);
+        if (error) {
+            return error;
+        }
+    }
+}
+
+static int64_t eventfd_write(struct object *object, const void *buffer, size_t size) {
+    struct eventfd *e = (struct eventfd *)object;
+    uint64_t value;
+    if (size < 8) {
+        return -VX_EINVAL;
+    }
+    memcpy(&value, buffer, 8);
+    if (value > EVENTFD_MAX) {
+        return -VX_EINVAL;
+    }
+    for (;;) {
+        uint64_t flags = spin_lock_irqsave(&e->lock);
+        if (value <= EVENTFD_MAX - e->count) {
+            e->count += value;
+            spin_unlock_irqrestore(&e->lock, flags);
+            if (value) {
+                wait_queue_wake_all(&e->readers);
+            }
+            return 8;
+        }
+        spin_unlock_irqrestore(&e->lock, flags);
+        if (object->flags & OBJECT_NONBLOCK) {
+            return -VX_EAGAIN;
+        }
+        int error = wait_queue_wait_interruptible(&e->writers, eventfd_has_room, e);
+        if (error) {
+            return error;
+        }
+    }
+}
+
+static uint32_t eventfd_poll(struct object *object) {
+    struct eventfd *e = (struct eventfd *)object;
+    return (e->count > 0 ? OBJECT_READABLE : 0) | (e->count < EVENTFD_MAX ? OBJECT_WRITABLE : 0);
+}
+
+static void eventfd_destroy(struct object *object) {
+    kfree(object);
+}
+
+static const struct object_type eventfd_type = {
+    .name = "eventfd",
+    .destroy = eventfd_destroy,
+    .read = eventfd_read,
+    .write = eventfd_write,
+    .poll = eventfd_poll,
+};
+
+static int64_t sys_eventfd2(struct interrupt_frame *f, uint64_t initial, uint64_t flags,
+                            uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5) {
+    if (flags & ~(uint64_t)(LINUX_O_CLOEXEC | LINUX_O_NONBLOCK | LINUX_EFD_SEMAPHORE)) {
+        return -LE_EINVAL;
+    }
+    struct eventfd *e = kzalloc(sizeof(*e));
+    if (!e) {
+        return -LE_ENOMEM;
+    }
+    object_init(&e->object, &eventfd_type); /* kzalloc: the lock and queues start empty. */
+    e->count = (uint32_t)initial;
+    e->semaphore = flags & LINUX_EFD_SEMAPHORE;
+    if (flags & LINUX_O_NONBLOCK) {
+        e->object.flags |= OBJECT_NONBLOCK;
+    }
+    int fd = handle_add(me()->handles, &e->object, HANDLE_RIGHT_READ | HANDLE_RIGHT_WRITE);
+    if (fd < 0) {
+        object_put(&e->object);
+        return lx(fd);
+    }
+    if (flags & LINUX_O_CLOEXEC) {
+        handle_set_flags(me()->handles, fd, HANDLE_FLAG_CLOSE_ON_EXEC);
+    }
+    return fd;
+}
+
+static int64_t sys_eventfd(struct interrupt_frame *f, uint64_t initial, uint64_t a1,
+                           uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5) {
+    return sys_eventfd2(f, initial, 0, 0, 0, 0, 0);
+}
+
 /* ---- epoll ---- */
 
 struct epoll_item {
@@ -3399,6 +3525,8 @@ static const linux_fn syscalls[] = {
     CALL(membarrier, sys_no_such_call_quietly),
     CALL(epoll_create, sys_epoll_create),
     CALL(epoll_create1, sys_epoll_create1),
+    CALL(eventfd, sys_eventfd),
+    CALL(eventfd2, sys_eventfd2),
     CALL(epoll_ctl, sys_epoll_ctl),
     CALL(epoll_wait, sys_epoll_wait),
     CALL(epoll_pwait, sys_epoll_wait),

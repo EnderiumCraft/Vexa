@@ -160,14 +160,15 @@ static struct rect work_area(void) {
 
 /* ---- The menu ---- */
 
-enum menu_action { RUN_TERMINAL, RUN_X, RUN_ABOUT, SEPARATOR, LEAVE };
+enum menu_action { RUN_TERMINAL, RUN_X, RUN_GTK_DEMO, RUN_ABOUT, SEPARATOR, LEAVE };
 
 static const struct {
     const char *label, *keys;
     enum menu_action action;
 } menu_items[] = {
     {"Terminal", "Ctrl+Alt+T", RUN_TERMINAL},
-    {"X with an xterm", "Ctrl+Alt+X", RUN_X},
+    {"XTerm", "Ctrl+Alt+X", RUN_X},
+    {"GTK 3 demo", "", RUN_GTK_DEMO},
     {"About Vexa", "", RUN_ABOUT},
     {"", "", SEPARATOR},
     {"Back to the console", "Ctrl+Alt+Q", LEAVE},
@@ -837,6 +838,7 @@ static void client_message(int client) {
             strncpy(w->title, m.text, sizeof(w->title) - 1);
             add_damage(frame_rect(w));
             add_damage(panel_rect());
+            printf("desktop: window %d is now called \"%s\"\n", w->id, w->title);
         }
         break;
     case DESKTOP_DESTROY:
@@ -870,14 +872,15 @@ static void client_message(int client) {
 
 /* ---- Programs ---- */
 
-static void launch(const char *path) {
-    const char *argv[] = {path};
+/* Starts a program, with one argument or none. */
+static void launch_with(const char *path, const char *arg) {
+    const char *argv[] = {path, arg};
     unsigned long envc = 0;
     while (environ[envc]) {
         envc++;
     }
     struct vx_spawn spawn = {
-        .argv = argv, .argc = 1, .envp = (const char *const *)environ, .envc = envc,
+        .argv = argv, .argc = arg ? 2 : 1, .envp = (const char *const *)environ, .envc = envc,
         .handles = {0, 1, 2}, .flags = VX_SPAWN_NEW_GROUP,
     };
     int process = vx_spawn(path, &spawn);
@@ -894,6 +897,10 @@ static void launch(const char *path) {
     vx_close(process);
 }
 
+static void launch(const char *path) {
+    launch_with(path, NULL);
+}
+
 static void reap_children(void) {
     for (int i = 0; i < MAX_CHILDREN; i++) {
         if (children[i] >= 0 && vx_wait(children[i], VX_WAIT_NO_HANG) != -VX_EAGAIN) {
@@ -906,7 +913,9 @@ static void reap_children(void) {
 static void run(enum menu_action action) {
     switch (action) {
     case RUN_TERMINAL: launch("/bin/term"); break;
-    case RUN_X: launch("/linux/usr/bin/xsession"); break; /* If the Linux subsystem is there. */
+    /* X programs, if the Linux subsystem is there. */
+    case RUN_X: launch("/linux/usr/bin/xsession"); break;
+    case RUN_GTK_DEMO: launch_with("/linux/usr/bin/xrun", "gtk3-demo"); break;
     case RUN_ABOUT: launch("/bin/about"); break;
     case LEAVE: quit = true; break;
     case SEPARATOR: break;

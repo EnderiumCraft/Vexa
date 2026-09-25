@@ -1,17 +1,3 @@
 #!/bin/sh
-# xsession: an xterm on the Vexa desktop, through Xvexa. The X server is
-# rootless (every X window is a desktop window of its own); the first
-# xsession starts it, and it keeps running for other X programs
-# (DISPLAY=:0) until the desktop exits.
-display=${DISPLAY:-:0}
-socket=/tmp/.X11-unix/X${display#:}
-if [ ! -S "$socket" ]; then
-    Xvexa "$display" -rootless -noreset &
-    # Wait for the server's socket.
-    for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
-        [ -S "$socket" ] && break
-        sleep 0.5
-    done
-fi
-export DISPLAY="$display"
-exec xterm -fa "DejaVu Sans Mono" -fs 12 "$@"
+# xsession: an xterm on the Vexa desktop (see xrun).
+exec xrun xterm -fa "DejaVu Sans Mono" -fs 12 "$@"

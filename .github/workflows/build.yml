@@ -22,7 +22,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential xorriso qemu-system-x86 ovmf python3 e2fsprogs \
-            musl-tools linux-libc-dev ninja-build pkg-config bison gperf
+            musl-tools linux-libc-dev ninja-build pkg-config bison gperf \
+            libglib2.0-dev-bin gtk-update-icon-cache python3-packaging
           # X.Org's packages want a newer Meson than Ubuntu's.
           pipx install meson==1.12.1
 
@@ -35,7 +36,7 @@ jobs:
           path: |
             build/x11
             third_party/x11
-          key: x11-${{ hashFiles('third_party/x11-sources.txt', 'tools/build-x11.sh', 'tools/musl-cc-wrapper.sh', 'third_party/xvexa/**') }}
+          key: x11-${{ hashFiles('third_party/x11-sources.txt', 'tools/build-x11.sh', 'tools/musl-cc-wrapper.sh', 'tools/musl-cxx-wrapper.sh', 'third_party/xvexa/**') }}
 
       - name: Mark the restored X build as up to date
         if: steps.x11-cache.outputs.cache-hit == 'true'
@@ -65,6 +66,13 @@ jobs:
           # BusyBox (GPL-2.0), bash and coreutils (GPL-3.0): every release carries
           # their exact sources; BusyBox's with its configuration.
           cp build/busybox-*-source.tar.gz third_party/bash-*.tar.xz third_party/coreutils-*.tar.xz .
+          # GTK 3 and the LGPL (and MPL) libraries under it: their sources too.
+          mkdir -p lgpl-sources
+          cp third_party/x11/glib2.0_*.orig.tar.* third_party/x11/gtk+3.0_*.orig.tar.* \
+            third_party/x11/pango1.0_*.orig.tar.* third_party/x11/gdk-pixbuf_*.orig.tar.* \
+            third_party/x11/at-spi2-core_*.orig.tar.* third_party/x11/fribidi_*.orig.tar.* \
+            third_party/x11/cairo_*.orig.tar.* third_party/x11/dbus_*.orig.tar.* lgpl-sources/
+          tar -cf "gtk-and-lgpl-sources-$version.tar" -C lgpl-sources .
 
       - uses: actions/upload-artifact@v4
         with:
@@ -75,6 +83,7 @@ jobs:
             busybox-*-source.tar.gz
             bash-*.tar.xz
             coreutils-*.tar.xz
+            gtk-and-lgpl-sources-*.tar
 
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -108,7 +117,7 @@ jobs:
 
           Run it with: \`qemu-system-x86_64 -M q35 -m 512M -cdrom vexa-${VERSION}.iso\`
 
-          The ISO includes BusyBox (GPL-2.0), GNU bash and coreutils (GPL-3.0); their sources are attached."
+          The ISO includes BusyBox (GPL-2.0), GNU bash and coreutils (GPL-3.0), and GTK 3 with the LGPL libraries under it; their sources are attached."
           # Move the tag to this commit, then replace the release and its files.
           git tag -f latest-build
           git push -f origin refs/tags/latest-build
@@ -116,7 +125,7 @@ jobs:
           gh release create latest-build \
             --title "Latest build (${VERSION}, ${short_sha})" \
             --notes "$notes" --prerelease --latest=false \
-            "vexa-${VERSION}.iso" "vexa-${VERSION}.iso.sha256" busybox-*-source.tar.gz bash-*.tar.xz coreutils-*.tar.xz
+            "vexa-${VERSION}.iso" "vexa-${VERSION}.iso.sha256" busybox-*-source.tar.gz bash-*.tar.xz coreutils-*.tar.xz gtk-and-lgpl-sources-*.tar
 
       - name: Create versioned release if VEXA_VERSION is new
         run: |
@@ -126,4 +135,4 @@ jobs:
           fi
           gh release create "v${VERSION}" --target "$GITHUB_SHA" \
             --title "Vexa ${VERSION}" --generate-notes --latest \
-            "vexa-${VERSION}.iso" "vexa-${VERSION}.iso.sha256" busybox-*-source.tar.gz bash-*.tar.xz coreutils-*.tar.xz
+            "vexa-${VERSION}.iso" "vexa-${VERSION}.iso.sha256" busybox-*-source.tar.gz bash-*.tar.xz coreutils-*.tar.xz gtk-and-lgpl-sources-*.tar
