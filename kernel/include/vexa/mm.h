@@ -102,13 +102,17 @@ struct address_space {
     uint64_t *pml4;
     uint64_t pml4_phys;
     struct spinlock lock;
+    uint32_t refs;         /* The process, plus anyone looking at it (/proc). */
     struct vm_area *areas; /* Sorted by address. */
     uint64_t heap_start, heap_end; /* The brk heap. */
 };
 
+/* A new, empty address space with one reference. */
 struct address_space *vm_create(void);
-/* Frees every page and table. It must not be active on any CPU. */
-void vm_destroy(struct address_space *as);
+void vm_get(struct address_space *as);
+/* Drops a reference; the last one frees every page and table, so by then it
+ * must not be active on any CPU. */
+void vm_put(struct address_space *as);
 /* A copy for fork(): pages are shared read-only until either side writes. */
 struct address_space *vm_fork(struct address_space *parent);
 /* Adds [start, end) (page aligned) with `flags`. Where it overlaps existing
@@ -131,6 +135,9 @@ bool vm_handle_fault(struct address_space *as, uint64_t address, bool write);
 /* Copies into another (inactive) address space, e.g. to set up a new stack. */
 bool vm_write(struct address_space *as, uint64_t address, const void *data, size_t size);
 uint64_t vm_resident_bytes(struct address_space *as);
+/* Calls `fn` for each area, with the address space locked (no sleeping). */
+void vm_for_each_area(struct address_space *as,
+                      void (*fn)(const struct vm_area *area, void *arg), void *arg);
 
 /* ---- Kernel heap (heap.c): slab caches for small objects. ---- */
 

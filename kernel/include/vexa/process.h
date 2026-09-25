@@ -58,6 +58,10 @@ struct process {
     char *cwd;               /* Absolute, normalized. */
     uint64_t pending_signals;
     uint8_t signal_actions[VX_SIGNAL_COUNT]; /* enum signal_action */
+    char *exe;               /* The program's path, and its arguments NUL-separated. */
+    char *cmdline;
+    size_t cmdline_length;
+    uint64_t start_ms;       /* timer_ms() when it started. */
     uint64_t entry;          /* Where user mode starts, and with what stack. */
     uint64_t stack_pointer;
     struct wait_queue exited;           /* Anyone waiting for this process. */
@@ -115,6 +119,10 @@ struct process *process_fork(struct interrupt_frame *frame, int *error);
  * `frame` is set up to start the new program; on failure nothing changed. */
 int process_exec(const char *path, char *const *argv, size_t argc, char *const *envp,
                  size_t envc, struct interrupt_frame *frame, const char **reason);
+
+/* The process's address space with a reference (vm_put when done), or NULL
+ * if it has exited. Safe for other processes' address spaces. */
+struct address_space *process_address_space(struct process *process);
 
 struct process *process_current(void);
 /* Returns a reference to the process with this id, or NULL. */

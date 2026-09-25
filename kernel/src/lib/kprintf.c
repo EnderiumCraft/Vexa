@@ -23,7 +23,32 @@ static void kputs(const char *s) {
     }
 }
 
-static void put_unsigned(uint64_t value, unsigned base, int min_digits) {
+/* The formatter writes through a sink: the console, or a buffer (ksnprintf). */
+struct sink {
+    void (*put)(struct sink *sink, char c);
+    char *buffer;
+    size_t size, length;
+};
+
+static void console_sink(struct sink *sink, char c) {
+    (void)sink;
+    kputc(c);
+}
+
+static void buffer_sink(struct sink *sink, char c) {
+    if (sink->length + 1 < sink->size) {
+        sink->buffer[sink->length] = c;
+    }
+    sink->length++;
+}
+
+static void put_string(struct sink *sink, const char *s) {
+    while (*s) {
+        sink->put(sink, *s++);
+    }
+}
+
+static void put_unsigned(struct sink *sink, uint64_t value, unsigned base, int min_digits) {
     static const char digits[] = "0123456789abcdef";
     char buf[32];
     int i = 0;
@@ -35,17 +60,22 @@ static void put_unsigned(uint64_t value, unsigned base, int min_digits) {
         buf[i++] = '0';
     }
     while (i--) {
-        kputc(buf[i]);
+        sink->put(sink, buf[i]);
     }
 }
 
-void kvprintf(const char *fmt, va_list args) {
+static void format(struct sink *sink, const char *fmt, va_list args) {
     for (; *fmt; fmt++) {
         if (*fmt != '%') {
-            kputc(*fmt);
+            sink->put(sink, *fmt);
             continue;
         }
         fmt++;
+        /* A zero-padded width, for numbers: %02u, %08lx. */
+        int width = 0;
+        while (*fmt >= '0' && *fmt <= '9') {
+            width = width * 10 + (*fmt++ - '0');
+        }
         bool is_long = false;
         while (*fmt == 'l') {
             is_long = true;
@@ -54,44 +84,68 @@ void kvprintf(const char *fmt, va_list args) {
         switch (*fmt) {
         case 's': {
             const char *s = va_arg(args, const char *);
-            kputs(s ? s : "(null)");
+            put_string(sink, s ? s : "(null)");
             break;
         }
         case 'c':
-            kputc((char)va_arg(args, int));
+            sink->put(sink, (char)va_arg(args, int));
             break;
         case 'd':
         case 'i': {
             int64_t v = is_long ? va_arg(args, int64_t) : va_arg(args, int);
             if (v < 0) {
-                kputc('-');
-                put_unsigned((uint64_t)-v, 10, 1);
+                sink->put(sink, '-');
+                put_unsigned(sink, (uint64_t)-v, 10, width ? width : 1);
             } else {
-                put_unsigned((uint64_t)v, 10, 1);
+                put_unsigned(sink, (uint64_t)v, 10, width ? width : 1);
             }
             break;
         }
         case 'u':
-            put_unsigned(is_long ? va_arg(args, uint64_t) : va_arg(args, unsigned), 10, 1);
+            put_unsigned(sink, is_long ? va_arg(args, uint64_t) : va_arg(args, unsigned), 10,
+                         width ? width : 1);
             break;
         case 'x':
-            put_unsigned(is_long ? va_arg(args, uint64_t) : va_arg(args, unsigned), 16, 1);
+            put_unsigned(sink, is_long ? va_arg(args, uint64_t) : va_arg(args, unsigned), 16,
+                         width ? width : 1);
             break;
         case 'p':
-            kputs("0x");
-            put_unsigned((uint64_t)va_arg(args, void *), 16, 16);
+            put_string(sink, "0x");
+            put_unsigned(sink, (uint64_t)va_arg(args, void *), 16, 16);
             break;
         case '%':
-            kputc('%');
+            sink->put(sink, '%');
             break;
         case '\0':
             return;
         default:
-            kputc('%');
-            kputc(*fmt);
+            sink->put(sink, '%');
+            sink->put(sink, *fmt);
             break;
         }
     }
+}
+
+void kvprintf(const char *fmt, va_list args) {
+    struct sink sink = {.put = console_sink};
+    format(&sink, fmt, args);
+}
+
+size_t kvsnprintf(char *buffer, size_t size, const char *fmt, va_list args) {
+    struct sink sink = {.put = buffer_sink, .buffer = buffer, .size = size};
+    format(&sink, fmt, args);
+    if (size) {
+        buffer[sink.length < size ? sink.length : size - 1] = '\0';
+    }
+    return sink.length;
+}
+
+size_t ksnprintf(char *buffer, size_t size, const char *fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    size_t length = kvsnprintf(buffer, size, fmt, args);
+    va_end(args);
+    return length;
 }
 
 void kprintf(const char *fmt, ...) {

@@ -51,12 +51,14 @@ static uint32_t next_process_id = 1;
 static void process_destroy(struct object *object) {
     struct process *process = (struct process *)object;
     if (process->address_space) {
-        vm_destroy(process->address_space);
+        vm_put(process->address_space);
     }
     if (process->personality && process->personality->free_data && process->personality_data) {
         process->personality->free_data(process->personality_data);
     }
     kfree(process->cwd);
+    kfree(process->cmdline);
+    kfree(process->exe);
     kfree(process);
 }
 
@@ -68,6 +70,48 @@ const struct object_type process_object_type = {
 static void user_thread_entry(void *arg) {
     struct process *process = arg;
     enter_user_mode(process->entry, process->stack_pointer);
+}
+
+struct address_space *process_address_space(struct process *process) {
+    uint64_t flags = spin_lock_irqsave(&process_lock);
+    struct address_space *as = process->address_space;
+    if (as) {
+        vm_get(as);
+    }
+    spin_unlock_irqrestore(&process_lock, flags);
+    return as;
+}
+
+#define CMDLINE_MAX 4096
+
+/* Remembers what a process is running, for /proc: its program's path and
+ * its arguments (NUL-separated, like Linux's /proc/<pid>/cmdline). */
+static void set_program(struct process *process, const char *path, char *const *argv,
+                        size_t argc) {
+    size_t length = 0;
+    for (size_t i = 0; i < argc && length < CMDLINE_MAX; i++) {
+        length += strlen(argv[i]) + 1;
+    }
+    length = length < CMDLINE_MAX ? length : CMDLINE_MAX;
+    char *cmdline = kmalloc(length + 1);
+    char *exe = kmalloc(strlen(path) + 1);
+    if (cmdline) {
+        size_t at = 0;
+        for (size_t i = 0; i < argc && at < length; i++) {
+            size_t n = strlen(argv[i]) + 1;
+            n = n < length - at ? n : length - at;
+            memcpy(cmdline + at, argv[i], n);
+            at += n;
+        }
+    }
+    if (exe) {
+        strcpy(exe, path);
+    }
+    kfree(process->cmdline);
+    kfree(process->exe);
+    process->cmdline = cmdline;
+    process->cmdline_length = cmdline ? length : 0;
+    process->exe = exe;
 }
 
 /* ---- Loading a program ---- */
@@ -261,7 +305,7 @@ static int load_program(const char *path, char *const *argv, size_t argc, char *
         }
     }
     if (error) {
-        vm_destroy(as);
+        vm_put(as);
         return error;
     }
     *as_out = as;
@@ -405,6 +449,8 @@ struct process *process_spawn(const struct spawn_request *request, int *error,
     process->main_thread = thread;
     process->parent = request->parent;
     process->auto_reap = request->parent == NULL;
+    process->start_ms = timer_ms();
+    set_program(process, request->path, request->argv, request->argc);
 
     uint64_t flags = spin_lock_irqsave(&process_lock);
     process->id = next_process_id++;
@@ -503,6 +549,20 @@ struct process *process_fork(struct interrupt_frame *frame, int *error) {
     thread->fs_base = rdmsr(IA32_FS_BASE_MSR);
     child->main_thread = thread;
     child->parent = parent;
+    child->start_ms = timer_ms();
+    if (parent->exe) {
+        child->exe = kmalloc(strlen(parent->exe) + 1);
+        if (child->exe) {
+            strcpy(child->exe, parent->exe);
+        }
+    }
+    if (parent->cmdline) {
+        child->cmdline = kmalloc(parent->cmdline_length + 1);
+        if (child->cmdline) {
+            memcpy(child->cmdline, parent->cmdline, parent->cmdline_length);
+            child->cmdline_length = parent->cmdline_length;
+        }
+    }
 
     uint64_t flags = spin_lock_irqsave(&process_lock);
     child->id = next_process_id++;
@@ -531,16 +591,19 @@ int process_exec(const char *path, char *const *argv, size_t argc, char *const *
     }
     void *fresh_fpu = fpu_alloc_state();
     if (!fresh_fpu) {
-        vm_destroy(as);
+        vm_put(as);
         *reason = "out of memory";
         return -VX_ENOMEM;
     }
     /* Past the point of no return: swap in the new program. This is the
      * process's only thread, so nothing else uses the old address space. */
+    uint64_t lock_flags = spin_lock_irqsave(&process_lock);
     struct address_space *old = process->address_space;
     process->address_space = as;
+    spin_unlock_irqrestore(&process_lock, lock_flags);
     vmm_activate(as);
-    vm_destroy(old);
+    vm_put(old);
+    set_program(process, path, argv, argc);
 
     if (process->personality_data && process->personality->free_data) {
         process->personality->free_data(process->personality_data);
@@ -738,13 +801,18 @@ void process_thread_reaped(struct thread *thread) {
     }
     /* The last (only) thread is gone, so no CPU can be using these tables.
      * (Its handles were closed by process_exit.) */
-    vm_destroy(process->address_space);
+    spin_lock_irqsave(&process_lock); /* Interrupts are already off. */
+    struct address_space *as = process->address_space;
     process->address_space = NULL;
+    spin_unlock(&process_lock);
+    if (as) {
+        vm_put(as);
+    }
     process->main_thread = NULL; /* The thread is about to be freed. */
     process->state = PROCESS_EXITED;
     wait_queue_wake_all_locked(&process->exited);
 
-    spin_lock_irqsave(&process_lock); /* Interrupts are already off. */
+    spin_lock_irqsave(&process_lock);
     struct process *parent = process->parent;
     bool unlinked = false;
     if (parent) {

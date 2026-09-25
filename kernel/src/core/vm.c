@@ -128,6 +128,7 @@ struct address_space *vm_create(void) {
         kfree(as);
         return NULL;
     }
+    as->refs = 1;
     as->pml4_phys = phys;
     as->pml4 = phys_to_virt(phys);
     memset(as->pml4, 0, PAGE_SIZE / 2);
@@ -151,7 +152,19 @@ static void free_tables(uint64_t *table, int level) {
     }
 }
 
-void vm_destroy(struct address_space *as) {
+void vm_get(struct address_space *as) {
+    __atomic_add_fetch(&as->refs, 1, __ATOMIC_RELAXED);
+}
+
+static void vm_destroy(struct address_space *as);
+
+void vm_put(struct address_space *as) {
+    if (__atomic_sub_fetch(&as->refs, 1, __ATOMIC_ACQ_REL) == 0) {
+        vm_destroy(as);
+    }
+}
+
+static void vm_destroy(struct address_space *as) {
     for (int i = 0; i < 256; i++) {
         if (as->pml4[i] & PTE_PRESENT) {
             free_tables(phys_to_virt(as->pml4[i] & PTE_ADDR_MASK), 3);
@@ -219,7 +232,7 @@ struct address_space *vm_fork(struct address_space *parent) {
         __asm__ volatile("mov %0, %%cr3" : : "r"(parent->pml4_phys) : "memory"); /* Flush. */
     }
     if (!ok) {
-        vm_destroy(child);
+        vm_put(child);
         return NULL;
     }
     return child;
@@ -457,6 +470,15 @@ bool vm_write(struct address_space *as, uint64_t address, const void *data, size
         done += n;
     }
     return true;
+}
+
+void vm_for_each_area(struct address_space *as,
+                      void (*fn)(const struct vm_area *area, void *arg), void *arg) {
+    uint64_t lock_flags = spin_lock_irqsave(&as->lock);
+    for (struct vm_area *area = as->areas; area; area = area->next) {
+        fn(area, arg);
+    }
+    spin_unlock_irqrestore(&as->lock, lock_flags);
 }
 
 uint64_t vm_resident_bytes(struct address_space *as) {

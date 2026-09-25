@@ -78,6 +78,8 @@ void init_thread(void *unused) {
     }
     vfs_mkdir("/dev", 4);
     must(vfs_mount("devfs", NULL, "devfs", "/dev"), "mounting /dev");
+    vfs_mkdir("/proc", 5);
+    must(vfs_mount("proc", NULL, "proc", "/proc"), "mounting /proc");
     vfs_mkdir("/mnt", 4);
     vfs_mkdir("/tmp", 4);
 

@@ -15,6 +15,7 @@ struct device_node {
     struct vnode vnode;
     char name[16];
     struct block_device *block; /* For block devices. */
+    const char *link;           /* For symbolic links: the target. */
 };
 
 static struct mount *devfs_mount_point;
@@ -86,13 +87,34 @@ bool vfs_is_terminal(struct file *file) {
 }
 static const struct vnode_ops block_ops = {.read = block_node_read, .write = block_node_write};
 
-static void add_node(const char *name, uint32_t type, const struct vnode_ops *ops,
-                     struct block_device *block) {
+/* /dev/fd, /dev/stdin...: symbolic links into /proc/self/fd, as on Linux. */
+static const char *const link_targets[][2] = {
+    {"fd", "/proc/self/fd"},
+    {"stdin", "/proc/self/fd/0"},
+    {"stdout", "/proc/self/fd/1"},
+    {"stderr", "/proc/self/fd/2"},
+};
+
+static int64_t link_read(struct vnode *v, void *b, size_t s, uint64_t o) {
+    const char *target = ((struct device_node *)v)->link;
+    size_t length = strlen(target);
+    if (o >= length) {
+        return 0;
+    }
+    size_t n = length - o < s ? length - o : s;
+    memcpy(b, target + o, n);
+    return (int64_t)n;
+}
+
+static const struct vnode_ops link_ops = {.read = link_read};
+
+static struct device_node *add_node(const char *name, uint32_t type,
+                                    const struct vnode_ops *ops, struct block_device *block) {
     struct device_node *node = kzalloc(sizeof(*node));
     if (!node || device_count == MAX_DEVICES) {
         kfree(node);
         kprintf("[devfs] no room for /dev/%s\n", name);
-        return;
+        return NULL;
     }
     vnode_init(&node->vnode, devfs_mount_point, type, ops);
     node->vnode.inode = device_count + 2;
@@ -105,6 +127,7 @@ static void add_node(const char *name, uint32_t type, const struct vnode_ops *op
         node->name[i] = name[i];
     }
     devices[device_count++] = node;
+    return node;
 }
 
 static int devfs_lookup(struct vnode *dir, const char *name, size_t length, struct vnode **out) {
@@ -156,6 +179,13 @@ static int devfs_mount(struct mount *mount, struct block_device *device) {
     add_node("zero", VX_TYPE_CHAR_DEVICE, &zero_ops, NULL);
     add_node("console", VX_TYPE_CHAR_DEVICE, &console_ops, NULL);
     add_node("tty", VX_TYPE_CHAR_DEVICE, &console_ops, NULL);
+    for (size_t i = 0; i < sizeof(link_targets) / sizeof(link_targets[0]); i++) {
+        struct device_node *link = add_node(link_targets[i][0], VX_TYPE_SYMLINK, &link_ops, NULL);
+        if (link) {
+            link->link = link_targets[i][1];
+            link->vnode.size = strlen(link->link);
+        }
+    }
     for (int i = 0; i < pending_count; i++) {
         add_node(pending_blocks[i]->name, VX_TYPE_BLOCK_DEVICE, &block_ops, pending_blocks[i]);
     }

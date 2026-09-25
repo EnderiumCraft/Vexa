@@ -523,11 +523,49 @@ static int64_t sys_sendfile(struct interrupt_frame *f, uint64_t out_fd, uint64_t
 
 /* ---- Opening and closing ---- */
 
+/* If `path` names one of the caller's own descriptors (/dev/fd/N,
+ * /proc/self/fd/N, /dev/stdin...), returns N. Opening such a path on Linux
+ * reopens whatever the descriptor refers to, even a pipe (bash's <(...) passes
+ * /dev/fd/63), which a plain symbolic link can't do. */
+static int own_descriptor(const char *path) {
+    static const char *const names[] = {"/dev/stdin", "/dev/stdout", "/dev/stderr"};
+    for (int i = 0; i < 3; i++) {
+        if (strcmp(path, names[i]) == 0) {
+            return i;
+        }
+    }
+    char self[32];
+    ksnprintf(self, sizeof(self), "/proc/%u/fd/", me()->id);
+    const char *prefixes[] = {"/dev/fd/", "/proc/self/fd/", self};
+    for (int i = 0; i < 3; i++) {
+        size_t n = strlen(prefixes[i]);
+        if (strlen(path) <= n || memcmp(path, prefixes[i], n) != 0) {
+            continue;
+        }
+        int fd = 0;
+        for (const char *p = path + n; *p; p++) {
+            if (*p < '0' || *p > '9' || fd > HANDLE_MAX) {
+                return -1;
+            }
+            fd = fd * 10 + (*p - '0');
+        }
+        return fd;
+    }
+    return -1;
+}
+
+static int64_t dup_from(int64_t old, int64_t min, bool close_on_exec);
+
 static int64_t do_openat(int64_t dirfd, uint64_t user_path, uint64_t flags) {
     char *path;
     int64_t error = path_at(dirfd, user_path, &path);
     if (error) {
         return error;
+    }
+    int own = own_descriptor(path);
+    if (own >= 0) {
+        kfree(path);
+        return dup_from(own, 0, flags & LINUX_O_CLOEXEC);
     }
     uint32_t vx_flags = 0;
     switch (flags & LINUX_O_ACCMODE) {
