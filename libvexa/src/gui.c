@@ -134,6 +134,10 @@ int vx_gui_handle(void) {
     return connection;
 }
 
+static unsigned long buffer_size(int width, int height) {
+    return ((unsigned long)width * height * 4 + 4095) & ~4095UL;
+}
+
 static long send_message(struct desktop_message *m) {
     return vx_write(connection, m, sizeof(*m)) == sizeof(*m) ? 0 : -VX_EPIPE;
 }
@@ -143,7 +147,43 @@ static long receive_message(struct desktop_message *m) {
     return n == sizeof(*m) ? 0 : n < 0 ? n : -VX_EPIPE;
 }
 
-struct vx_window *vx_window_create(const char *title, int width, int height) {
+/* Makes a pixel buffer: a file in /run/shm, mapped. Returns its handle (and
+ * fills in path and pixels), or a negative error. */
+static int make_buffer(int width, int height, char *path, size_t path_size, void **pixels) {
+    snprintf(path, path_size, "/run/shm/window-%ld-%d", vx_process_id(), ++buffers_made);
+    unsigned long size = buffer_size(width, height);
+    int handle = vx_open(path, VX_OPEN_READ | VX_OPEN_WRITE | VX_OPEN_CREATE | VX_OPEN_TRUNCATE);
+    if (handle < 0) {
+        return handle;
+    }
+    *pixels = vx_resize(handle, size) == 0 ? vx_map_file(handle, 0, size, VX_MAP_WRITE) : NULL;
+    if (!*pixels) {
+        vx_close(handle);
+        vx_remove(path);
+        return -VX_ENOMEM;
+    }
+    return handle;
+}
+
+/* Waits for the desktop's answer of this type; events that come first wait
+ * in the queue. Returns 0, or an error if the desktop is gone. */
+static long wait_reply(uint32_t type, struct desktop_message *reply) {
+    for (;;) {
+        long error = receive_message(reply);
+        if (error) {
+            return error;
+        }
+        if (reply->type == type) {
+            return 0;
+        }
+        if (queued_count < QUEUE_MAX) {
+            queued[queued_count++] = *reply;
+        }
+    }
+}
+
+struct vx_window *vx_window_create_flags(const char *title, int width, int height,
+                                         unsigned flags) {
     if (width <= 0 || height <= 0 || width > 4096 || height > 4096 || connect_desktop() < 0) {
         return NULL;
     }
@@ -153,55 +193,69 @@ struct vx_window *vx_window_create(const char *title, int width, int height) {
     }
     /* The pixels: a file in /run/shm that the desktop maps too. */
     char path[64];
-    snprintf(path, sizeof(path), "/run/shm/window-%ld-%d", vx_process_id(), ++buffers_made);
-    unsigned long size = ((unsigned long)width * height * 4 + 4095) & ~4095UL;
-    int handle = vx_open(path, VX_OPEN_READ | VX_OPEN_WRITE | VX_OPEN_CREATE | VX_OPEN_TRUNCATE);
-    void *pixels = NULL;
-    if (handle >= 0 && vx_resize(handle, size) == 0) {
-        pixels = vx_map_file(handle, 0, size, VX_MAP_WRITE);
-    }
-    if (!pixels) {
-        if (handle >= 0) {
-            vx_close(handle);
-            vx_remove(path);
-        }
+    void *pixels;
+    int handle = make_buffer(width, height, path, sizeof(path), &pixels);
+    if (handle < 0) {
         free(window);
         return NULL;
     }
     window->surface = (struct vx_surface){pixels, width, height, width};
     window->buffer_handle = handle;
 
-    struct desktop_message m = {.type = DESKTOP_CREATE, .a = width, .b = height};
+    struct desktop_message m = {.type = DESKTOP_CREATE, .a = width, .b = height,
+                                .c = flags & VX_WINDOW_RESIZABLE ? DESKTOP_RESIZABLE : 0};
     size_t path_length = strlen(path);
     memcpy(m.text, path, path_length + 1);
     strncpy(m.text + path_length + 1, title ? title : "", sizeof(m.text) - path_length - 2);
-    if (send_message(&m)) {
-        vx_close(handle);
-        free(window);
-        return NULL;
-    }
-    /* Wait for the answer; events for other windows wait in the queue. */
-    for (;;) {
-        struct desktop_message reply;
-        if (receive_message(&reply)) {
-            window = NULL;
-            break;
-        }
-        if (reply.type == DESKTOP_CREATED) {
-            window->id = (int)reply.window;
-            break;
-        }
-        if (queued_count < QUEUE_MAX) {
-            queued[queued_count++] = reply;
-        }
-    }
+    struct desktop_message reply;
+    bool ok = send_message(&m) == 0 && wait_reply(DESKTOP_CREATED, &reply) == 0 && reply.window;
     vx_remove(path); /* Both sides have it mapped; the name isn't needed. */
-    if (!window || !window->id) {
+    if (!ok) {
+        vx_unmap(pixels, buffer_size(width, height));
         vx_close(handle);
         free(window);
         return NULL;
     }
+    window->id = (int)reply.window;
     return window;
+}
+
+struct vx_window *vx_window_create(const char *title, int width, int height) {
+    return vx_window_create_flags(title, width, height, 0);
+}
+
+int vx_window_resize(struct vx_window *window, int width, int height) {
+    if (width <= 0 || height <= 0 || width > 4096 || height > 4096) {
+        return -VX_EINVAL;
+    }
+    char path[64];
+    void *pixels;
+    int handle = make_buffer(width, height, path, sizeof(path), &pixels);
+    if (handle < 0) {
+        return handle;
+    }
+    struct desktop_message m = {.type = DESKTOP_BUFFER, .window = (uint32_t)window->id,
+                                .a = width, .b = height};
+    strncpy(m.text, path, sizeof(m.text) - 1);
+    struct desktop_message reply;
+    long error = send_message(&m);
+    if (!error) {
+        /* Answers for this window only; other windows' can't be mixed up. */
+        do {
+            error = wait_reply(DESKTOP_RESIZED, &reply);
+        } while (!error && reply.window != (uint32_t)window->id);
+    }
+    vx_remove(path);
+    if (error || reply.a == 0) {
+        vx_unmap(pixels, buffer_size(width, height));
+        vx_close(handle);
+        return error ? (int)error : -VX_EINVAL;
+    }
+    vx_unmap(window->surface.pixels, buffer_size(window->surface.width, window->surface.height));
+    vx_close(window->buffer_handle);
+    window->surface = (struct vx_surface){pixels, width, height, width};
+    window->buffer_handle = handle;
+    return 0;
 }
 
 void vx_window_present(struct vx_window *window, int x, int y, int width, int height) {
@@ -219,9 +273,7 @@ void vx_window_set_title(struct vx_window *window, const char *title) {
 void vx_window_destroy(struct vx_window *window) {
     struct desktop_message m = {.type = DESKTOP_DESTROY, .window = (uint32_t)window->id};
     send_message(&m);
-    unsigned long size = ((unsigned long)window->surface.width * window->surface.height * 4 +
-                          4095) & ~4095UL;
-    vx_unmap(window->surface.pixels, size);
+    vx_unmap(window->surface.pixels, buffer_size(window->surface.width, window->surface.height));
     vx_close(window->buffer_handle);
     free(window);
 }
@@ -249,6 +301,11 @@ static void to_event(const struct desktop_message *m, struct vx_gui_event *e) {
     case DESKTOP_FOCUS:
         e->type = VX_GUI_FOCUS;
         e->value = m->a;
+        break;
+    case DESKTOP_CONFIGURE:
+        e->type = VX_GUI_RESIZE;
+        e->width = m->a;
+        e->height = m->b;
         break;
     }
 }

@@ -80,6 +80,7 @@
 #define VX_SYS_MAP_FILE 54 /* vx_map_file(handle, offset, size, VX_MAP_* flags) -> address,
                               shared: writes reach the file (or device) and other mappings */
 #define VX_SYS_RESIZE 55   /* vx_resize(handle, size): a file's new length (zero-filled) */
+#define VX_SYS_TIME 56     /* vx_time(): seconds since 1970-01-01 UTC (0 if the clock is unknown) */
 
 #define VX_MAP_WRITE 0x1
 #define VX_MAP_EXEC 0x2

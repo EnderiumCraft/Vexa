@@ -44,6 +44,14 @@ struct vx_window {
 /* Opens a window (connecting to the desktop the first time). NULL if there
  * is no desktop running. */
 struct vx_window *vx_window_create(const char *title, int width, int height);
+/* The same, with VX_WINDOW_* flags. A resizable window gets VX_GUI_RESIZE
+ * events when the user resizes or maximizes it. */
+#define VX_WINDOW_RESIZABLE 0x1
+struct vx_window *vx_window_create_flags(const char *title, int width, int height,
+                                         unsigned flags);
+/* Gives the window a new size: a new, blank surface to draw on (present it
+ * all). Returns 0 or a negative VX_E* error (the old surface stays). */
+int vx_window_resize(struct vx_window *window, int width, int height);
 /* Shows what was drawn in the rectangle. */
 void vx_window_present(struct vx_window *window, int x, int y, int width, int height);
 void vx_window_set_title(struct vx_window *window, const char *title);
@@ -54,6 +62,7 @@ enum vx_gui_event_type {
     VX_GUI_POINTER = 2, /* x, y (in the window), buttons (bit 0 left, 1 right, 2 middle), wheel */
     VX_GUI_CLOSE = 3,   /* The user asked to close the window. */
     VX_GUI_FOCUS = 4,   /* value: 1 gained, 0 lost */
+    VX_GUI_RESIZE = 5,  /* width, height: what the user asked for (see vx_window_resize) */
 };
 
 struct vx_gui_event {
@@ -62,6 +71,7 @@ struct vx_gui_event {
     int x, y, buttons, wheel;
     int key, value;
     int character; /* What the key types, or 0 (arrows...). Ctrl+letter gives 1-26. */
+    int width, height;
 };
 
 /* Waits up to timeout_ms (-1: no limit) for an event. Returns 1 with one,

@@ -243,6 +243,10 @@ long vx_resize(int handle, unsigned long size) {
     return syscall2(VX_SYS_RESIZE, handle, size);
 }
 
+long vx_time(void) {
+    return syscall0(VX_SYS_TIME);
+}
+
 const char *vx_strerror(long error) {
     switch (-error) {
     case VX_ENOSYS: return "not supported";

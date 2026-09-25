@@ -201,6 +201,8 @@ Native track:
 - [x] A first Vexa compositor (`desktop`): windows as shared buffers, drawn on the
       screen, with a mouse pointer, keyboard focus, raising and dragging (0.12.0)
 - [x] A native terminal window (`term`) running `vsh` on a pseudo-terminal (0.12.0)
+- [x] A panel with the Vexa menu, window buttons and a clock; resizing, maximizing and
+      minimizing windows; Alt+Tab; a wallpaper; "About Vexa" (0.14.0)
 
 Linux track:
 - [x] The X Window System built from source with musl: the X libraries, X.Org's

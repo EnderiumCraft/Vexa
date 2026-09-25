@@ -13,6 +13,8 @@ long vx_yield(void);
 long vx_sleep(uint64_t ms);
 long vx_process_id(void);
 long vx_uptime(void);
+/* Seconds since 1970-01-01 UTC, from the real-time clock (0 if unknown). */
+long vx_time(void);
 
 /* Files. Paths are ordinary C strings here; libvexa passes their length. */
 int vx_open(const char *path, unsigned flags); /* Returns a handle. */

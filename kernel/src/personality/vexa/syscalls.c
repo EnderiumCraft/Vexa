@@ -2,6 +2,7 @@
 #include <vexa/abi.h>
 #include <vexa/arch.h>
 #include <vexa/cpu.h>
+#include <vexa/fs.h>
 #include <vexa/futex.h>
 #include <vexa/kprintf.h>
 #include <vexa/mm.h>
@@ -104,6 +105,11 @@ static int64_t sys_process_id(uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3
 static int64_t sys_uptime(uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3) {
     (void)a0, (void)a1, (void)a2, (void)a3;
     return (int64_t)timer_ms();
+}
+
+static int64_t sys_time(uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3) {
+    (void)a0, (void)a1, (void)a2, (void)a3;
+    return time_now();
 }
 
 /* ---- Files and other handles ---- */
@@ -1251,6 +1257,7 @@ static const syscall_fn syscalls[] = {
     [VX_SYS_CONTROL] = sys_control,
     [VX_SYS_MAP_FILE] = sys_map_file,
     [VX_SYS_RESIZE] = sys_resize,
+    [VX_SYS_TIME] = sys_time,
 };
 
 static void vexa_syscall(struct interrupt_frame *frame) {

@@ -117,8 +117,8 @@ TYPED_COMMANDS = [
     ("fetch @URL@/hello.txt", "Hello from the test's web server", 30),
     # Graphics: the mouse, then the desktop with a terminal window. Typing
     # goes to the window's shell; dragging its title bar moves it (the pointer
-    # starts in the middle of the 1280x800 screen; QEMU delivers moves of up
-    # to about 1000 pixels at a time); Ctrl+Alt+T opens another; Ctrl+Alt+Q
+    # starts in the middle of the 1280x800 screen; QEMU can drop part of a
+    # long move, so those are split); Ctrl+Alt+T opens another; Ctrl+Alt+Q
     # goes back.
     ("input", "PS/2 mouse", 10),
     ("desktop", 'desktop: window 1 "Terminal"', 30),
@@ -127,8 +127,27 @@ TYPED_COMMANDS = [
     ("@mouse_button 1", "desktop: left button at 200,70", 10),
     ("@mouse_move 100 50", None, 5),
     ("@mouse_button 0", "desktop: moved window 1 to 180,132", 10),
+    # Its bottom right corner (828,524) resizes it: 100 by 50 pixels bigger,
+    # which the terminal rounds to whole characters.
+    ("@mouse_move 264 202", None, 5),
+    ("@mouse_move 264 202", None, 5),
+    ("@mouse_button 1", "desktop: left button at 828,524", 10),
+    ("@mouse_move 100 50", None, 5),
+    ("@mouse_button 0", "desktop: window 1 is now 744x440", 10),
     ("@sendkey ctrl-alt-t", "desktop: window 2", 30),
     ("@type exit", "desktop: closed window 2", 30),
+    # The Vexa menu (top left) starts "About Vexa"; its close button closes it.
+    ("@mouse_move -299 -187", None, 5),
+    ("@mouse_move -299 -187", None, 5),
+    ("@mouse_move -299 -187", None, 5),
+    ("@mouse_button 1", "desktop: left button at 31,13", 10),
+    ("@mouse_button 0", None, 5),
+    ("@mouse_move 0 77", None, 5),
+    ("@mouse_button 1", 'desktop: window 3 "About Vexa"', 20),
+    ("@mouse_button 0", None, 5),
+    ("@mouse_move 463 37", None, 5),
+    ("@mouse_button 1", "desktop: asked window 3 to close", 10),
+    ("@mouse_button 0", "desktop: closed window 3", 10),
     ("@sendkey ctrl-alt-q", "desktop: back to the console", 20),
     ("Hello Vexa", "Hello: command not found", 10),
 ]

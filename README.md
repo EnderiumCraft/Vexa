@@ -37,7 +37,8 @@ runs an X server with `xterm` in a window on it. The kernel:
 - reads the PS/2 keyboard (US layout, Shift, Caps Lock, Ctrl) and mouse (with a scroll
   wheel), as input events programs can read
 - has a graphical desktop: a compositor that draws programs' windows (shared buffers)
-  on the screen, which you move by their title bars, and a terminal window
+  on the screen, with a panel (the Vexa menu, a button per window, a clock), windows
+  you move, resize, maximize and minimize, a terminal window and an "About Vexa" window
 - runs the X Window System through the Linux subsystem: Xvexa, an X server (X.Org's,
   built with musl) whose screen is a window on the desktop, and `xterm` in it
 - has a terminal with line editing, Ctrl-C (or Ctrl-\\) to stop programs and Ctrl-D for
@@ -84,7 +85,7 @@ the `vexa:/>` prompt:
 | `bash` | GNU bash, a Linux program (`exit` to go back); inside it, `ls`, `vi`, `grep`, `ps`, `top`... are BusyBox's |
 | `sh`, `busybox` | BusyBox's shell; `busybox` alone lists its commands |
 | `ln -s`, `cat /proc/meminfo` | symbolic links; `/proc` |
-| `desktop` | the graphical desktop, with a terminal window; Ctrl+Alt+T opens another, Ctrl+Alt+X starts X with an `xterm` (point at it to type into it), Ctrl+Alt+Q goes back to the text console |
+| `desktop` | the graphical desktop, with a terminal window; the Vexa menu (top left) starts programs, Alt+Tab switches windows, Ctrl+Alt+T opens a terminal, Ctrl+Alt+X starts X with an `xterm` (point at it to type into it), Ctrl+Alt+Q goes back to the text console |
 | `input` | the keyboard and mouse; `input watch 1` shows what the mouse reports |
 | `net` | network interfaces and addresses (Linux: `ifconfig`, `route -n`) |
 | `fetch http://example.com/` | downloads a web page (a Vexa program); `wget` is BusyBox's |

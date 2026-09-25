@@ -2,9 +2,13 @@
  *
  * It takes the screen, the keyboard and the mouse, and draws programs'
  * windows (buffers they share with it) with a title bar you can drag them
- * by. Clicking a window raises it and gives it the keyboard. Ctrl+Alt+T opens
- * a terminal, Ctrl+Alt+X starts X (Xvexa) with an xterm, and Ctrl+Alt+Q goes
- * back to the text console.
+ * by, and buttons to minimize, maximize and close them; resizable windows
+ * are resized by their right and bottom edges. A panel along the top has the
+ * Vexa menu (programs to start), a button for each window and a clock.
+ *
+ * Clicking a window raises it and gives it the keyboard. Alt+Tab goes to the
+ * next window, Ctrl+Alt+T opens a terminal, Ctrl+Alt+X starts X (Xvexa) with
+ * an xterm, and Ctrl+Alt+Q goes back to the text console.
  *
  * Programs talk to it over the local socket /run/desktop (see
  * <vexa/desktop.h>; <vexa/gui.h> has the easy way).
@@ -22,16 +26,33 @@
 #define MAX_WINDOWS 32
 #define MAX_CLIENTS 32
 #define MAX_CHILDREN 32
+#define PANEL_HEIGHT 26
 #define TITLE_HEIGHT 22
 #define BORDER 1
+#define GRIP 6         /* How far past a resizable window's edge you can grab it. */
+#define BUTTON_WIDTH 20 /* The title bar's buttons. */
+#define MIN_WIDTH 120
+#define MIN_HEIGHT 60
+#define DOUBLE_CLICK_MS 400
 
-#define COLOR_BACKGROUND 0x0b0613
-#define COLOR_BACKGROUND_TEXT 0x6e6485
+#define COLOR_WALLPAPER_TOP 0x2a1850
+#define COLOR_WALLPAPER_BOTTOM 0x0b0613
+#define COLOR_WALLPAPER_TEXT 0x3a2766
+#define COLOR_PANEL 0x140c24
+#define COLOR_PANEL_LINE 0x3a2a5c
+#define COLOR_PANEL_TEXT 0xe4dcf2
+#define COLOR_PANEL_DIM 0x8a80a3
+#define COLOR_BUTTON 0x2c1d4a
+#define COLOR_BUTTON_HOT 0x5b3a96
+#define COLOR_BUTTON_OFF 0x1c1230
 #define COLOR_TITLE 0x2c1d4a
 #define COLOR_TITLE_FOCUSED 0x5b3a96
 #define COLOR_TITLE_TEXT 0xe4dcf2
 #define COLOR_BORDER 0x3a2a5c
 #define COLOR_CLOSE 0xff6b81
+#define COLOR_OUTLINE 0xb07cff
+#define COLOR_MENU 0x1c1230
+#define COLOR_MENU_HOT 0x5b3a96
 
 struct rect {
     int x, y, width, height;
@@ -49,11 +70,14 @@ struct window {
     struct vx_surface content;
     size_t mapped_size;
     int buffer_handle;
+    bool resizable, minimized, maximized;
+    struct rect restore; /* Where it was before it was maximized (content). */
 };
 
 static struct vx_display_info display;
 static uint32_t *frame;             /* The display's memory. */
 static struct vx_surface screen;    /* Composed here, then copied to `frame`. */
+static struct vx_surface wallpaper; /* Drawn once. */
 static struct window *stack[MAX_WINDOWS]; /* Bottom to top. */
 static int window_count, next_window_id = 1;
 static struct window *focused;
@@ -62,10 +86,21 @@ static int listener, keyboard = -1, mouse = -1;
 static int children[MAX_CHILDREN];
 
 static int pointer_x, pointer_y, buttons;
-static struct window *dragging;
-static int drag_dx, drag_dy;
 static struct rect damage; /* What must be drawn again (width 0: nothing). */
 static bool quit;
+
+/* What the left button is doing. */
+static enum { IDLE, MOVING, RESIZING } drag;
+static struct window *dragged;
+static int drag_dx, drag_dy;
+static bool resize_right, resize_bottom;
+static struct rect outline; /* The size a window is being resized to (content). */
+static long last_click_ms;
+static struct window *last_click_window;
+
+static bool menu_open;
+static int menu_hot = -1;
+static long shown_minute = -1;
 
 static bool shift, ctrl, alt, caps_lock;
 
@@ -75,6 +110,17 @@ static struct rect frame_rect(const struct window *w) {
     return (struct rect){w->x - BORDER, w->y - TITLE_HEIGHT - BORDER,
                          w->content.width + 2 * BORDER,
                          w->content.height + TITLE_HEIGHT + 2 * BORDER};
+}
+
+/* Where clicks reach the window: its frame, and for a resizable one a little
+ * past its right and bottom edges. */
+static struct rect hit_rect(const struct window *w) {
+    struct rect r = frame_rect(w);
+    if (w->resizable && !w->maximized) {
+        r.width += GRIP;
+        r.height += GRIP;
+    }
+    return r;
 }
 
 static bool inside(struct rect r, int x, int y) {
@@ -97,21 +143,302 @@ static void add_damage(struct rect r) {
     damage = (struct rect){x0, y0, x1 - x0, y1 - y0};
 }
 
+static struct rect panel_rect(void) {
+    return (struct rect){0, 0, screen.width, PANEL_HEIGHT};
+}
+
+/* The space windows get when maximized. */
+static struct rect work_area(void) {
+    return (struct rect){BORDER, PANEL_HEIGHT + TITLE_HEIGHT + BORDER,
+                         screen.width - 2 * BORDER,
+                         screen.height - PANEL_HEIGHT - TITLE_HEIGHT - 2 * BORDER};
+}
+
+/* ---- The menu ---- */
+
+enum menu_action { RUN_TERMINAL, RUN_X, RUN_ABOUT, SEPARATOR, LEAVE };
+
+static const struct {
+    const char *label, *keys;
+    enum menu_action action;
+} menu_items[] = {
+    {"Terminal", "Ctrl+Alt+T", RUN_TERMINAL},
+    {"X with an xterm", "Ctrl+Alt+X", RUN_X},
+    {"About Vexa", "", RUN_ABOUT},
+    {"", "", SEPARATOR},
+    {"Back to the console", "Ctrl+Alt+Q", LEAVE},
+};
+#define MENU_ITEMS (int)(sizeof(menu_items) / sizeof(menu_items[0]))
+#define MENU_WIDTH 300
+#define MENU_ITEM_HEIGHT 24
+#define MENU_SEPARATOR_HEIGHT 9
+#define MENU_BUTTON_WIDTH 72
+
+static int menu_item_height(int i) {
+    return menu_items[i].action == SEPARATOR ? MENU_SEPARATOR_HEIGHT : MENU_ITEM_HEIGHT;
+}
+
+static struct rect menu_rect(void) {
+    int height = 8;
+    for (int i = 0; i < MENU_ITEMS; i++) {
+        height += menu_item_height(i);
+    }
+    return (struct rect){4, PANEL_HEIGHT, MENU_WIDTH, height};
+}
+
+/* The menu item at a point, or -1. */
+static int menu_item_at(int x, int y) {
+    struct rect r = menu_rect();
+    if (!menu_open || !inside(r, x, y)) {
+        return -1;
+    }
+    int top = r.y + 4;
+    for (int i = 0; i < MENU_ITEMS; i++) {
+        int h = menu_item_height(i);
+        if (y >= top && y < top + h) {
+            return menu_items[i].action == SEPARATOR ? -1 : i;
+        }
+        top += h;
+    }
+    return -1;
+}
+
+static void set_menu(bool open) {
+    if (menu_open != open) {
+        menu_open = open;
+        menu_hot = -1;
+        struct rect r = menu_rect();
+        add_damage(r);
+        add_damage(panel_rect());
+    }
+}
+
+/* ---- The panel's window buttons ---- */
+
+/* Windows in the order they were opened (their buttons' order). */
+static int windows_by_id(struct window **out) {
+    int n = 0;
+    for (int i = 0; i < window_count; i++) {
+        out[n++] = stack[i];
+    }
+    for (int i = 1; i < n; i++) {
+        for (int j = i; j > 0 && out[j - 1]->id > out[j]->id; j--) {
+            struct window *t = out[j];
+            out[j] = out[j - 1];
+            out[j - 1] = t;
+        }
+    }
+    return n;
+}
+
+#define CLOCK_WIDTH (18 * FONT_WIDTH)
+
+static struct rect task_button(int index, int count) {
+    int left = MENU_BUTTON_WIDTH + 12;
+    int room = screen.width - left - CLOCK_WIDTH - 24;
+    int width = count ? room / count - 4 : 0;
+    if (width > 180) {
+        width = 180;
+    }
+    return (struct rect){left + index * (width + 4), 3, width, PANEL_HEIGHT - 6};
+}
+
 /* ---- Drawing ---- */
 
 #define CURSOR_WIDTH 12
 #define CURSOR_HEIGHT 19
 
-/* An arrow: '#' outline, '.' fill. */
+/* An arrow, and the one for resizing: '#' outline, '.' fill. */
 static const char *const cursor_shape[CURSOR_HEIGHT] = {
     "#           ", "##          ", "#.#         ", "#..#        ", "#...#       ",
     "#....#      ", "#.....#     ", "#......#    ", "#.......#   ", "#........#  ",
     "#.........# ", "#..........#", "#......#####", "#...#..#    ", "#..# #..#   ",
     "#.#  #..#   ", "##    #..#  ", "#     #..#  ", "       ##   ",
 };
+static const char *const resize_shape[CURSOR_HEIGHT] = {
+    "######      ", "#....#      ", "#...#       ", "#....#      ", "#.#..#      ",
+    "## #..#     ", "    #..#    ", "     #..# ##", "      #..#.#", "       #....#",
+    "       #...#", "      #....#", "      ######", "            ", "            ",
+    "            ", "            ", "            ", "            ",
+};
+
+static bool resize_cursor;
 
 static struct rect cursor_rect(void) {
-    return (struct rect){pointer_x, pointer_y, CURSOR_WIDTH, CURSOR_HEIGHT};
+    return (struct rect){pointer_x, pointer_y, CURSOR_WIDTH + 1, CURSOR_HEIGHT};
+}
+
+/* Text cut to fit `width` pixels, with "..." when it doesn't. */
+static void draw_text_fit(struct vx_surface *s, int x, int y, int width, const char *text,
+                          uint32_t color) {
+    int fits = width / FONT_WIDTH;
+    int length = (int)strlen(text);
+    if (fits <= 0) {
+        return;
+    }
+    char line[128];
+    if (length <= fits) {
+        vx_draw_text(s, x, y, text, color, VX_TRANSPARENT);
+        return;
+    }
+    if (fits > (int)sizeof(line) - 1) {
+        fits = sizeof(line) - 1;
+    }
+    int keep = fits > 3 ? fits - 3 : fits;
+    memcpy(line, text, (size_t)keep);
+    strcpy(line + keep, fits > 3 ? "..." : "");
+    vx_draw_text(s, x, y, line, color, VX_TRANSPARENT);
+}
+
+/* Draws a character `scale` times its size. */
+static void draw_big_char(struct vx_surface *s, int x, int y, char c, int scale, uint32_t color) {
+    if (c < FONT_FIRST_CHAR || c >= FONT_FIRST_CHAR + FONT_GLYPH_COUNT) {
+        return;
+    }
+    const uint8_t *rows = font_glyphs[c - FONT_FIRST_CHAR];
+    for (int r = 0; r < FONT_HEIGHT; r++) {
+        for (int col = 0; col < FONT_WIDTH; col++) {
+            if (rows[r] & (0x80 >> col)) {
+                vx_fill(s, x + col * scale, y + r * scale, scale, scale, color);
+            }
+        }
+    }
+}
+
+static uint32_t mix(uint32_t a, uint32_t b, int num, int den) {
+    uint32_t out = 0;
+    for (int shift = 0; shift <= 16; shift += 8) {
+        int ca = (a >> shift) & 0xff, cb = (b >> shift) & 0xff;
+        out |= (uint32_t)(ca + (cb - ca) * num / den) << shift;
+    }
+    return out;
+}
+
+static void make_wallpaper(void) {
+    for (int y = 0; y < wallpaper.height; y++) {
+        uint32_t color = mix(COLOR_WALLPAPER_TOP, COLOR_WALLPAPER_BOTTOM, y, wallpaper.height);
+        uint32_t *row = wallpaper.pixels + (long)y * wallpaper.stride;
+        for (int x = 0; x < wallpaper.width; x++) {
+            row[x] = color;
+        }
+    }
+    /* The name, large, in the bottom right corner. */
+    int scale = wallpaper.width >= 1024 ? 8 : 4;
+    const char *name = "Vexa";
+    int width = (int)strlen(name) * FONT_WIDTH * scale;
+    int x = wallpaper.width - width - 48, y = wallpaper.height - FONT_HEIGHT * scale - 40;
+    for (int i = 0; name[i]; i++) {
+        draw_big_char(&wallpaper, x + i * FONT_WIDTH * scale, y, name[i], scale,
+                      COLOR_WALLPAPER_TEXT);
+    }
+    char version[64];
+    struct vx_system_info info;
+    snprintf(version, sizeof(version), "version %s",
+             vx_system_info(&info) == 0 ? info.version : "?");
+    vx_draw_text(&wallpaper, x + 4, y + FONT_HEIGHT * scale + 4, version, COLOR_WALLPAPER_TEXT,
+                 VX_TRANSPARENT);
+}
+
+static void draw_title_bar(struct vx_surface *view, int ox, int oy, struct window *w) {
+    int x = ox + w->x, y = oy + w->y - TITLE_HEIGHT, width = w->content.width;
+    vx_fill(view, x, y, width, TITLE_HEIGHT, w == focused ? COLOR_TITLE_FOCUSED : COLOR_TITLE);
+    int button_count = w->resizable ? 3 : 2;
+    draw_text_fit(view, x + 8, y + 3, width - 16 - button_count * BUTTON_WIDTH, w->title,
+                  COLOR_TITLE_TEXT);
+    /* Close: an x at the right end; then maximize (a box) and minimize (a bar). */
+    int bx = x + width - BUTTON_WIDTH;
+    vx_draw_char(view, bx + 4, y + 3, 'x', COLOR_CLOSE, VX_TRANSPARENT);
+    if (w->resizable) {
+        bx -= BUTTON_WIDTH;
+        int size = w->maximized ? 7 : 9;
+        int bxx = bx + 5, byy = y + 6;
+        vx_fill(view, bxx, byy, size, 2, COLOR_TITLE_TEXT);
+        vx_fill(view, bxx, byy + size - 1, size, 1, COLOR_TITLE_TEXT);
+        vx_fill(view, bxx, byy, 1, size, COLOR_TITLE_TEXT);
+        vx_fill(view, bxx + size - 1, byy, 1, size, COLOR_TITLE_TEXT);
+        if (w->maximized) { /* Two boxes: "restore". */
+            vx_fill(view, bxx + 2, byy - 2, size, 1, COLOR_TITLE_TEXT);
+            vx_fill(view, bxx + size + 1, byy - 2, 1, size, COLOR_TITLE_TEXT);
+        }
+    }
+    bx -= BUTTON_WIDTH;
+    vx_fill(view, bx + 5, y + 14, 9, 2, COLOR_TITLE_TEXT);
+}
+
+static void draw_panel(struct vx_surface *view, int ox, int oy) {
+    vx_fill(view, ox, oy, screen.width, PANEL_HEIGHT - 1, COLOR_PANEL);
+    vx_fill(view, ox, oy + PANEL_HEIGHT - 1, screen.width, 1, COLOR_PANEL_LINE);
+    /* The Vexa menu's button: a diamond and the name. */
+    vx_fill(view, ox + 3, oy + 3, MENU_BUTTON_WIDTH, PANEL_HEIGHT - 6,
+            menu_open ? COLOR_BUTTON_HOT : COLOR_BUTTON);
+    for (int i = 0; i < 5; i++) {
+        vx_fill(view, ox + 14 - i, oy + 8 + i, 2 * i + 1, 1, COLOR_OUTLINE);
+        vx_fill(view, ox + 14 - i, oy + 16 - i, 2 * i + 1, 1, COLOR_OUTLINE);
+    }
+    vx_draw_text(view, ox + 26, oy + 5, "Vexa", COLOR_PANEL_TEXT, VX_TRANSPARENT);
+
+    struct window *list[MAX_WINDOWS];
+    int n = windows_by_id(list);
+    for (int i = 0; i < n; i++) {
+        struct rect b = task_button(i, n);
+        struct window *w = list[i];
+        uint32_t color = w->minimized ? COLOR_BUTTON_OFF
+                         : w == focused ? COLOR_BUTTON_HOT : COLOR_BUTTON;
+        vx_fill(view, ox + b.x, oy + b.y, b.width, b.height, color);
+        draw_text_fit(view, ox + b.x + 8, oy + b.y + 2, b.width - 12, w->title,
+                      w->minimized ? COLOR_PANEL_DIM : COLOR_PANEL_TEXT);
+    }
+
+    /* The clock (UTC: Vexa doesn't know time zones yet). */
+    long now = vx_time();
+    if (now > 0) {
+        static const char *const days[] = {"Thu", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed"};
+        static const char *const months[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                                             "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+        long day_number = now / 86400, seconds = now % 86400;
+        /* Civil date from days since 1970 (Howard Hinnant's algorithm). */
+        long z = day_number + 719468, era = z / 146097, doe = z - era * 146097;
+        long yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+        long doy = doe - (365 * yoe + yoe / 4 - yoe / 100), mp = (5 * doy + 2) / 153;
+        long mday = doy - (153 * mp + 2) / 5 + 1, month = mp < 10 ? mp + 3 : mp - 9;
+        char text[32];
+        snprintf(text, sizeof(text), "%s %ld %s  %02ld:%02ld", days[day_number % 7], mday,
+                 months[month - 1], seconds / 3600, seconds / 60 % 60);
+        int width = (int)strlen(text) * FONT_WIDTH;
+        vx_draw_text(view, ox + screen.width - width - 12, oy + 5, text, COLOR_PANEL_TEXT,
+                     VX_TRANSPARENT);
+    }
+}
+
+static void draw_menu(struct vx_surface *view, int ox, int oy) {
+    struct rect r = menu_rect();
+    vx_fill(view, ox + r.x, oy + r.y, r.width, r.height, COLOR_PANEL_LINE);
+    vx_fill(view, ox + r.x + 1, oy + r.y, r.width - 2, r.height - 1, COLOR_MENU);
+    int top = r.y + 4;
+    for (int i = 0; i < MENU_ITEMS; i++) {
+        int h = menu_item_height(i);
+        if (menu_items[i].action == SEPARATOR) {
+            vx_fill(view, ox + r.x + 8, oy + top + h / 2, r.width - 16, 1, COLOR_PANEL_LINE);
+        } else {
+            if (i == menu_hot) {
+                vx_fill(view, ox + r.x + 4, oy + top, r.width - 8, h, COLOR_MENU_HOT);
+            }
+            vx_draw_text(view, ox + r.x + 12, oy + top + 4, menu_items[i].label,
+                         COLOR_PANEL_TEXT, VX_TRANSPARENT);
+            int keys = (int)strlen(menu_items[i].keys) * FONT_WIDTH;
+            vx_draw_text(view, ox + r.x + r.width - keys - 12, oy + top + 4, menu_items[i].keys,
+                         COLOR_PANEL_DIM, VX_TRANSPARENT);
+        }
+        top += h;
+    }
+}
+
+/* A rectangle's outline, `thickness` pixels wide, inside it. */
+static void draw_outline(struct vx_surface *view, struct rect r, int thickness, uint32_t color) {
+    vx_fill(view, r.x, r.y, r.width, thickness, color);
+    vx_fill(view, r.x, r.y + r.height - thickness, r.width, thickness, color);
+    vx_fill(view, r.x, r.y, thickness, r.height, color);
+    vx_fill(view, r.x + r.width - thickness, r.y, thickness, r.height, color);
 }
 
 /* Draws everything that overlaps `area` into the screen buffer. */
@@ -135,28 +462,33 @@ static void compose(struct rect area) {
     struct vx_surface view = {screen.pixels + (long)area.y * screen.stride + area.x, area.width,
                               area.height, screen.stride};
     int ox = -area.x, oy = -area.y;
-    vx_fill(&view, 0, 0, area.width, area.height, COLOR_BACKGROUND);
-    const char *hint = "Vexa    Ctrl+Alt+T: terminal    Ctrl+Alt+X: X with an xterm    "
-                       "Ctrl+Alt+Q: back to the console";
-    vx_draw_text(&view, ox + 16, oy + screen.height - FONT_HEIGHT - 12, hint,
-                 COLOR_BACKGROUND_TEXT, VX_TRANSPARENT);
+    vx_blit(&view, 0, 0, &wallpaper, area.x, area.y, area.width, area.height);
     for (int i = 0; i < window_count; i++) {
         struct window *w = stack[i];
+        if (w->minimized) {
+            continue;
+        }
         struct rect f = frame_rect(w);
         vx_fill(&view, ox + f.x, oy + f.y, f.width, f.height, COLOR_BORDER);
-        vx_fill(&view, ox + w->x, oy + w->y - TITLE_HEIGHT, w->content.width, TITLE_HEIGHT,
-                w == focused ? COLOR_TITLE_FOCUSED : COLOR_TITLE);
-        vx_draw_text(&view, ox + w->x + 8, oy + w->y - TITLE_HEIGHT + 3, w->title,
-                     COLOR_TITLE_TEXT, VX_TRANSPARENT);
-        /* The close box: an x at the right end of the title bar. */
-        vx_draw_char(&view, ox + w->x + w->content.width - 16, oy + w->y - TITLE_HEIGHT + 3,
-                     'x', COLOR_CLOSE, VX_TRANSPARENT);
+        draw_title_bar(&view, ox, oy, w);
         vx_blit(&view, ox + w->x, oy + w->y, &w->content, 0, 0, w->content.width,
                 w->content.height);
     }
+    if (drag == RESIZING) {
+        struct rect r = {ox + outline.x - BORDER, oy + outline.y - TITLE_HEIGHT - BORDER,
+                         outline.width + 2 * BORDER, outline.height + TITLE_HEIGHT + 2 * BORDER};
+        draw_outline(&view, r, 2, COLOR_OUTLINE);
+    }
+    if (area.y < PANEL_HEIGHT) {
+        draw_panel(&view, ox, oy);
+    }
+    if (menu_open) {
+        draw_menu(&view, ox, oy);
+    }
+    const char *const *shape = resize_cursor ? resize_shape : cursor_shape;
     for (int row = 0; row < CURSOR_HEIGHT; row++) {
-        for (int col = 0; col < CURSOR_WIDTH; col++) {
-            char c = cursor_shape[row][col];
+        for (int col = 0; shape[row][col]; col++) {
+            char c = shape[row][col];
             int x = pointer_x + col + ox, y = pointer_y + row + oy;
             if (c != ' ' && x >= 0 && y >= 0 && x < view.width && y < view.height) {
                 view.pixels[(long)y * view.stride + x] = c == '#' ? 0x000000 : 0xffffff;
@@ -228,6 +560,17 @@ static void set_focus(struct window *w) {
         send_to(w->client, &m);
         add_damage(frame_rect(w));
     }
+    add_damage(panel_rect());
+}
+
+/* The top window that isn't minimized, or NULL. */
+static struct window *top_window(void) {
+    for (int i = window_count - 1; i >= 0; i--) {
+        if (!stack[i]->minimized) {
+            return stack[i];
+        }
+    }
+    return NULL;
 }
 
 static void raise_window(struct window *w) {
@@ -243,6 +586,57 @@ static void raise_window(struct window *w) {
     add_damage(frame_rect(w));
 }
 
+static void activate(struct window *w) {
+    if (w->minimized) {
+        w->minimized = false;
+        add_damage(frame_rect(w));
+        add_damage(panel_rect());
+    }
+    raise_window(w);
+    set_focus(w);
+}
+
+static void minimize(struct window *w) {
+    if (w->minimized) {
+        return;
+    }
+    w->minimized = true;
+    add_damage(frame_rect(w));
+    add_damage(panel_rect());
+    if (focused == w) {
+        set_focus(top_window());
+    }
+}
+
+/* Asks the window's program for a new size (it answers with a new buffer). */
+static void configure(struct window *w, int width, int height) {
+    struct desktop_message m = {.type = DESKTOP_CONFIGURE, .window = (uint32_t)w->id,
+                                .a = width, .b = height};
+    send_to(w->client, &m);
+}
+
+static void toggle_maximized(struct window *w) {
+    if (!w->resizable) {
+        return;
+    }
+    add_damage(frame_rect(w));
+    if (w->maximized) {
+        w->maximized = false;
+        w->x = w->restore.x;
+        w->y = w->restore.y;
+        configure(w, w->restore.width, w->restore.height);
+    } else {
+        w->maximized = true;
+        w->restore = (struct rect){w->x, w->y, w->content.width, w->content.height};
+        struct rect area = work_area();
+        w->x = area.x;
+        w->y = area.y;
+        configure(w, area.width, area.height);
+    }
+    add_damage(frame_rect(w));
+    printf("desktop: %s window %d\n", w->maximized ? "maximized" : "restored", w->id);
+}
+
 static struct window *find_window(int client, uint32_t id) {
     for (int i = 0; i < window_count; i++) {
         if (stack[i]->id == (int)id && stack[i]->client == client) {
@@ -253,8 +647,11 @@ static struct window *find_window(int client, uint32_t id) {
 }
 
 static struct window *window_at(int x, int y) {
+    if (y < PANEL_HEIGHT) {
+        return NULL;
+    }
     for (int i = window_count - 1; i >= 0; i--) {
-        if (inside(frame_rect(stack[i]), x, y)) {
+        if (!stack[i]->minimized && inside(hit_rect(stack[i]), x, y)) {
             return stack[i];
         }
     }
@@ -263,23 +660,52 @@ static struct window *window_at(int x, int y) {
 
 static void destroy_window(struct window *w) {
     add_damage(frame_rect(w));
+    add_damage(panel_rect());
     int at = 0;
     while (stack[at] != w) {
         at++;
     }
     memmove(stack + at, stack + at + 1, (size_t)(window_count - at - 1) * sizeof(stack[0]));
     window_count--;
-    if (dragging == w) {
-        dragging = NULL;
+    if (dragged == w) {
+        dragged = NULL;
+        if (drag == RESIZING) {
+            add_damage((struct rect){outline.x - 8, outline.y - TITLE_HEIGHT - 8,
+                                     outline.width + 16, outline.height + TITLE_HEIGHT + 16});
+        }
+        drag = IDLE;
+    }
+    if (last_click_window == w) {
+        last_click_window = NULL;
     }
     if (focused == w) {
         focused = NULL;
-        set_focus(window_count ? stack[window_count - 1] : NULL);
+        set_focus(top_window());
     }
     vx_unmap(w->content.pixels, w->mapped_size);
     vx_close(w->buffer_handle);
     printf("desktop: closed window %d \"%s\"\n", w->id, w->title);
     free(w);
+}
+
+/* Maps a program's buffer file. False if it isn't one. */
+static bool map_buffer(const char *path, int width, int height, int *handle, void **pixels,
+                       size_t *size) {
+    if (width <= 0 || height <= 0 || width > 4096 || height > 4096 ||
+        strncmp(path, "/run/shm/", 9) != 0) {
+        return false;
+    }
+    *size = ((size_t)width * height * 4 + 4095) & ~(size_t)4095;
+    *handle = vx_open(path, VX_OPEN_READ);
+    if (*handle < 0) {
+        return false;
+    }
+    *pixels = vx_map_file(*handle, 0, *size, 0);
+    if (!*pixels) {
+        vx_close(*handle);
+        return false;
+    }
+    return true;
 }
 
 static void create_window(int client, struct desktop_message *m) {
@@ -289,30 +715,17 @@ static void create_window(int client, struct desktop_message *m) {
     size_t path_length = strlen(path);
     const char *title = path_length + 1 < sizeof(m->text) ? path + path_length + 1 : "";
     int width = m->a, height = m->b;
-    struct window *w = NULL;
-    if (window_count < MAX_WINDOWS && width > 0 && height > 0 && width <= 4096 &&
-        height <= 4096 && strncmp(path, "/run/shm/", 9) == 0) {
-        w = calloc(1, sizeof(*w));
+    struct window *w = window_count < MAX_WINDOWS ? calloc(1, sizeof(*w)) : NULL;
+    void *pixels;
+    if (w && !map_buffer(path, width, height, &w->buffer_handle, &pixels, &w->mapped_size)) {
+        free(w);
+        w = NULL;
     }
     if (w) {
-        w->mapped_size = ((size_t)width * height * 4 + 4095) & ~(size_t)4095;
-        w->buffer_handle = vx_open(path, VX_OPEN_READ);
-        void *pixels = w->buffer_handle >= 0
-                           ? vx_map_file(w->buffer_handle, 0, w->mapped_size, 0)
-                           : NULL;
-        if (!pixels) {
-            if (w->buffer_handle >= 0) {
-                vx_close(w->buffer_handle);
-            }
-            free(w);
-            w = NULL;
-        } else {
-            w->content = (struct vx_surface){pixels, width, height, width};
-        }
-    }
-    if (w) {
+        w->content = (struct vx_surface){pixels, width, height, width};
         w->id = next_window_id++;
         w->client = client;
+        w->resizable = m->c & DESKTOP_RESIZABLE;
         strncpy(w->title, title, sizeof(w->title) - 1);
         /* Cascade new windows from the top left. */
         int n = (w->id - 1) % 8;
@@ -322,14 +735,37 @@ static void create_window(int client, struct desktop_message *m) {
             w->x = screen.width > width ? (screen.width - width) / 2 : BORDER;
         }
         if (w->y + height > screen.height) {
-            w->y = TITLE_HEIGHT + BORDER;
+            w->y = PANEL_HEIGHT + TITLE_HEIGHT + BORDER;
         }
         stack[window_count++] = w;
         add_damage(frame_rect(w));
+        add_damage(panel_rect());
         set_focus(w);
         reply.window = (uint32_t)w->id;
         printf("desktop: window %d \"%s\" (%dx%d) at %d,%d\n", w->id, w->title, width, height,
                w->x, w->y);
+    }
+    send_to(client, &reply);
+}
+
+/* A program's new buffer, at a new size. */
+static void replace_buffer(int client, struct window *w, struct desktop_message *m) {
+    struct desktop_message reply = {.type = DESKTOP_RESIZED, .window = m->window};
+    m->text[sizeof(m->text) - 1] = '\0';
+    int handle;
+    void *pixels;
+    size_t size;
+    if (w && map_buffer(m->text, m->a, m->b, &handle, &pixels, &size)) {
+        add_damage(frame_rect(w));
+        vx_unmap(w->content.pixels, w->mapped_size);
+        vx_close(w->buffer_handle);
+        w->content = (struct vx_surface){pixels, m->a, m->b, m->a};
+        w->buffer_handle = handle;
+        w->mapped_size = size;
+        add_damage(frame_rect(w));
+        reply.a = m->a;
+        reply.b = m->b;
+        printf("desktop: window %d is now %dx%d\n", w->id, m->a, m->b);
     }
     send_to(client, &reply);
 }
@@ -360,7 +796,7 @@ static void client_message(int client) {
         create_window(client, &m);
         break;
     case DESKTOP_PRESENT:
-        if (w) {
+        if (w && !w->minimized) {
             add_damage((struct rect){w->x + m.a, w->y + m.b, m.c, m.d});
         }
         break;
@@ -369,12 +805,16 @@ static void client_message(int client) {
             m.text[sizeof(m.text) - 1] = '\0';
             strncpy(w->title, m.text, sizeof(w->title) - 1);
             add_damage(frame_rect(w));
+            add_damage(panel_rect());
         }
         break;
     case DESKTOP_DESTROY:
         if (w) {
             destroy_window(w);
         }
+        break;
+    case DESKTOP_BUFFER:
+        replace_buffer(client, w, &m);
         break;
     }
 }
@@ -414,6 +854,16 @@ static void reap_children(void) {
     }
 }
 
+static void run(enum menu_action action) {
+    switch (action) {
+    case RUN_TERMINAL: launch("/bin/term"); break;
+    case RUN_X: launch("/linux/usr/bin/xsession"); break; /* If the Linux subsystem is there. */
+    case RUN_ABOUT: launch("/bin/about"); break;
+    case LEAVE: quit = true; break;
+    case SEPARATOR: break;
+    }
+}
+
 /* ---- Input ---- */
 
 /* What a key types on a US keyboard, by key code (Linux's, 0 to 57). */
@@ -435,6 +885,20 @@ static int character_of(int key) {
     return (unsigned char)c;
 }
 
+/* Alt+Tab: the window opened after the focused one (round the list). */
+static void next_window(void) {
+    struct window *list[MAX_WINDOWS];
+    int n = windows_by_id(list);
+    if (n == 0) {
+        return;
+    }
+    int at = 0;
+    while (at < n && list[at] != focused) {
+        at++;
+    }
+    activate(list[at < n ? (at + 1) % n : 0]);
+}
+
 static void key_event(int key, int value) {
     bool down = value != 0;
     /* Modifiers change what keys type here, and go to the window too (an X
@@ -454,17 +918,25 @@ static void key_event(int key, int value) {
     }
     if (ctrl && alt && value == 1) {
         if (key == 20) { /* T */
-            launch("/bin/term");
+            run(RUN_TERMINAL);
             return;
         }
-        if (key == 45) { /* X: X in a window, if the Linux subsystem is there */
-            launch("/linux/usr/bin/xsession");
+        if (key == 45) { /* X */
+            run(RUN_X);
             return;
         }
         if (key == 16) { /* Q */
-            quit = true;
+            run(LEAVE);
             return;
         }
+    }
+    if (alt && !ctrl && key == 15 && value != 0) { /* Tab */
+        next_window();
+        return;
+    }
+    if (menu_open && key == 1 && value == 1) { /* Escape */
+        set_menu(false);
+        return;
     }
     if (focused) {
         struct desktop_message m = {.type = DESKTOP_KEY, .window = (uint32_t)focused->id,
@@ -480,37 +952,143 @@ static void send_pointer(struct window *w, int wheel) {
     send_to(w->client, &m);
 }
 
+/* Which edges of a resizable window the pointer is on (for resizing). */
+static bool on_edges(struct window *w, int x, int y, bool *right, bool *bottom) {
+    if (!w->resizable || w->maximized) {
+        return false;
+    }
+    struct rect f = frame_rect(w);
+    *right = x >= f.x + f.width - 3;
+    *bottom = y >= f.y + f.height - 3;
+    return *right || *bottom;
+}
+
+static struct rect outline_damage(void) {
+    return (struct rect){outline.x - BORDER - 2, outline.y - TITLE_HEIGHT - BORDER - 2,
+                         outline.width + 2 * BORDER + 4,
+                         outline.height + TITLE_HEIGHT + 2 * BORDER + 4};
+}
+
+/* A click on the panel. */
+static void panel_click(void) {
+    if (pointer_x < MENU_BUTTON_WIDTH + 4) {
+        set_menu(!menu_open);
+        return;
+    }
+    set_menu(false);
+    struct window *list[MAX_WINDOWS];
+    int n = windows_by_id(list);
+    for (int i = 0; i < n; i++) {
+        if (inside(task_button(i, n), pointer_x, pointer_y)) {
+            if (list[i] == focused && !list[i]->minimized) {
+                minimize(list[i]);
+            } else {
+                activate(list[i]);
+            }
+            return;
+        }
+    }
+}
+
+/* A click on a window's title bar: its buttons, or the start of a move. */
+static void title_click(struct window *w) {
+    int right = w->x + w->content.width;
+    int button = pointer_x >= right - BUTTON_WIDTH ? 0
+                 : pointer_x >= right - 2 * BUTTON_WIDTH ? 1
+                 : pointer_x >= right - 3 * BUTTON_WIDTH ? 2 : -1;
+    if (!w->resizable && button == 2) {
+        button = -1;
+    }
+    if (button == 0) {
+        struct desktop_message m = {.type = DESKTOP_CLOSE, .window = (uint32_t)w->id};
+        send_to(w->client, &m);
+        printf("desktop: asked window %d to close\n", w->id);
+        return;
+    }
+    if ((button == 1 && w->resizable) || (button == 2 && w->resizable)) {
+        if (button == 1) {
+            toggle_maximized(w);
+        } else {
+            minimize(w);
+        }
+        return;
+    }
+    if (button == 1) { /* Not resizable: the second button minimizes. */
+        minimize(w);
+        return;
+    }
+    long now = vx_uptime();
+    if (last_click_window == w && now - last_click_ms < DOUBLE_CLICK_MS) {
+        last_click_window = NULL;
+        toggle_maximized(w);
+        return;
+    }
+    last_click_window = w;
+    last_click_ms = now;
+    drag = MOVING;
+    dragged = w;
+    drag_dx = pointer_x - w->x;
+    drag_dy = pointer_y - w->y;
+}
+
 static void button_event(int bit, bool down) {
     int before = buttons;
     buttons = down ? buttons | bit : buttons & ~bit;
-    struct window *w = window_at(pointer_x, pointer_y);
-    if (bit == 1 && down && !(before & 1)) {
+    bool left_down = bit == 1 && down && !(before & 1);
+    if (left_down) {
         printf("desktop: left button at %d,%d\n", pointer_x, pointer_y);
     }
-    if (bit == 1 && down && !(before & 1) && w) {
-        raise_window(w);
-        set_focus(w);
-        bool title = pointer_y < w->y;
-        bool close = title && pointer_x >= w->x + w->content.width - 20;
-        if (close) {
-            struct desktop_message m = {.type = DESKTOP_CLOSE, .window = (uint32_t)w->id};
-            send_to(w->client, &m);
-            printf("desktop: asked window %d to close\n", w->id);
-            return;
+    if (left_down && menu_open && pointer_y >= PANEL_HEIGHT) {
+        /* A click on an item runs it; anywhere else it just closes the menu. */
+        int item = menu_item_at(pointer_x, pointer_y);
+        if (item >= 0 || !inside(menu_rect(), pointer_x, pointer_y)) {
+            set_menu(false);
         }
-        if (title) {
-            dragging = w;
-            drag_dx = pointer_x - w->x;
-            drag_dy = pointer_y - w->y;
-            return;
+        if (item >= 0) {
+            run(menu_items[item].action);
         }
-    }
-    if (bit == 1 && !down && dragging) {
-        printf("desktop: moved window %d to %d,%d\n", dragging->id, dragging->x, dragging->y);
-        dragging = NULL;
         return;
     }
-    if (w && pointer_y >= w->y) {
+    if (left_down && pointer_y < PANEL_HEIGHT) {
+        panel_click();
+        return;
+    }
+    struct window *w = window_at(pointer_x, pointer_y);
+    if (left_down && w) {
+        activate(w);
+        bool right, bottom;
+        if (on_edges(w, pointer_x, pointer_y, &right, &bottom)) {
+            drag = RESIZING;
+            dragged = w;
+            resize_right = right;
+            resize_bottom = bottom;
+            drag_dx = w->x + w->content.width - pointer_x;
+            drag_dy = w->y + w->content.height - pointer_y;
+            outline = (struct rect){w->x, w->y, w->content.width, w->content.height};
+            add_damage(outline_damage());
+            return;
+        }
+        if (pointer_y < w->y) {
+            title_click(w);
+            return;
+        }
+    }
+    if (bit == 1 && !down && drag != IDLE) {
+        struct window *d = dragged;
+        if (drag == MOVING && d) {
+            printf("desktop: moved window %d to %d,%d\n", d->id, d->x, d->y);
+        } else if (drag == RESIZING && d) {
+            add_damage(outline_damage());
+            if (outline.width != d->content.width || outline.height != d->content.height) {
+                configure(d, outline.width, outline.height);
+            }
+        }
+        drag = IDLE;
+        dragged = NULL;
+        return;
+    }
+    if (w && drag == IDLE && pointer_y >= w->y && pointer_x < w->x + w->content.width &&
+        pointer_y < w->y + w->content.height) {
         send_pointer(w, 0);
     }
 }
@@ -522,20 +1100,49 @@ static void pointer_moved(int dx, int dy, int wheel) {
         pointer_y += dy;
         pointer_x = pointer_x < 0 ? 0 : pointer_x >= screen.width ? screen.width - 1 : pointer_x;
         pointer_y = pointer_y < 0 ? 0 : pointer_y >= screen.height ? screen.height - 1 : pointer_y;
-        add_damage(cursor_rect());
-        if (dragging) {
-            add_damage(frame_rect(dragging));
-            dragging->x = pointer_x - drag_dx;
-            dragging->y = pointer_y - drag_dy;
-            if (dragging->y < TITLE_HEIGHT + BORDER) {
-                dragging->y = TITLE_HEIGHT + BORDER; /* Keep the title bar on the screen. */
+        if (drag == MOVING && dragged) {
+            add_damage(frame_rect(dragged));
+            dragged->x = pointer_x - drag_dx;
+            dragged->y = pointer_y - drag_dy;
+            if (dragged->y < PANEL_HEIGHT + TITLE_HEIGHT + BORDER) {
+                dragged->y = PANEL_HEIGHT + TITLE_HEIGHT + BORDER; /* Keep the title bar out. */
             }
-            add_damage(frame_rect(dragging));
+            dragged->maximized = false;
+            add_damage(frame_rect(dragged));
+        } else if (drag == RESIZING && dragged) {
+            add_damage(outline_damage());
+            if (resize_right) {
+                outline.width = pointer_x + drag_dx - outline.x;
+                outline.width = outline.width < MIN_WIDTH ? MIN_WIDTH : outline.width;
+            }
+            if (resize_bottom) {
+                outline.height = pointer_y + drag_dy - outline.y;
+                outline.height = outline.height < MIN_HEIGHT ? MIN_HEIGHT : outline.height;
+            }
+            add_damage(outline_damage());
+        }
+        /* The resize arrows over a resizable window's edges. */
+        struct window *under = window_at(pointer_x, pointer_y);
+        bool right, bottom;
+        bool edge = drag == RESIZING ||
+                    (drag == IDLE && under && on_edges(under, pointer_x, pointer_y, &right,
+                                                       &bottom));
+        resize_cursor = edge;
+        if (menu_open) {
+            int hot = menu_item_at(pointer_x, pointer_y);
+            if (hot != menu_hot) {
+                menu_hot = hot;
+                add_damage(menu_rect());
+            }
+        }
+        add_damage(cursor_rect());
+        if (drag != IDLE) {
             return;
         }
     }
     struct window *w = window_at(pointer_x, pointer_y);
-    if (w && pointer_y >= w->y) {
+    if (w && pointer_y >= w->y && pointer_x < w->x + w->content.width &&
+        pointer_y < w->y + w->content.height) {
         send_pointer(w, wheel);
     }
 }
@@ -609,14 +1216,17 @@ static bool setup(void) {
         return false;
     }
     frame = vx_map_file(handle, 0, display.size, VX_MAP_WRITE);
-    screen.width = (int)display.width;
-    screen.height = (int)display.height;
-    screen.stride = screen.width;
-    screen.pixels = vx_map((size_t)screen.width * screen.height * 4, VX_MAP_WRITE);
-    if (!frame || !screen.pixels) {
+    screen.width = wallpaper.width = (int)display.width;
+    screen.height = wallpaper.height = (int)display.height;
+    screen.stride = wallpaper.stride = screen.width;
+    size_t size = (size_t)screen.width * screen.height * 4;
+    screen.pixels = vx_map(size, VX_MAP_WRITE);
+    wallpaper.pixels = vx_map(size, VX_MAP_WRITE);
+    if (!frame || !screen.pixels || !wallpaper.pixels) {
         fprintf(stderr, "desktop: out of memory\n");
         return false;
     }
+    make_wallpaper();
     keyboard = open_input(VX_INPUT_KEYS);
     mouse = open_input(VX_INPUT_POINTER);
 
@@ -654,6 +1264,11 @@ int main(int argc, char **argv) {
     launch(argc > 1 ? argv[1] : "/bin/term");
 
     while (!quit) {
+        long minute = vx_time() / 60;
+        if (minute != shown_minute) { /* The clock. */
+            shown_minute = minute;
+            add_damage(panel_rect());
+        }
         redraw_damage();
         fflush(stdout);
         struct vx_poll polls[3 + MAX_CLIENTS];

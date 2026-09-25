@@ -193,8 +193,12 @@ reads partition tables, and calls the drivers (`dev/virtio_blk.c`, `dev/ahci.c`,
 - **The desktop** (`userland/desktop`) is an ordinary program: it grabs the keyboard and
   mouse, listens on the local socket `/run/desktop`, keeps windows in a stack, composes
   the parts of the screen that changed into memory and copies them to the display.
-  Programs use `<vexa/gui.h>`: `vx_window_create`, draw into `window->surface`,
-  `vx_window_present`, and `vx_gui_wait` for key, pointer and close events.
+  It draws the panel (the Vexa menu, window buttons, a clock from `vx_time`), title
+  bars with minimize, maximize and close buttons, and the outline of a window being
+  resized. Programs use `<vexa/gui.h>`: `vx_window_create`, draw into
+  `window->surface`, `vx_window_present`, and `vx_gui_wait` for key, pointer and close
+  events. A window made with `VX_WINDOW_RESIZABLE` gets `VX_GUI_RESIZE` events and
+  answers with `vx_window_resize`, which hands the desktop a new buffer.
 - **X** runs as Linux programs. Xvexa (`third_party/xvexa`) is a kdrive X server
   built into X.Org's source tree: it opens a desktop window, uses the window's
   shared buffer as its framebuffer, presents what X damaged, and turns the

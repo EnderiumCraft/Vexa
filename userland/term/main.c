@@ -12,8 +12,10 @@
 #include <vexa/gui.h>
 #include <vexa/syscall.h>
 
-#define COLUMNS 80
+#define COLUMNS 80 /* To start with; the window can be resized. */
 #define ROWS 24
+#define MAX_COLUMNS 250
+#define MAX_ROWS 120
 #define MARGIN 4
 #define MAX_PARAMS 8
 #define TAB_WIDTH 8
@@ -33,8 +35,9 @@ struct cell {
     uint32_t fg, bg;
 };
 
-static struct cell cells[ROWS][COLUMNS];
-static bool dirty[ROWS];
+static struct cell cells[MAX_ROWS][MAX_COLUMNS];
+static bool dirty[MAX_ROWS];
+static int columns = COLUMNS, rows = ROWS;
 static int cursor_x, cursor_y, saved_x, saved_y;
 static uint32_t fg = COLOR_TEXT, bg = COLOR_BACKGROUND;
 static bool bold, focused = true;
@@ -51,19 +54,19 @@ static void blank(int x, int y) {
 }
 
 static void scroll_up(void) {
-    memmove(cells[0], cells[1], sizeof(cells[0]) * (ROWS - 1));
-    for (int x = 0; x < COLUMNS; x++) {
-        cells[ROWS - 1][x] = (struct cell){' ', fg, bg};
+    memmove(cells[0], cells[1], sizeof(cells[0]) * (rows - 1));
+    for (int x = 0; x < columns; x++) {
+        cells[rows - 1][x] = (struct cell){' ', fg, bg};
     }
-    for (int y = 0; y < ROWS; y++) {
+    for (int y = 0; y < rows; y++) {
         dirty[y] = true;
     }
 }
 
 static void line_feed(void) {
-    if (++cursor_y == ROWS) {
+    if (++cursor_y == rows) {
         scroll_up();
-        cursor_y = ROWS - 1;
+        cursor_y = rows - 1;
     }
 }
 
@@ -108,8 +111,8 @@ static void set_graphics(void) {
 }
 
 static void erase_display(int mode) {
-    for (int y = 0; y < ROWS; y++) {
-        for (int x = 0; x < COLUMNS; x++) {
+    for (int y = 0; y < rows; y++) {
+        for (int x = 0; x < columns; x++) {
             bool before = y < cursor_y || (y == cursor_y && x < cursor_x);
             if (mode == 2 || mode == 3 || (mode == 0 && !before) ||
                 (mode == 1 && (before || (y == cursor_y && x == cursor_x)))) {
@@ -120,7 +123,7 @@ static void erase_display(int mode) {
 }
 
 static void erase_line(int mode) {
-    for (int x = 0; x < COLUMNS; x++) {
+    for (int x = 0; x < columns; x++) {
         if (mode == 2 || (mode == 0 && x >= cursor_x) || (mode == 1 && x <= cursor_x)) {
             blank(x, cursor_y);
         }
@@ -129,16 +132,16 @@ static void erase_line(int mode) {
 
 static void control_sequence(char final) {
     switch (final) {
-    case 'A': cursor_y = clamp(cursor_y - param(0, 1), ROWS); break;
-    case 'B': cursor_y = clamp(cursor_y + param(0, 1), ROWS); break;
-    case 'C': cursor_x = clamp(cursor_x + param(0, 1), COLUMNS); break;
-    case 'D': cursor_x = clamp(cursor_x - param(0, 1), COLUMNS); break;
-    case 'G': cursor_x = clamp(param(0, 1) - 1, COLUMNS); break;
-    case 'd': cursor_y = clamp(param(0, 1) - 1, ROWS); break;
+    case 'A': cursor_y = clamp(cursor_y - param(0, 1), rows); break;
+    case 'B': cursor_y = clamp(cursor_y + param(0, 1), rows); break;
+    case 'C': cursor_x = clamp(cursor_x + param(0, 1), columns); break;
+    case 'D': cursor_x = clamp(cursor_x - param(0, 1), columns); break;
+    case 'G': cursor_x = clamp(param(0, 1) - 1, columns); break;
+    case 'd': cursor_y = clamp(param(0, 1) - 1, rows); break;
     case 'H':
     case 'f':
-        cursor_y = clamp(param(0, 1) - 1, ROWS);
-        cursor_x = clamp(param(1, 1) - 1, COLUMNS);
+        cursor_y = clamp(param(0, 1) - 1, rows);
+        cursor_x = clamp(param(1, 1) - 1, columns);
         break;
     case 'J': erase_display(param_count ? params[0] : 0); break;
     case 'K': erase_line(param_count ? params[0] : 0); break;
@@ -219,16 +222,16 @@ static void put(char c) {
             do {
                 blank(cursor_x, cursor_y);
                 cursor_x++;
-            } while (cursor_x % TAB_WIDTH != 0 && cursor_x < COLUMNS);
-            if (cursor_x >= COLUMNS) {
-                cursor_x = COLUMNS - 1;
+            } while (cursor_x % TAB_WIDTH != 0 && cursor_x < columns);
+            if (cursor_x >= columns) {
+                cursor_x = columns - 1;
             }
             break;
         default:
             if ((unsigned char)c < ' ') {
                 break;
             }
-            if (cursor_x >= COLUMNS) { /* Wrap before writing past the edge. */
+            if (cursor_x >= columns) { /* Wrap before writing past the edge. */
                 cursor_x = 0;
                 line_feed();
             }
@@ -245,7 +248,7 @@ static void put(char c) {
 static void redraw(void) {
     int first = -1, last = -1;
     struct vx_surface *s = &window->surface;
-    for (int y = 0; y < ROWS; y++) {
+    for (int y = 0; y < rows; y++) {
         if (!dirty[y]) {
             continue;
         }
@@ -253,11 +256,11 @@ static void redraw(void) {
         first = first < 0 ? y : first;
         last = y;
         int py = MARGIN + y * FONT_HEIGHT;
-        for (int x = 0; x < COLUMNS; x++) {
+        for (int x = 0; x < columns; x++) {
             struct cell *cell = &cells[y][x];
             vx_draw_char(s, MARGIN + x * FONT_WIDTH, py, cell->c, cell->fg, cell->bg);
         }
-        if (y == cursor_y && cursor_x < COLUMNS) {
+        if (y == cursor_y && cursor_x < columns) {
             int cx = MARGIN + cursor_x * FONT_WIDTH;
             if (focused) {
                 vx_fill(s, cx, py + FONT_HEIGHT - 3, FONT_WIDTH, 2, COLOR_CURSOR);
@@ -270,6 +273,46 @@ static void redraw(void) {
         vx_window_present(window, 0, MARGIN + first * FONT_HEIGHT, s->width,
                           (last - first + 1) * FONT_HEIGHT);
     }
+}
+
+/* A new size from the desktop: as many rows and columns as fit. Text stays
+ * where it was (the bottom rows, if there are fewer), and the programs on
+ * the terminal hear of it (SIGWINCH). */
+static void resize(int master, int width, int height) {
+    int new_columns = (width - 2 * MARGIN) / FONT_WIDTH;
+    int new_rows = (height - 2 * MARGIN) / FONT_HEIGHT;
+    new_columns = new_columns < 10 ? 10 : new_columns > MAX_COLUMNS ? MAX_COLUMNS : new_columns;
+    new_rows = new_rows < 2 ? 2 : new_rows > MAX_ROWS ? MAX_ROWS : new_rows;
+    if (vx_window_resize(window, 2 * MARGIN + new_columns * FONT_WIDTH,
+                         2 * MARGIN + new_rows * FONT_HEIGHT)) {
+        return;
+    }
+    int lost = cursor_y - (new_rows - 1); /* Lines to drop off the top. */
+    if (lost > 0) {
+        memmove(cells[0], cells[lost], sizeof(cells[0]) * (size_t)(rows - lost));
+        cursor_y -= lost;
+        saved_y = saved_y >= lost ? saved_y - lost : 0;
+    }
+    int kept = lost > 0 ? rows - lost : rows;
+    for (int y = 0; y < new_rows; y++) {
+        for (int x = y < kept ? columns : 0; x < new_columns; x++) {
+            cells[y][x] = (struct cell){' ', COLOR_TEXT, COLOR_BACKGROUND};
+        }
+    }
+    columns = new_columns;
+    rows = new_rows;
+    cursor_x = clamp(cursor_x, columns + 1);
+    saved_x = clamp(saved_x, columns);
+    saved_y = clamp(saved_y, rows);
+    struct vx_surface *s = &window->surface;
+    vx_fill(s, 0, 0, s->width, s->height, COLOR_BACKGROUND);
+    for (int y = 0; y < rows; y++) {
+        dirty[y] = true;
+    }
+    redraw();
+    vx_window_present(window, 0, 0, s->width, s->height);
+    struct vx_tty_size size = {(unsigned short)rows, (unsigned short)columns};
+    vx_control(master, VX_TTY_SET_SIZE, &size, sizeof(size));
 }
 
 /* ---- Keys ---- */
@@ -338,16 +381,16 @@ static int start_shell(int *master_out, const char *program) {
 
 int main(int argc, char **argv) {
     const char *program = argc > 1 ? argv[1] : "/bin/vsh";
-    window = vx_window_create("Terminal", 2 * MARGIN + COLUMNS * FONT_WIDTH,
-                              2 * MARGIN + ROWS * FONT_HEIGHT);
+    window = vx_window_create_flags("Terminal", 2 * MARGIN + columns * FONT_WIDTH,
+                                    2 * MARGIN + rows * FONT_HEIGHT, VX_WINDOW_RESIZABLE);
     if (!window) {
         fprintf(stderr, "term: no desktop to open a window on\n");
         return 1;
     }
     vx_fill(&window->surface, 0, 0, window->surface.width, window->surface.height,
             COLOR_BACKGROUND);
-    for (int y = 0; y < ROWS; y++) {
-        for (int x = 0; x < COLUMNS; x++) {
+    for (int y = 0; y < rows; y++) {
+        for (int x = 0; x < columns; x++) {
             cells[y][x] = (struct cell){' ', fg, bg};
         }
         dirty[y] = true;
@@ -391,6 +434,8 @@ int main(int argc, char **argv) {
             }
             if (e.type == VX_GUI_KEY) {
                 type_key(master, &e);
+            } else if (e.type == VX_GUI_RESIZE) {
+                resize(master, e.width, e.height);
             } else if (e.type == VX_GUI_FOCUS) {
                 focused = e.value;
                 dirty[cursor_y] = true;
