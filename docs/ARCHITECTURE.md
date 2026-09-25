@@ -164,10 +164,17 @@ underneath it:
 - `tmpfs`: in memory; the root file system, filled from `initramfs.tar` at boot
 - `devfs`: `/dev`, with `null`, `zero`, `console` and every disk and partition
 - `ext2`: disks, mounted at `/mnt/<disk>`
+- `iso9660`: CDs (read-only, with Rock Ridge names, permissions and links), mounted at
+  `/mnt/cd0`...; the first with a `linux` directory, normally the boot CD, is also
+  `/cdrom`. The Linux subsystem's programs and libraries live there: in the initramfs,
+  `/linux` holds only what changes (`etc`, `var`, `root`) and links `bin`, `lib`,
+  `sbin` and `usr` to `/cdrom/linux`, so they are read when used instead of taking
+  memory from boot
 
 Disks sit behind the block layer (`core/block.c`), which caches them in 4 KiB chunks,
 reads partition tables, and calls the drivers (`dev/virtio_blk.c`, `dev/ahci.c`,
-`dev/nvme.c`).
+`dev/nvme.c`). AHCI drives CD/DVD drives too, through ATAPI (SCSI commands in a
+PACKET command), as `cd0`... with 2048-byte sectors.
 
 ## Graphics and input today
 

@@ -280,6 +280,9 @@ void block_register(struct block_device *device) {
     kprintf("[block] %s: %lu MiB (%u-byte sectors)\n", device->name,
             block_size_bytes(device) / (1024 * 1024), device->sector_size);
     add_device(device);
+    if (device->sector_size == 2048) {
+        return; /* A CD or DVD: its ISO's hybrid partition tables aren't for us. */
+    }
     if (!scan_gpt(device)) {
         scan_mbr(device);
     }

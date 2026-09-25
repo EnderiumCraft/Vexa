@@ -9,8 +9,9 @@
 
 /*
  * AHCI: the standard interface for SATA controllers. Each port with a hard
- * disk becomes sda, sdb... One command slot per port, one request at a time.
- * (CD/DVD drives on AHCI speak ATAPI, which isn't supported yet.)
+ * disk becomes sda, sdb..., and each CD/DVD drive cd0, cd1... (read-only,
+ * 2048-byte sectors, through ATAPI: SCSI commands in a PACKET command). One
+ * command slot per port, one request at a time.
  */
 
 #define HBA_CAP 0x00
@@ -47,10 +48,19 @@
 #define PORT_INTERRUPTS 0x7d80007f /* Completions and all error conditions. */
 
 #define SIG_SATA_DISK 0x00000101
+#define SIG_ATAPI 0xeb140101
 
 #define ATA_IDENTIFY 0xec
 #define ATA_READ_DMA_EXT 0x25
 #define ATA_WRITE_DMA_EXT 0x35
+#define ATA_PACKET 0xa0
+
+#define SCSI_TEST_UNIT_READY 0x00
+#define SCSI_READ_CAPACITY 0x25
+#define SCSI_READ_10 0x28
+
+#define CD_SECTOR 2048
+#define HEADER_ATAPI (1 << 5)
 
 struct __attribute__((packed)) command_header {
     uint16_t flags; /* FIS length in dwords (bits 0-4), write (bit 6)... */
@@ -84,7 +94,7 @@ struct ahci_port {
 
 #define MAX_PORTS 32
 static struct ahci_port *ports[MAX_PORTS];
-static int port_count;
+static int port_count, disk_count, cd_count;
 static volatile uint32_t *interrupt_hbas[4];
 static int interrupt_hba_count;
 
@@ -117,28 +127,38 @@ static bool command_done(void *arg) {
            (port_read(port, PX_TFD) & TFD_ERROR);
 }
 
+/* Runs an ATA command, or with `packet` an ATAPI one (a SCSI command block
+ * in a PACKET command). `bytes` may be 0 (no data). */
 static int run_command(struct ahci_port *port, uint8_t command, uint64_t lba, uint16_t count,
-                       void *buffer, uint32_t bytes, bool write) {
+                       void *buffer, uint32_t bytes, bool write, const uint8_t *packet) {
     struct command_table *table = port->table;
     memset(table, 0, sizeof(*table));
     uint8_t *fis = table->fis;
     fis[0] = 0x27;  /* Register FIS, host to device. */
     fis[1] = 0x80;  /* This is a command. */
     fis[2] = command;
+    if (packet) {
+        memcpy(table->atapi, packet, 12);
+        fis[3] = bytes ? 1 : 0; /* Features: the data goes by DMA. */
+        fis[5] = (uint8_t)bytes; /* Byte count limit (for PIO; harmless with DMA). */
+        fis[6] = (uint8_t)(bytes >> 8);
+    }
     fis[4] = (uint8_t)lba;
     fis[5] = (uint8_t)(lba >> 8);
     fis[6] = (uint8_t)(lba >> 16);
-    fis[7] = 0x40; /* LBA addressing. */
+    fis[7] = packet ? 0 : 0x40; /* LBA addressing. */
     fis[8] = (uint8_t)(lba >> 24);
     fis[9] = (uint8_t)(lba >> 32);
     fis[10] = (uint8_t)(lba >> 40);
     fis[12] = (uint8_t)count;
     fis[13] = (uint8_t)(count >> 8);
-    table->prdt[0].address = virt_to_phys(buffer);
-    table->prdt[0].byte_count = (bytes - 1) | (1U << 31);
+    if (bytes) {
+        table->prdt[0].address = virt_to_phys(buffer);
+        table->prdt[0].byte_count = (bytes - 1) | (1U << 31);
+    }
 
-    port->headers[0].flags = 5 | (write ? (1 << 6) : 0); /* 5-dword FIS. */
-    port->headers[0].prdt_length = 1;
+    port->headers[0].flags = 5 | (write ? (1 << 6) : 0) | (packet ? HEADER_ATAPI : 0);
+    port->headers[0].prdt_length = bytes ? 1 : 0;
     port->headers[0].bytes_transferred = 0;
     port->headers[0].table = virt_to_phys(table);
 
@@ -160,7 +180,7 @@ static int ahci_transfer(struct block_device *block, uint64_t sector, uint32_t c
     struct ahci_port *port = (struct ahci_port *)block;
     mutex_lock(&port->lock);
     int result = run_command(port, write ? ATA_WRITE_DMA_EXT : ATA_READ_DMA_EXT, sector,
-                             (uint16_t)count, buffer, count * block->sector_size, write);
+                             (uint16_t)count, buffer, count * block->sector_size, write, NULL);
     mutex_unlock(&port->lock);
     return result;
 }
@@ -172,6 +192,18 @@ static int ahci_read(struct block_device *block, uint64_t sector, uint32_t count
 static int ahci_write(struct block_device *block, uint64_t sector, uint32_t count,
                       const void *buffer) {
     return ahci_transfer(block, sector, count, (void *)buffer, true);
+}
+
+/* CD/DVD drives: READ(10), up to 65535 sectors at a time. */
+static int cd_read(struct block_device *block, uint64_t sector, uint32_t count, void *buffer) {
+    struct ahci_port *port = (struct ahci_port *)block;
+    uint8_t packet[12] = {SCSI_READ_10, 0, (uint8_t)(sector >> 24), (uint8_t)(sector >> 16),
+                          (uint8_t)(sector >> 8), (uint8_t)sector, 0, (uint8_t)(count >> 8),
+                          (uint8_t)count, 0, 0, 0};
+    mutex_lock(&port->lock);
+    int result = run_command(port, ATA_PACKET, 0, 0, buffer, count * CD_SECTOR, false, packet);
+    mutex_unlock(&port->lock);
+    return result;
 }
 
 static bool wait_clear(struct ahci_port *port, uint32_t reg, uint32_t bits) {
@@ -204,9 +236,10 @@ static void setup_port(volatile uint32_t *hba, int number, bool interrupts) {
 
     uint32_t status = port_read(port, PX_SSTS);
     bool present = (status & 0xf) == 3 && ((status >> 8) & 0xf) == 1;
-    if (!present || port_read(port, PX_SIG) != SIG_SATA_DISK) {
+    uint32_t signature = port_read(port, PX_SIG);
+    if (!present || (signature != SIG_SATA_DISK && signature != SIG_ATAPI)) {
         kfree(port);
-        return; /* Empty, asleep, or not a hard disk (e.g. a CD drive). */
+        return; /* Empty, asleep, or something else. */
     }
 
     /* Stop the port while we give it memory for its command list. */
@@ -235,8 +268,41 @@ static void setup_port(volatile uint32_t *hba, int number, bool interrupts) {
     port->waiter.has_interrupt = interrupts;
     ports[port_count++] = port;
 
+    if (signature == SIG_ATAPI) {
+        /* A CD/DVD drive: its size, once the disc is ready (the first
+         * commands after a reset report a "unit attention"). */
+        uint8_t *capacity = dma_page();
+        const uint8_t ready[12] = {SCSI_TEST_UNIT_READY};
+        const uint8_t read_capacity[12] = {SCSI_READ_CAPACITY};
+        bool ok = false;
+        for (int attempt = 0; capacity && attempt < 5 && !ok; attempt++) {
+            run_command(port, ATA_PACKET, 0, 0, NULL, 0, false, ready);
+            ok = run_command(port, ATA_PACKET, 0, 0, capacity, 8, false, read_capacity) == 0;
+        }
+        uint32_t last = ok ? (uint32_t)capacity[0] << 24 | capacity[1] << 16 | capacity[2] << 8 |
+                                 capacity[3]
+                           : 0;
+        if (capacity) {
+            pmm_free(virt_to_phys(capacity), 0);
+        }
+        if (!ok) {
+            kprintf("[ahci] port %d: a CD/DVD drive with no disc\n", number);
+            port_count--;
+            return;
+        }
+        ksnprintf(port->block.name, sizeof(port->block.name), "cd%d", cd_count++);
+        port->block.sector_count = (uint64_t)last + 1;
+        port->block.sector_size = CD_SECTOR;
+        port->block.read = cd_read;
+        port->block.write = NULL;
+        kprintf("[ahci] %s: CD/DVD drive on port %d, %s\n", port->block.name, number,
+                interrupts ? "MSI interrupts" : "polling");
+        block_register(&port->block);
+        return;
+    }
+
     uint16_t *identify = dma_page();
-    if (!identify || run_command(port, ATA_IDENTIFY, 0, 0, identify, 512, false) != 0) {
+    if (!identify || run_command(port, ATA_IDENTIFY, 0, 0, identify, 512, false, NULL) != 0) {
         kprintf("[ahci] port %d: IDENTIFY failed\n", number);
         port_count--;
         return;
@@ -252,9 +318,8 @@ static void setup_port(volatile uint32_t *hba, int number, bool interrupts) {
     }
     pmm_free(virt_to_phys(identify), 0);
 
-    int index = port_count - 1;
     memcpy(port->block.name, "sda", 4);
-    port->block.name[2] = (char)('a' + index);
+    port->block.name[2] = (char)('a' + disk_count++);
     port->block.sector_count = sectors;
     port->block.sector_size = sector_size;
     port->block.read = ahci_read;

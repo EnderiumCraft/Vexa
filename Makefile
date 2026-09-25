@@ -196,6 +196,11 @@ $(BUILD)/programs/%: $(CRT0) $(LIBVEXA_SO) $(LIBVEXA_OBJS) libvexa/program.ld \
 		$(LD) $(DYNAMIC_LDFLAGS) $(CRT0) $(filter-out $(LIBVEXA_OBJS),$(filter %.o,$^)) \
 			$(LIBVEXA_SO) -o $@)
 
+# /linux is split: what's written to stays in memory, the rest is read from
+# the boot CD when it's used (the ISO's /linux; /cdrom is the boot CD).
+LINUX_IN_MEMORY := etc var root
+LINUX_ON_CD := bin lib sbin usr
+
 # The starting root file system: rootfs/ plus the programs in /bin, as a tar
 # archive (ustar, with fixed owners and times so builds are reproducible).
 $(INITRAMFS): $(PROGRAM_BINS) $(LIBVEXA_SO) $(VEXA_LD) $(ROOTFS_FILES) $(LINUX_TREE)
@@ -204,9 +209,12 @@ $(INITRAMFS): $(PROGRAM_BINS) $(LIBVEXA_SO) $(VEXA_LD) $(ROOTFS_FILES) $(LINUX_T
 	cp -R rootfs/. $(BUILD)/rootfs/
 	cp $(PROGRAM_BINS) $(BUILD)/rootfs/bin/
 	cp $(LIBVEXA_SO) $(VEXA_LD) $(BUILD)/rootfs/lib/
+	# /linux: the files that change (etc, var, root) are here, in memory;
+	# the programs and libraries stay on the boot CD (see make_iso).
 	if [ -n "$(LINUX_TREE)" ]; then \
-		mkdir -p $(BUILD)/rootfs/linux && cp -a $(LINUX_ROOT)/. $(BUILD)/rootfs/linux/ && \
-		rm $(BUILD)/rootfs/linux/.done; fi
+		mkdir -p $(BUILD)/rootfs/linux && \
+		for dir in $(LINUX_IN_MEMORY); do cp -a $(LINUX_ROOT)/$$dir $(BUILD)/rootfs/linux/; done && \
+		for dir in $(LINUX_ON_CD); do ln -s /cdrom/linux/$$dir $(BUILD)/rootfs/linux/$$dir; done; fi
 	tar --format=ustar --owner=0 --group=0 --numeric-owner --mtime=@0 --sort=name \
 		-cf $@ -C $(BUILD)/rootfs .
 
@@ -412,7 +420,9 @@ define make_iso
 	cp limine/limine-bios.sys limine/limine-bios-cd.bin \
 		limine/limine-uefi-cd.bin $(BUILD)/iso_root/boot/limine/
 	cp limine/BOOTX64.EFI limine/BOOTIA32.EFI $(BUILD)/iso_root/EFI/BOOT/
-	xorriso -as mkisofs -R -r -J -b boot/limine/limine-bios-cd.bin \
+	if [ -n "$(LINUX_TREE)" ]; then mkdir -p $(BUILD)/iso_root/linux && \
+		for dir in $(LINUX_ON_CD); do cp -a $(LINUX_ROOT)/$$dir $(BUILD)/iso_root/linux/; done; fi
+	xorriso -as mkisofs -R -r -J -D -b boot/limine/limine-bios-cd.bin \
 		-no-emul-boot -boot-load-size 4 -boot-info-table -hfsplus \
 		-apm-block-size 2048 --efi-boot boot/limine/limine-uefi-cd.bin \
 		-efi-boot-part --efi-boot-image --protective-msdos-label \
@@ -420,7 +430,7 @@ define make_iso
 	./limine/limine bios-install $(2)
 endef
 
-$(ISO): $(KERNEL) $(INITRAMFS) $(BUILD)/limine.conf limine/limine
+$(ISO): $(KERNEL) $(INITRAMFS) $(BUILD)/limine.conf limine/limine $(LINUX_TREE)
 	$(call make_iso,$(BUILD)/limine.conf,$@)
 
 $(SAFE_ISO): $(KERNEL) $(INITRAMFS) $(BUILD)/limine.conf limine/limine

@@ -97,6 +97,8 @@ registers survive being interrupted.
 - [x] virtio-blk driver (QEMU), then AHCI and NVMe for real hardware; each falls back to
       polling without MSI
 - [x] ext2 read/write (ext4 later), so disks can be shared with other systems
+- [x] CDs: ATAPI drives on AHCI and ISO 9660 with Rock Ridge; the Linux programs and
+      libraries are read from the boot CD instead of living in memory (0.14.0)
 - [ ] Moved to later phases: USB storage (with USB in Phase 8), ext4, a journal or
       another crash-safe file system, finer-grained VFS locking, running `vinit` from a
       disk as the root file system

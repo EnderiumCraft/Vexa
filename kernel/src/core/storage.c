@@ -9,22 +9,34 @@ void virtio_blk_init(void);                     /* dev/virtio_blk.c */
 void ahci_init(void);                           /* dev/ahci.c */
 void nvme_init(void);                           /* dev/nvme.c */
 bool ext2_probe(struct block_device *device);   /* fs/ext2.c */
+bool iso9660_probe(struct block_device *device); /* fs/iso9660.c */
 
-/* Mounts every ext2 file system found at /mnt/<device>, e.g. /mnt/vda1. */
+/* Mounts every ext2 file system and CD found at /mnt/<device>, e.g.
+ * /mnt/vda1 or /mnt/cd0. The first CD with Vexa's Linux files on it (the
+ * boot CD, normally) is also /cdrom: /linux/usr and the like point there. */
 static void mount_disks(void) {
     for (struct block_device *device = block_first(); device; device = device->next) {
-        if (!ext2_probe(device)) {
+        const char *fs = ext2_probe(device) ? "ext2" : iso9660_probe(device) ? "iso9660" : NULL;
+        if (!fs) {
             continue;
         }
         char path[32] = "/mnt/";
         size_t n = strlen(device->name);
         memcpy(path + 5, device->name, n + 1);
         vfs_mkdir(path, 5 + n);
-        int error = vfs_mount("ext2", device, device->name, path);
+        int error = vfs_mount(fs, device, device->name, path);
         if (error) {
             kprintf("[storage] could not mount %s: %s\n", device->name, vfs_error_name(error));
-        } else {
-            kprintf("[storage] mounted %s at %s\n", device->name, path);
+            continue;
+        }
+        kprintf("[storage] mounted %s at %s\n", device->name, path);
+        struct vx_stat stat;
+        char linux_dir[40];
+        ksnprintf(linux_dir, sizeof(linux_dir), "%s/linux", path);
+        if (fs[0] == 'i' && vfs_stat("/cdrom", 6, &stat) != 0 &&
+            vfs_stat(linux_dir, strlen(linux_dir), &stat) == 0) {
+            vfs_symlink(path, "/cdrom", 6);
+            kprintf("[storage] /cdrom is %s\n", path);
         }
     }
 }

@@ -54,8 +54,10 @@ runs X programs such as `xterm` in windows of their own on it. The kernel:
 - has its own system call interface and C library, `libvexa`
 - has a file system tree with a root in memory (unpacked from an initramfs), `/dev`,
   and disks mounted under `/mnt`
-- drives disks through virtio-blk (virtual machines), AHCI (SATA) and NVMe, reads GPT
-  and MBR partition tables, and reads and writes ext2 file systems
+- drives disks through virtio-blk (virtual machines), AHCI (SATA disks and CD/DVD
+  drives) and NVMe, reads GPT and MBR partition tables, reads and writes ext2 file
+  systems, and reads CDs (ISO 9660 with Rock Ridge): the Linux programs and libraries
+  are read from the boot CD when they're used, not loaded into memory at boot
 - has symbolic links, `#!` scripts, and `/proc` (in Linux's format, so `ps` and `top`
   work)
 - is on the network: a virtio-net driver, its own TCP/IP stack (Ethernet, ARP, IPv4,
@@ -110,8 +112,8 @@ There is no HTTPS yet (no TLS library), and no IPv6.
 
 ### Disks
 
-Vexa mounts every ext2 file system it finds at `/mnt/<disk>`, such as `/mnt/vda1`
-or `/mnt/nvme0n1`. The easiest way to try it is `make run-disk`: it boots with a small
+Vexa mounts every ext2 file system and CD it finds at `/mnt/<disk>`, such as `/mnt/vda1`
+or `/mnt/cd0` (the boot CD is also `/cdrom`). The easiest way to try it is `make run-disk`: it boots with a small
 disk (kept in `build/my-disk.img`, so what you write survives restarts). To prepare
 your own disk image on Linux:
 
@@ -200,7 +202,7 @@ kernel/
                      pseudo-terminals, font, PS/2 keyboard and mouse, clock, PCI,
                      virtio-blk, virtio-net, AHCI, NVMe
   src/lib/           string functions, kprintf, panic
-  src/fs/            ext2, tmpfs, devfs, initramfs unpacking
+  src/fs/            ext2, ISO 9660, tmpfs, devfs, procfs, initramfs unpacking
 abi/vexa/abi.h       system call numbers and error codes, shared by kernel and libvexa
 rootfs/              files for the root file system (packed into initramfs.tar)
 third_party/         BusyBox's build configuration, the X sources list (x11-sources.txt) and
