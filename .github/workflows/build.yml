@@ -24,8 +24,10 @@ jobs:
             build-essential xorriso qemu-system-x86 ovmf python3 e2fsprogs \
             musl-tools linux-libc-dev ninja-build pkg-config bison gperf \
             libglib2.0-dev-bin gtk-update-icon-cache python3-packaging
-          # X.Org's packages want a newer Meson than Ubuntu's.
+          # X.Org's packages want a newer Meson than Ubuntu's. GLib's build
+          # looks for Python's "packaging" module in Meson's own environment.
           pipx install meson==1.12.1
+          pipx inject meson packaging
 
       # The X Window System takes the longest to build: keep it (and its source
       # tarballs) between runs, until its sources or build script change.
