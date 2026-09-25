@@ -2,7 +2,7 @@
 """Boot build/vexa.iso in QEMU, type into the PS/2 keyboard, and check the serial log.
 
 Usage: tools/qemu-smoke-test.py [--iso PATH] [--uefi] [--smp N] [--memory SIZE] [--cpu MODEL]
-                                [--safe-mode] [--disks DIR]
+                                [--safe-mode] [--disks DIR] [--no-linux]
 
 With --disks, attaches the test disks from `make test-disks` (copies, so the
 originals stay pristine), runs file commands on them, and checks each with
@@ -95,6 +95,26 @@ TYPED_COMMANDS = [
     ("Hello Vexa", "Hello: command not found", 10),
 ]
 
+# The Linux subsystem: BusyBox (built from source with musl) from vsh, then
+# its shell, with fork, exec, pipes, Ctrl-C and signal handlers. Typed before
+# "ps" unless --no-linux (for kernels built with LINUX_COMPAT=0).
+LINUX_COMMANDS = [
+    ("busybox echo hello from linux", "hello from linux", 20, 2),
+    ("busybox uname -sr", "Vexa 6.1.0-vexa", 20),
+    ("busybox sh -c 'echo answer $((6*7))'", "answer 42", 20),
+    ("export PS1='\\166exa:bb# '", None, 10),  # "vexa:bb# ", so prompts are counted
+    ("busybox sh", "vexa:bb# ", 20),
+    ("cd /tmp && echo made > bb.txt && cat bb.txt", "made\r\n", 20),
+    ("seq 5 7 | tr '\\n' +", "5+6+7+", 20),
+    ("sleep 30^C", None, 20),
+    ("echo after ctrl-c $?", "after ctrl-c 130", 20),
+    ("sh -c 'kill -TERM $$' ; echo killed $?", "killed 143", 20),
+    ("trap 'echo caught' USR1 ; kill -USR1 $$", "caught", 20, 2),
+    ("for i in 1 2 3 4 5 ; do echo n$i ; done | wc -l | sed s/^/lines:/", "lines:5", 20),
+    ("/bin/hello", "hi :)", 20, 2),  # A native program, started by a Linux one.
+    ("exit", None, 20),
+]
+
 # With --disks: one ext2 file system on each kind of disk.
 DISK_COMMANDS = [
     ("sys disks", "nvme0n1", 10),
@@ -138,7 +158,10 @@ def check_filesystem(image, offset, tmp):
 KEY_NAMES = {" ": "spc", "\n": "ret", "\b": "backspace", "-": "minus", ".": "dot", "/": "slash",
              ":": "shift-semicolon", "_": "shift-minus", ";": "semicolon", "=": "equal",
              "|": "shift-backslash", ">": "shift-dot", "<": "shift-comma", "$": "shift-4",
-             "?": "shift-slash", "&": "shift-7", "\"": "shift-apostrophe", "'": "apostrophe"}
+             "?": "shift-slash", "&": "shift-7", "\"": "shift-apostrophe", "'": "apostrophe",
+             "(": "shift-9", ")": "shift-0", "*": "shift-8", "+": "shift-equal", "!": "shift-1",
+             "#": "shift-3", "%": "shift-5", "\\": "backslash", ",": "comma", "@": "shift-2", "^": "shift-6",
+             "[": "bracket_left", "]": "bracket_right", "\x1b": "esc"}
 
 
 def keys_for(text):
@@ -218,6 +241,8 @@ def main():
     parser.add_argument("--cpu", help="QEMU CPU model, e.g. max (adds AVX, SMEP, SMAP)")
     parser.add_argument("--disks", help="directory with the test disk images")
     parser.add_argument("--iso", default="build/vexa.iso", help="ISO image to boot")
+    parser.add_argument("--no-linux", action="store_true",
+                        help="skip the Linux subsystem checks (a LINUX_COMPAT=0 kernel)")
     parser.add_argument("--safe-mode", action="store_true",
                         help="expect a safe mode boot (use with the ISO from "
                              "`make build/vexa-safe-mode-test.iso`)")
@@ -234,6 +259,9 @@ def main():
     ]
     disks = []
     commands = list(TYPED_COMMANDS)
+    if not args.no_linux:
+        at = next(i for i, c in enumerate(commands) if c[0] == "ps")
+        commands[at:at] = LINUX_COMMANDS
     if args.disks:
         for name, qemu_args, offset in TEST_DISKS:
             copy = os.path.join(tmp, name)

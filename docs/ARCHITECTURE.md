@@ -105,16 +105,41 @@ libvexa/                  Vexa's C library
 userland/                 native programs: vinit, vsh, utilities, compositor
 ```
 
-Everything but `personality/linux/` exists today, along with `fs/` (file systems) under
-`kernel/src/`. IPC and networking arrive in later phases of the [roadmap](ROADMAP.md), as
-do `vinit` and `vsh`.
+All of these exist today except the compositor, along with `fs/` (file systems) under
+`kernel/src/`. Networking and more IPC arrive in later phases of the
+[roadmap](ROADMAP.md).
+
+## The Linux subsystem today
+
+`personality/linux/` runs static Linux x86_64 programs, starting with BusyBox. When the
+ELF loader finds no `.note.vexa` note in a program, the process gets the Linux
+personality, and its system calls go to `linux_syscall()`, which translates each one
+into core operations:
+
+- **File descriptors are handle numbers.** `open` becomes `vfs_open` plus a handle;
+  `dup2`, `fcntl` and close-on-exec work on the same handle table native programs use.
+- **Processes.** `fork` is `process_fork` in the core (a copy-on-write address space
+  and a copy of the handle table); `execve` is `process_exec`, which can also start a
+  native program; `wait4` is `process_wait_child`.
+- **Signals** use the core's numbering, which is Linux's. The core decides when a
+  signal is delivered; the personality only builds the Linux signal frame on the user
+  stack, and `rt_sigreturn` takes it down again. Vector registers are kept in the
+  kernel while a handler runs, so a program can't hand back a malformed state.
+- **Terminals.** The console terminal already uses Linux's termios flags, so
+  `TCGETS`/`TCSETS` pass straight through.
+
+Anything missing returns `ENOSYS` and is logged once, with its arguments:
+`[linux] prog (process 7): system call 41 is not implemented (...)`.
+
+The kernel builds without the subsystem with `make LINUX_COMPAT=0`, and `make test`
+boots such a kernel to check native Vexa never depends on it.
 
 ## Handles and files today
 
 A process refers to kernel objects through **handles**: small numbers in its handle
-table, each with the rights it was opened with (read, write). Open files are the first
-kind of object; pipes, processes and sockets will be others. The Linux subsystem will map
-Unix file descriptors onto the same table.
+table, each with the rights it was opened with (read, write). Open files, pipes and
+processes are objects so far; sockets will be another. The Linux subsystem maps Unix
+file descriptors onto the same table.
 
 Files live in one tree managed by the **VFS** (`core/vfs.c`). File systems plug in
 underneath it:

@@ -1,4 +1,5 @@
 #include <vexa/arch.h>
+#include <vexa/cpu.h>
 #include <vexa/elf.h>
 #include <vexa/fpu.h>
 #include <vexa/kprintf.h>
@@ -39,6 +40,7 @@
 #define AT_EXECFN 31
 
 __attribute__((noreturn)) void enter_user_mode(uint64_t entry, uint64_t stack); /* syscall.c */
+__attribute__((noreturn)) void return_to_user(struct interrupt_frame *f);      /* syscall.S */
 
 /* Protects the process list and parent links. Lock order: the scheduler
  * lock, then this. */
@@ -275,6 +277,161 @@ struct process *process_spawn(const struct spawn_request *request, int *error,
 
     thread_start(thread);
     return process;
+}
+
+/* ---- fork and exec (for the Linux personality) ---- */
+
+struct fork_start {
+    struct process *process;
+    struct interrupt_frame frame;
+};
+
+static void forked_thread_entry(void *arg) {
+    struct fork_start *start = arg;
+    struct interrupt_frame frame = start->frame; /* On this thread's own stack. */
+    kfree(start);
+    interrupts_disable();
+    return_to_user(&frame);
+}
+
+static void copy_name(struct process *process, const char *path) {
+    const char *name = path;
+    for (const char *p = path; *p; p++) {
+        if (*p == '/' && p[1]) {
+            name = p + 1;
+        }
+    }
+    size_t i = 0;
+    for (; name[i] && name[i] != '/' && i < sizeof(process->name) - 1; i++) {
+        process->name[i] = name[i];
+    }
+    process->name[i] = '\0';
+}
+
+struct process *process_fork(struct interrupt_frame *frame, int *error) {
+    struct process *parent = process_current();
+    struct thread *parent_thread = thread_current();
+    *error = -VX_ENOMEM;
+    struct process *child = kzalloc(sizeof(*child));
+    struct fork_start *start = child ? kmalloc(sizeof(*start)) : NULL;
+    char *cwd = start ? kmalloc(strlen(parent->cwd) + 1) : NULL;
+    if (!cwd) {
+        kfree(start);
+        kfree(child);
+        return NULL;
+    }
+    object_init(&child->object, &process_object_type);
+    strcpy(cwd, parent->cwd);
+    child->cwd = cwd;
+    memcpy(child->name, parent->name, sizeof(child->name));
+    memcpy(child->signal_actions, parent->signal_actions, sizeof(child->signal_actions));
+    child->personality = parent->personality;
+    child->address_space = vm_fork(parent->address_space);
+    child->handles = child->address_space ? handle_table_clone(parent->handles) : NULL;
+    bool data_ok = true;
+    if (child->handles && parent->personality_data && parent->personality->fork_data) {
+        child->personality_data = parent->personality->fork_data(parent->personality_data);
+        data_ok = child->personality_data != NULL;
+    }
+    struct thread *thread = NULL;
+    void *fpu = NULL;
+    if (child->handles && data_ok) {
+        thread = thread_create_stopped(child->name, forked_thread_entry, start);
+        fpu = thread ? fpu_alloc_state() : NULL;
+    }
+    if (!fpu) {
+        if (thread) {
+            thread_destroy_unstarted(thread);
+        }
+        if (child->handles) {
+            handle_table_destroy(child->handles);
+        }
+        kfree(start);
+        object_put(&child->object); /* Frees the address space and data too. */
+        return NULL;
+    }
+    /* The child starts where the parent is: same registers (fork returns 0
+     * there), vector registers, and thread-local storage pointer. */
+    start->process = child;
+    start->frame = *frame;
+    start->frame.rax = 0;
+    fpu_save(fpu);
+    thread->fpu_state = fpu;
+    thread->process = child;
+    thread->blocked_signals = parent_thread->blocked_signals;
+    thread->fs_base = rdmsr(IA32_FS_BASE_MSR);
+    child->main_thread = thread;
+    child->parent = parent;
+
+    uint64_t flags = spin_lock_irqsave(&process_lock);
+    child->id = next_process_id++;
+    child->group = parent->group;
+    child->next = processes;
+    processes = child;
+    object_ref(&child->object);
+    spin_unlock_irqrestore(&process_lock, flags);
+
+    *error = 0;
+    thread_start(thread);
+    return child;
+}
+
+int process_exec(const char *path, char *const *argv, size_t argc, char *const *envp,
+                 size_t envc, struct interrupt_frame *frame, const char **reason) {
+    struct process *process = process_current();
+    struct address_space *as;
+    uint64_t entry, stack_pointer;
+    const struct personality *personality;
+    int error = process_load(path, argv, argc, envp, envc, &as, &entry, &stack_pointer,
+                             &personality, reason);
+    if (error) {
+        return error; /* The old program carries on. */
+    }
+    void *fresh_fpu = fpu_alloc_state();
+    if (!fresh_fpu) {
+        vm_destroy(as);
+        *reason = "out of memory";
+        return -VX_ENOMEM;
+    }
+    /* Past the point of no return: swap in the new program. This is the
+     * process's only thread, so nothing else uses the old address space. */
+    struct address_space *old = process->address_space;
+    process->address_space = as;
+    vmm_activate(as);
+    vm_destroy(old);
+
+    if (process->personality_data && process->personality->free_data) {
+        process->personality->free_data(process->personality_data);
+    }
+    process->personality_data = NULL;
+    process->personality = personality;
+    /* Handlers belong to the old program; ignored signals stay ignored. */
+    for (int i = 0; i < VX_SIGNAL_COUNT; i++) {
+        if (process->signal_actions[i] == SIGNAL_HANDLER) {
+            process->signal_actions[i] = SIGNAL_DEFAULT;
+        }
+    }
+    handle_close_on_exec(process->handles);
+    copy_name(process, path);
+
+    struct thread *thread = thread_current();
+    memset(thread->name, 0, sizeof(thread->name));
+    memcpy(thread->name, process->name, sizeof(thread->name) - 1);
+    thread->fs_base = 0;
+    wrmsr(IA32_FS_BASE_MSR, 0);
+    fpu_restore(fresh_fpu);
+    fpu_free_state(fresh_fpu);
+
+    struct interrupt_frame start = {
+        .rip = entry,
+        .cs = frame->cs,
+        .rflags = RFLAGS_INTERRUPTS_ON,
+        .rsp = stack_pointer,
+        .ss = frame->ss,
+        .vector = frame->vector,
+    };
+    *frame = start;
+    return 0;
 }
 
 /* ---- Exiting and collecting ---- */

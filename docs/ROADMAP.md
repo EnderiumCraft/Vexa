@@ -105,7 +105,7 @@ registers survive being interrupted.
 mounted under `/mnt`, and `run /mnt/vda1/hello-world` runs a program from one. `make test`
 writes to virtio, SATA and NVMe disks and then checks them with Linux's `e2fsck`.
 
-## Phase 5: Vexa userland
+## Phase 5: Vexa userland *(done)*
 
 Native track:
 - [x] `libvexa`: C startup code, strings, memory allocator, `printf`, buffered file I/O,
@@ -121,13 +121,20 @@ Native track:
       `pwd`, `ps`, `kill`, `sleep`, `clear`, `uptime`, `hello`, `sys`
 
 Linux track:
-- [ ] Create `kernel/src/personality/linux/` and the `LINUX_COMPAT` build option
-- [ ] Linux calls mapped onto the core: `read`, `write`, `open`, `mmap`, `exit_group`,
-      then `fork`, `execve`, `wait4`, signals, `ioctl` for terminals
-- [ ] Log every unimplemented Linux call with its number and arguments
-- [ ] Run static BusyBox from the Vexa shell
+- [x] Create `kernel/src/personality/linux/` and the `LINUX_COMPAT` build option
+      (`make test` also boots a kernel built without it)
+- [x] Linux calls mapped onto the core: files and directories, `mmap` and `brk`,
+      `fork` (copy-on-write), `execve`, `wait4`, process groups, signals with handlers
+      (`rt_sigaction`, signal frames, `rt_sigreturn`, `SA_RESTART`), terminal `ioctl`s,
+      `poll` and `select`, clocks and sleeping; about 150 calls
+- [x] Log every unimplemented Linux call with its number and arguments
+- [x] Run static BusyBox from the Vexa shell: built from a pinned release (1.36.1) with
+      musl, installed as `/linux/bin/busybox`; its source ships with every release
+- [ ] Moved to later phases: symbolic links, `/proc` (for `ps` and `top`), timers that
+      send signals (`alarm`), non-blocking I/O
 
-**Milestone:** a working Vexa shell, and Linux BusyBox running from it.
+**Milestone:** a working Vexa shell, and Linux BusyBox running from it. Reached in
+0.7.0: `busybox sh` runs from `vsh`, with pipes, job control, Ctrl-C, `trap` and `vi`.
 
 ## Phase 6: Dynamic linking and threads
 

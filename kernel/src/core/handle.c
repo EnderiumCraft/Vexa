@@ -24,8 +24,15 @@ void handle_table_destroy(struct handle_table *table) {
 }
 
 int handle_add(struct handle_table *table, struct object *object, uint32_t rights) {
+    return handle_add_from(table, object, rights, 0);
+}
+
+int handle_add_from(struct handle_table *table, struct object *object, uint32_t rights, int min) {
+    if (min < 0) {
+        min = 0;
+    }
     uint64_t flags = spin_lock_irqsave(&table->lock);
-    for (int i = 0; i < HANDLE_MAX; i++) {
+    for (int i = min; i < HANDLE_MAX; i++) {
         if (!table->objects[i]) {
             table->objects[i] = object;
             table->rights[i] = rights;

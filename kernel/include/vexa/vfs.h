@@ -78,6 +78,7 @@ struct file {
     struct vnode *vnode;
     uint64_t offset;
     uint32_t flags; /* VX_OPEN_* */
+    char *path;     /* As opened (absolute), for fchdir and openat. */
 };
 
 extern const struct object_type file_object_type;
@@ -111,6 +112,9 @@ int64_t vfs_seek(struct file *file, int64_t offset, int whence);
 int vfs_read_dir(struct file *file, struct vx_dir_entry *entry);
 void vfs_file_stat(struct file *file, struct vx_stat *stat);
 void vfs_close(struct file *file);
+int vfs_truncate(struct file *file, uint64_t size);
+/* True if the file is the terminal (/dev/console or /dev/tty). */
+bool vfs_is_terminal(struct file *file);
 
 void vfs_register_filesystem(const struct filesystem_type *type);
 const char *vfs_error_name(int error);

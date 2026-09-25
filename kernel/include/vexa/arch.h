@@ -22,6 +22,7 @@
 #define VECTOR_SPURIOUS 0xff
 
 #define RFLAGS_INTERRUPTS_ON 0x202 /* IF set, plus the always-one bit 1. */
+#define IA32_FS_BASE_MSR 0xc0000100 /* User thread-local storage pointer. */
 
 /* Register state pushed by the ISR stubs in isr.S. Order must match. */
 struct interrupt_frame {

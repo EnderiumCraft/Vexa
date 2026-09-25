@@ -11,9 +11,10 @@ that sits on top of the Vexa kernel. See [docs/ARCHITECTURE.md](docs/ARCHITECTUR
 
 ## Status
 
-Phases 1 to 4 are complete: boot and CPU basics, memory management, processes and
-user mode, and files and storage. Phase 5 is under way: Vexa now boots into its own
-shell, `vsh`, with pipes and a set of core programs. The kernel:
+Phases 1 to 5 are complete: boot and CPU basics, memory management, processes and
+user mode, files and storage, and a userland. Vexa boots into its own shell, `vsh`,
+with a set of native programs, and runs its first Linux program, BusyBox, through the
+Linux subsystem. The kernel:
 
 - boots through the [Limine](https://github.com/limine-bootloader/limine) bootloader (BIOS and UEFI)
 - runs in 64-bit long mode as a higher-half kernel
@@ -42,6 +43,8 @@ shell, `vsh`, with pipes and a set of core programs. The kernel:
   and disks mounted under `/mnt`
 - drives disks through virtio-blk (virtual machines), AHCI (SATA) and NVMe, reads GPT
   and MBR partition tables, and reads and writes ext2 file systems
+- runs static Linux programs through an optional Linux subsystem: `fork`, `execve`,
+  signal handlers, terminal control and about 150 system calls in all
 
 At boot, `vinit` (the first program) starts `vsh`, the Vexa shell. Some things to try at
 the `vexa:/>` prompt:
@@ -60,6 +63,8 @@ the `vexa:/>` prompt:
 | `sleep 30`, then Ctrl-C | stops the program in front |
 | `ps`, `kill`, `uptime` | processes and how long the system has been up |
 | `sys` | the kernel's own commands: `sys disks`, `sys mount`, `sys pci`, `sys cpu`, `sys mem`, `sys memtest`, `sys threads` |
+| `busybox sh` | a Linux shell, BusyBox's; inside it, BusyBox's own `ls`, `vi`, `grep`, `wc`, ... (`exit` to go back) |
+| `busybox` | lists BusyBox's commands; run one with e.g. `busybox uname -a` |
 
 The kernel's built-in command line (the kernel monitor) is still there for when
 something is broken: pick it in the boot menu, and Vexa starts it instead of `vinit`.
@@ -86,7 +91,7 @@ ext4 disks are refused (Vexa doesn't support their extra features yet), and ext2
 journal, so pulling the plug mid-write can leave the disk needing a check with
 `e2fsck` on Linux.
 
-Next in Phase 5: the Linux subsystem, starting with BusyBox. See [docs/ROADMAP.md](docs/ROADMAP.md) for the full
+Next up is Phase 6: threads and dynamic linking, for both native and Linux programs. See [docs/ROADMAP.md](docs/ROADMAP.md) for the full
 plan from here to Firefox.
 
 ## Download
@@ -115,15 +120,18 @@ You need a Linux host (or WSL) with:
 | Python 3 (for `make test`) | `python3` |
 | UEFI firmware (for `make test`) | `ovmf` |
 | mke2fs and e2fsck (for test disks) | `e2fsprogs` |
+| musl C compiler and Linux headers (for BusyBox) | `musl-tools`, `linux-libc-dev` |
 
 ```sh
 make                # builds build/vexa.iso (fetches Limine on first run)
 make run            # boots in QEMU; kernel log appears in your terminal
+make LINUX_COMPAT=0 # a kernel without the Linux subsystem (and without BusyBox)
 make run-disk       # the same, with a disk mounted at /mnt/vda1
 make run-nographic  # headless boot, serial only (Ctrl-A then X to quit)
 make test           # boots in QEMU (BIOS; UEFI with 4 CPUs and 6 GiB; safe mode), with
                     # virtio, SATA and NVMe test disks; types commands into the virtual
-                    # keyboard, checks the replies, then checks the disks with e2fsck
+                    # keyboard, checks the replies, then checks the disks with e2fsck;
+                    # then boots a kernel built without the Linux subsystem
 make clean
 ```
 
@@ -144,12 +152,14 @@ kernel/
                      signals, pipes, handles, VFS,
                      block cache and partitions, ELF loader, ACPI, init, kernel monitor
   src/personality/vexa/  the native Vexa system calls
+  src/personality/linux/ the Linux subsystem (optional: LINUX_COMPAT)
   src/dev/           serial, framebuffer, text console, terminal, font, PS/2 keyboard, clock,
                      PCI, virtio-blk, AHCI, NVMe
   src/lib/           string functions, kprintf, panic
   src/fs/            ext2, tmpfs, devfs, initramfs unpacking
 abi/vexa/abi.h       system call numbers and error codes, shared by kernel and libvexa
 rootfs/              files for the root file system (packed into initramfs.tar)
+third_party/         BusyBox's build configuration (its source is fetched at build time)
 libvexa/             Vexa's C library: program startup, system calls, printf, strings
 userland/            Vexa programs, one directory each: vinit, vsh, ls, cat, ...
 tests/disk-content/  files put on the test disks
@@ -157,6 +167,7 @@ tools/
   bdf2c.py           converts a BDF bitmap font into the console font table
   qemu-smoke-test.py boot test used by `make test`
   make-disk.py       builds disk images (GPT, MBR or none) holding an ext2 file system
+  configure-busybox.sh  applies third_party/busybox.config to BusyBox's configuration
 docs/
   ARCHITECTURE.md    how the kernel, native interface and Linux subsystem fit together
   ROADMAP.md         the plan, phase by phase
@@ -168,3 +179,8 @@ starts it.
 
 The console font is [Spleen](https://github.com/fcambus/spleen) 8x16 by Frederic Cambus
 (BSD 2-Clause license, reproduced in `kernel/src/dev/font.c`).
+
+The ISO includes [BusyBox](https://busybox.net) 1.36.1 (GPL-2.0), built unmodified from
+its source with the configuration in `third_party/busybox.config`. Every release on the
+Releases page carries the matching source and configuration
+(`busybox-1_36_1-source.tar.gz`).

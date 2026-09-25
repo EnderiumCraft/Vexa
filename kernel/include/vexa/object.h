@@ -56,6 +56,8 @@ void handle_table_destroy(struct handle_table *table);
 int handle_add(struct handle_table *table, struct object *object, uint32_t rights);
 /* Returns a new reference to the object behind `handle` if it has the given
  * type and all of `rights`; otherwise NULL with *error set (-VX_EBADF/-VX_EACCES). */
+/* The same, using the lowest free number that is at least `min` (Linux dup). */
+int handle_add_from(struct handle_table *table, struct object *object, uint32_t rights, int min);
 struct object *handle_get(struct handle_table *table, int handle, const struct object_type *type,
                           uint32_t rights, int *error);
 int handle_close(struct handle_table *table, int handle);

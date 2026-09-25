@@ -5,7 +5,9 @@
 #   make run-nographic   boot headless; serial log only (Ctrl-A X to quit)
 #   make programs build the user programs in userland/ (with libvexa)
 #   make test     boot in QEMU (BIOS; UEFI with 4 CPUs, 6 GiB and a modern CPU
-#                 model; safe mode), type commands and check the replies
+#                 model; safe mode; a kernel without the Linux subsystem), type
+#                 commands and check the replies
+#   make busybox  build BusyBox (needs musl-gcc: Debian/Ubuntu package musl-tools)
 #   make clean
 
 CC      ?= cc
@@ -19,6 +21,10 @@ ISO     := $(BUILD)/vexa.iso
 # Same kernel, but the boot menu defaults to safe mode. Used by `make test`.
 SAFE_ISO := $(BUILD)/vexa-safe-mode-test.iso
 
+# The Linux subsystem (kernel/src/personality/linux) is optional:
+# `make LINUX_COMPAT=0` builds a kernel that runs only Vexa programs.
+LINUX_COMPAT ?= 1
+
 CFLAGS := -g -O2 -pipe -std=gnu11 -Wall -Wextra -Werror \
 	-ffreestanding -fno-stack-protector -fno-stack-check -fno-lto \
 	-fno-PIC -fno-omit-frame-pointer -m64 -march=x86-64 \
@@ -28,6 +34,11 @@ LDFLAGS := -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 \
 	--no-dynamic-linker -T kernel/linker.ld
 
 SRCS := $(shell find kernel/src -name '*.c' -o -name '*.S')
+ifeq ($(LINUX_COMPAT),1)
+CFLAGS += -DLINUX_COMPAT
+else
+SRCS := $(filter-out kernel/src/personality/linux/%,$(SRCS))
+endif
 OBJS := $(patsubst kernel/src/%,$(BUILD)/obj/%.o,$(SRCS))
 
 # User programs: libvexa plus one directory per program under userland/.
@@ -47,6 +58,21 @@ PROGRAM_BINS := $(addprefix $(BUILD)/programs/,$(PROGRAMS))
 INITRAMFS := $(BUILD)/initramfs.tar
 ROOTFS_FILES := $(shell find rootfs -type f)
 
+# BusyBox, the first Linux program Vexa runs: built from a pinned release with
+# musl (a static binary), and put in /linux/bin. It's GPL-2.0, so
+# `make busybox-source` packs the exact source and configuration used, which
+# the releases publish next to the ISO.
+BUSYBOX_VERSION := 1_36_1
+BUSYBOX_REPO := https://github.com/mirror/busybox.git
+BUSYBOX_SRC := third_party/busybox
+BUSYBOX_BUILD := $(BUILD)/busybox
+BUSYBOX := $(BUSYBOX_BUILD)/busybox
+BUSYBOX_SOURCE_TARBALL := $(BUILD)/busybox-$(BUSYBOX_VERSION)-source.tar.gz
+MUSL_CC ?= musl-gcc
+ifeq ($(LINUX_COMPAT),1)
+LINUX_PROGRAMS := $(BUSYBOX)
+endif
+
 # Test disks for `make test`: the same ext2 file system (tests/disk-content
 # plus hello-world) on three kinds of disk, each with a different layout.
 DISK_CONTENT_FILES := $(shell find tests/disk-content -type f)
@@ -57,7 +83,8 @@ MY_DISK := $(BUILD)/my-disk.img
 USER_OBJS := $(LIBVEXA_OBJS) \
 	$(patsubst %,$(BUILD)/%.o,$(wildcard $(addsuffix /*.c,$(addprefix userland/,$(PROGRAMS)))))
 
-.PHONY: all kernel programs iso run run-disk run-nographic test test-disks clean distclean
+.PHONY: all kernel programs iso run run-disk run-nographic test test-disks clean distclean \
+	busybox busybox-source test-native
 
 all: iso
 kernel: $(KERNEL)
@@ -91,13 +118,52 @@ $(BUILD)/programs/%: $(LIBVEXA_OBJS) libvexa/program.ld \
 
 # The starting root file system: rootfs/ plus the programs in /bin, as a tar
 # archive (ustar, with fixed owners and times so builds are reproducible).
-$(INITRAMFS): $(PROGRAM_BINS) $(ROOTFS_FILES)
+$(INITRAMFS): $(PROGRAM_BINS) $(ROOTFS_FILES) $(LINUX_PROGRAMS)
 	rm -rf $(BUILD)/rootfs
 	mkdir -p $(BUILD)/rootfs/bin
 	cp -R rootfs/. $(BUILD)/rootfs/
 	cp $(PROGRAM_BINS) $(BUILD)/rootfs/bin/
+	if [ -n "$(LINUX_PROGRAMS)" ]; then \
+		mkdir -p $(BUILD)/rootfs/linux/bin && cp $(LINUX_PROGRAMS) $(BUILD)/rootfs/linux/bin/; fi
 	tar --format=ustar --owner=0 --group=0 --numeric-owner --mtime=@0 --sort=name \
 		-cf $@ -C $(BUILD)/rootfs .
+
+# ---- BusyBox ----
+
+$(BUSYBOX_SRC)/Makefile:
+	rm -rf $(BUSYBOX_SRC)
+	git clone --depth 1 --branch $(BUSYBOX_VERSION) $(BUSYBOX_REPO) $(BUSYBOX_SRC)
+
+# musl-gcc only searches musl's headers; BusyBox also needs the Linux kernel's
+# (from linux-libc-dev), so make a directory with just those.
+$(BUILD)/linux-headers:
+	rm -rf $@ && mkdir -p $@
+	for dir in linux asm-generic mtd; do ln -s /usr/include/$$dir $@/$$dir; done
+	ln -s /usr/include/$$($(CC) -dumpmachine)/asm $@/asm
+
+$(BUSYBOX): $(BUSYBOX_SRC)/Makefile third_party/busybox.config tools/configure-busybox.sh \
+		| $(BUILD)/linux-headers
+	mkdir -p $(BUSYBOX_BUILD)
+	$(MAKE) -C $(BUSYBOX_SRC) O=$(abspath $(BUSYBOX_BUILD)) defconfig >/dev/null
+	tools/configure-busybox.sh $(BUSYBOX_BUILD)/.config third_party/busybox.config
+	yes '' | $(MAKE) -C $(BUSYBOX_BUILD) oldconfig >/dev/null
+	$(MAKE) -C $(BUSYBOX_BUILD) CC=$(MUSL_CC) \
+		EXTRA_CFLAGS="-isystem $(abspath $(BUILD)/linux-headers)" busybox
+	touch $@
+
+busybox: $(BUSYBOX)
+
+$(BUSYBOX_SOURCE_TARBALL): $(BUSYBOX)
+	git -C $(BUSYBOX_SRC) archive --format=tar --prefix=busybox-$(BUSYBOX_VERSION)/ HEAD \
+		> $(BUILD)/busybox-source.tar
+	tar --append -f $(BUILD)/busybox-source.tar --transform 's,^,busybox-$(BUSYBOX_VERSION)/,' \
+		-C $(BUSYBOX_BUILD) .config
+	tar --append -f $(BUILD)/busybox-source.tar --transform 's,^third_party/,busybox-$(BUSYBOX_VERSION)/vexa-,' \
+		third_party/busybox.config
+	gzip -9n < $(BUILD)/busybox-source.tar > $@
+	rm $(BUILD)/busybox-source.tar
+
+busybox-source: $(BUSYBOX_SOURCE_TARBALL)
 
 $(BUILD)/disk-content: $(DISK_CONTENT_FILES) $(BUILD)/programs/hello-world
 	rm -rf $@
@@ -173,11 +239,17 @@ test: $(ISO) $(SAFE_ISO) $(TEST_DISKS)
 	tools/qemu-smoke-test.py --disks $(BUILD)/disks
 	tools/qemu-smoke-test.py --disks $(BUILD)/disks --uefi --smp 4 --memory 6G --cpu max
 	tools/qemu-smoke-test.py --disks $(BUILD)/disks --safe-mode --iso $(SAFE_ISO)
+	$(MAKE) test-native
+
+# Vexa must work without the Linux subsystem: build and boot a kernel without it.
+test-native:
+	$(MAKE) BUILD=$(BUILD)/native LINUX_COMPAT=0 iso
+	tools/qemu-smoke-test.py --no-linux --iso $(BUILD)/native/vexa.iso
 
 clean:
 	rm -rf $(BUILD)
 
 distclean: clean
-	rm -rf limine
+	rm -rf limine $(BUSYBOX_SRC)
 
 -include $(OBJS:.o=.d) $(USER_OBJS:.o=.d)

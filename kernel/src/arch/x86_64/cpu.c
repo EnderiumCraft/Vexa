@@ -8,7 +8,6 @@
 #include <vexa/uaccess.h>
 
 #define IA32_PAT_MSR 0x277
-#define IA32_FS_BASE_MSR 0xc0000100
 #define IA32_GS_BASE_MSR 0xc0000101
 #define IA32_KERNEL_GS_BASE_MSR 0xc0000102
 

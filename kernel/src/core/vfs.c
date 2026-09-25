@@ -232,6 +232,7 @@ static void file_destroy(struct object *object) {
     vfs_lock();
     vnode_put(file->vnode);
     vfs_unlock();
+    kfree(file->path);
     kfree(file);
 }
 
@@ -298,6 +299,11 @@ int vfs_open(const char *path, size_t length, uint32_t flags, struct file **out)
     object_init(&file->object, &file_object_type);
     file->vnode = vnode;
     file->flags = flags;
+    file->path = kmalloc(length + 1);
+    if (file->path) {
+        memcpy(file->path, path, length);
+        file->path[length] = '\0';
+    }
     *out = file;
     return 0;
 }
@@ -516,6 +522,22 @@ void vfs_file_stat(struct file *file, struct vx_stat *stat) {
 
 void vfs_close(struct file *file) {
     object_put(&file->object);
+}
+
+int vfs_truncate(struct file *file, uint64_t size) {
+    struct vnode *vnode = file->vnode;
+    if (vnode->type == VX_TYPE_DIRECTORY) {
+        return -VX_EISDIR;
+    }
+    if (vnode->type != VX_TYPE_FILE) {
+        return -VX_EINVAL;
+    }
+    vfs_lock();
+    int error = vnode->mount->read_only || !vnode->ops->truncate
+                    ? -VX_EROFS
+                    : vnode->ops->truncate(vnode, size);
+    vfs_unlock();
+    return error;
 }
 
 const char *vfs_error_name(int error) {

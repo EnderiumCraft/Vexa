@@ -100,6 +100,15 @@ int process_load(const char *path, char *const *argv, size_t argc, char *const *
                  uint64_t *stack_pointer, const struct personality **personality,
                  const char **reason);
 
+/* Linux fork: a copy of the calling process (memory shared copy-on-write,
+ * handles, signal settings), whose thread resumes from `frame` with rax 0.
+ * Returns it with a reference for the caller, or NULL with *error set. */
+struct process *process_fork(struct interrupt_frame *frame, int *error);
+/* Replaces the calling process's program, like Linux execve. On success
+ * `frame` is set up to start the new program; on failure nothing changed. */
+int process_exec(const char *path, char *const *argv, size_t argc, char *const *envp,
+                 size_t envc, struct interrupt_frame *frame, const char **reason);
+
 struct process *process_current(void);
 /* Returns a reference to the process with this id, or NULL. */
 struct process *process_find(uint32_t id);

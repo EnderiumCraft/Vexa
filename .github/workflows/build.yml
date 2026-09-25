@@ -21,10 +21,11 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential xorriso qemu-system-x86 ovmf python3 e2fsprogs
+            build-essential xorriso qemu-system-x86 ovmf python3 e2fsprogs \
+            musl-tools linux-libc-dev
 
-      - name: Build ISO
-        run: make
+      - name: Build ISO (with BusyBox, built from source)
+        run: make && make busybox-source
 
       - name: Boot tests (BIOS, UEFI with 4 CPUs, safe mode; with test disks)
         run: |
@@ -44,6 +45,8 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           cp build/vexa.iso "vexa-$version.iso"
           sha256sum "vexa-$version.iso" > "vexa-$version.iso.sha256"
+          # BusyBox is GPL-2.0: every release carries its exact source and configuration.
+          cp build/busybox-*-source.tar.gz .
 
       - uses: actions/upload-artifact@v4
         with:
@@ -51,6 +54,7 @@ jobs:
           path: |
             vexa-${{ steps.version.outputs.version }}.iso
             vexa-${{ steps.version.outputs.version }}.iso.sha256
+            busybox-*-source.tar.gz
 
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -82,7 +86,9 @@ jobs:
 
           Built and boot-tested in QEMU (BIOS, UEFI with 4 CPUs, and safe mode). This is replaced on every push; see the versioned releases for stable downloads.
 
-          Run it with: \`qemu-system-x86_64 -M q35 -m 512M -cdrom vexa-${VERSION}.iso\`"
+          Run it with: \`qemu-system-x86_64 -M q35 -m 512M -cdrom vexa-${VERSION}.iso\`
+
+          The ISO includes BusyBox (GPL-2.0); its source and build configuration are attached."
           # Move the tag to this commit, then replace the release and its files.
           git tag -f latest-build
           git push -f origin refs/tags/latest-build
@@ -90,7 +96,7 @@ jobs:
           gh release create latest-build \
             --title "Latest build (${VERSION}, ${short_sha})" \
             --notes "$notes" --prerelease --latest=false \
-            "vexa-${VERSION}.iso" "vexa-${VERSION}.iso.sha256"
+            "vexa-${VERSION}.iso" "vexa-${VERSION}.iso.sha256" busybox-*-source.tar.gz
 
       - name: Create versioned release if VEXA_VERSION is new
         run: |
@@ -100,4 +106,4 @@ jobs:
           fi
           gh release create "v${VERSION}" --target "$GITHUB_SHA" \
             --title "Vexa ${VERSION}" --generate-notes --latest \
-            "vexa-${VERSION}.iso" "vexa-${VERSION}.iso.sha256"
+            "vexa-${VERSION}.iso" "vexa-${VERSION}.iso.sha256" busybox-*-source.tar.gz

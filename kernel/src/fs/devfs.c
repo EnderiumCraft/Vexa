@@ -80,6 +80,10 @@ static int64_t block_node_write(struct vnode *vnode, const void *buffer, size_t 
 static const struct vnode_ops null_ops = {.read = null_read, .write = null_write};
 static const struct vnode_ops zero_ops = {.read = zero_read, .write = null_write};
 static const struct vnode_ops console_ops = {.read = console_read, .write = console_write};
+
+bool vfs_is_terminal(struct file *file) {
+    return file->vnode->ops == &console_ops;
+}
 static const struct vnode_ops block_ops = {.read = block_node_read, .write = block_node_write};
 
 static void add_node(const char *name, uint32_t type, const struct vnode_ops *ops,
