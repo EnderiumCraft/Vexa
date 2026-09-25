@@ -117,11 +117,8 @@ static int load_segment(struct address_space *as, struct file *file,
     return 0;
 }
 
-/* Position-independent executables (ET_DYN) go here, like on Linux. */
-#define PIE_BASE 0x0000555555554000ULL
-
-int elf_load(struct address_space *as, struct file *file, struct elf_image *image,
-             const char **reason) {
+int elf_load(struct address_space *as, struct file *file, uint64_t load_base,
+             struct elf_image *image, const char **reason) {
     struct vx_stat stat;
     vfs_file_stat(file, &stat);
     uint64_t size = stat.size;
@@ -154,15 +151,21 @@ int elf_load(struct address_space *as, struct file *file, struct elf_image *imag
 
     int result = -VX_ENOEXEC;
     bool native = false;
-    uint64_t base = header.type == ET_DYN ? PIE_BASE : 0;
+    uint64_t base = header.type == ET_DYN ? load_base : 0;
+    image->base = base;
+    image->interp[0] = '\0';
     uint64_t phdr_address = 0, highest = 0;
     for (int i = 0; i < header.phnum; i++) {
         const struct elf64_phdr *ph = &phdrs[i];
         if (ph->type == PT_NOTE && in_file(ph->offset, ph->filesz, size) && has_vexa_note(file, ph)) {
             native = true;
         } else if (ph->type == PT_INTERP) {
-            *reason = "dynamically linked (Vexa can run static programs only, until Phase 6)";
-            goto out;
+            if (ph->filesz < 2 || ph->filesz > ELF_INTERP_MAX || !in_file(ph->offset, ph->filesz, size) ||
+                !read_exact(file, image->interp, ph->filesz, ph->offset) ||
+                image->interp[ph->filesz - 1] != '\0' || image->interp[0] != '/') {
+                *reason = "the dynamic loader's name (PT_INTERP) is not valid";
+                goto out;
+            }
         } else if (ph->type == PT_PHDR) {
             phdr_address = ph->vaddr + base;
         }

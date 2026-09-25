@@ -25,6 +25,10 @@ struct personality {
     /* Personality data follows a process through fork and is freed at exit. */
     void *(*fork_data)(void *data);
     void (*free_data)(void *data);
+    /* Optional: where this personality's programs find an absolute path (the
+     * Linux subsystem looks in /linux first). Returns a new string, or NULL
+     * to use the path as it is. */
+    char *(*translate_path)(const char *path);
 };
 
 extern const struct personality vexa_personality;  /* personality/vexa/ */
@@ -94,11 +98,14 @@ int process_wait_child(struct process *parent, uint32_t id, bool no_hang, int *e
                        int *exit_signal);
 
 /* Loads the program at `path` into a fresh address space with its arguments
- * and environment on the stack. Used by spawn and by exec. */
+ * and environment on the stack, along with its dynamic loader if it has one.
+ * A script starting with "#!" runs its interpreter instead. `caller` (may be
+ * NULL) is the personality asking, which decides how a script's interpreter
+ * path is found. Used by spawn and by exec. */
 int process_load(const char *path, char *const *argv, size_t argc, char *const *envp,
-                 size_t envc, struct address_space **as_out, uint64_t *entry,
-                 uint64_t *stack_pointer, const struct personality **personality,
-                 const char **reason);
+                 size_t envc, const struct personality *caller, struct address_space **as_out,
+                 uint64_t *entry, uint64_t *stack_pointer,
+                 const struct personality **personality, const char **reason);
 
 /* Linux fork: a copy of the calling process (memory shared copy-on-write,
  * handles, signal settings), whose thread resumes from `frame` with rax 0.

@@ -46,6 +46,8 @@
 #define LINUX_SYS_getpid 39
 #define LINUX_SYS_sendfile 40
 #define LINUX_SYS_socket 41
+#define LINUX_SYS_getsockname 51
+#define LINUX_SYS_getpeername 52
 #define LINUX_SYS_clone 56
 #define LINUX_SYS_fork 57
 #define LINUX_SYS_vfork 58
@@ -195,6 +197,7 @@
 #define LE_ENOSYS 38
 #define LE_ENOTEMPTY 39
 #define LE_ELOOP 40
+#define LE_ENOTSOCK 88
 #define LE_ETIMEDOUT 110
 
 /* ---- Files ---- */

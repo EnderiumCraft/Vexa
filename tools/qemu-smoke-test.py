@@ -161,7 +161,9 @@ KEY_NAMES = {" ": "spc", "\n": "ret", "\b": "backspace", "-": "minus", ".": "dot
              "?": "shift-slash", "&": "shift-7", "\"": "shift-apostrophe", "'": "apostrophe",
              "(": "shift-9", ")": "shift-0", "*": "shift-8", "+": "shift-equal", "!": "shift-1",
              "#": "shift-3", "%": "shift-5", "\\": "backslash", ",": "comma", "@": "shift-2", "^": "shift-6",
-             "[": "bracket_left", "]": "bracket_right", "\x1b": "esc"}
+             "[": "bracket_left", "]": "bracket_right", "\x1b": "esc",
+             "{": "shift-bracket_left", "}": "shift-bracket_right", "~": "shift-grave_accent",
+             "`": "grave_accent"}
 
 
 def keys_for(text):

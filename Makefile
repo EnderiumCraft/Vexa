@@ -69,8 +69,21 @@ BUSYBOX_BUILD := $(BUILD)/busybox
 BUSYBOX := $(BUSYBOX_BUILD)/busybox
 BUSYBOX_SOURCE_TARBALL := $(BUILD)/busybox-$(BUSYBOX_VERSION)-source.tar.gz
 MUSL_CC ?= musl-gcc
+# musl's C library, which is also its dynamic loader (/lib/ld-musl-x86_64.so.1).
+MUSL_LIBC ?= /usr/lib/x86_64-linux-musl/libc.so
+
+# GNU bash, from Ubuntu's copy of the upstream release (pinned by checksum).
+BASH_VERSION := 5.2.37
+BASH_URL := https://archive.ubuntu.com/ubuntu/pool/main/b/bash/bash_$(BASH_VERSION).orig.tar.xz
+BASH_SHA256 := 370704c9c859f4060b7df19055e43bb9b5fa09d887699cf6ba87885c5485d36a
+BASH_TARBALL := third_party/bash-$(BASH_VERSION).tar.xz
+BASH_BUILD := $(BUILD)/bash-$(BASH_VERSION)
+BASH := $(BASH_BUILD)/bash
+
+# Everything under /linux: the Linux programs and what they need.
+LINUX_ROOT := $(BUILD)/linux-root
 ifeq ($(LINUX_COMPAT),1)
-LINUX_PROGRAMS := $(BUSYBOX)
+LINUX_TREE := $(LINUX_ROOT)/.done
 endif
 
 # Test disks for `make test`: the same ext2 file system (tests/disk-content
@@ -84,7 +97,7 @@ USER_OBJS := $(LIBVEXA_OBJS) \
 	$(patsubst %,$(BUILD)/%.o,$(wildcard $(addsuffix /*.c,$(addprefix userland/,$(PROGRAMS)))))
 
 .PHONY: all kernel programs iso run run-disk run-nographic test test-disks clean distclean \
-	busybox busybox-source test-native
+	busybox busybox-source bash test-native
 
 all: iso
 kernel: $(KERNEL)
@@ -118,13 +131,14 @@ $(BUILD)/programs/%: $(LIBVEXA_OBJS) libvexa/program.ld \
 
 # The starting root file system: rootfs/ plus the programs in /bin, as a tar
 # archive (ustar, with fixed owners and times so builds are reproducible).
-$(INITRAMFS): $(PROGRAM_BINS) $(ROOTFS_FILES) $(LINUX_PROGRAMS)
+$(INITRAMFS): $(PROGRAM_BINS) $(ROOTFS_FILES) $(LINUX_TREE)
 	rm -rf $(BUILD)/rootfs
 	mkdir -p $(BUILD)/rootfs/bin
 	cp -R rootfs/. $(BUILD)/rootfs/
 	cp $(PROGRAM_BINS) $(BUILD)/rootfs/bin/
-	if [ -n "$(LINUX_PROGRAMS)" ]; then \
-		mkdir -p $(BUILD)/rootfs/linux/bin && cp $(LINUX_PROGRAMS) $(BUILD)/rootfs/linux/bin/; fi
+	if [ -n "$(LINUX_TREE)" ]; then \
+		mkdir -p $(BUILD)/rootfs/linux && cp -a $(LINUX_ROOT)/. $(BUILD)/rootfs/linux/ && \
+		rm $(BUILD)/rootfs/linux/.done; fi
 	tar --format=ustar --owner=0 --group=0 --numeric-owner --mtime=@0 --sort=name \
 		-cf $@ -C $(BUILD)/rootfs .
 
@@ -148,7 +162,7 @@ $(BUSYBOX): $(BUSYBOX_SRC)/Makefile third_party/busybox.config tools/configure-b
 	tools/configure-busybox.sh $(BUSYBOX_BUILD)/.config third_party/busybox.config
 	yes '' | $(MAKE) -C $(BUSYBOX_BUILD) oldconfig >/dev/null
 	$(MAKE) -C $(BUSYBOX_BUILD) CC=$(MUSL_CC) \
-		EXTRA_CFLAGS="-isystem $(abspath $(BUILD)/linux-headers)" busybox
+		EXTRA_CFLAGS="-isystem $(abspath $(BUILD)/linux-headers)" busybox busybox.links
 	touch $@
 
 busybox: $(BUSYBOX)
@@ -164,6 +178,32 @@ $(BUSYBOX_SOURCE_TARBALL): $(BUSYBOX)
 	rm $(BUILD)/busybox-source.tar
 
 busybox-source: $(BUSYBOX_SOURCE_TARBALL)
+
+# ---- bash ----
+
+$(BASH_TARBALL):
+	mkdir -p $(dir $@)
+	curl -fsSL -o $@.part $(BASH_URL)
+	echo "$(BASH_SHA256)  $@.part" | sha256sum -c --quiet
+	mv $@.part $@
+
+# musl-gcc sees no ncurses, so bash uses its own bundled termcap and readline.
+$(BASH): $(BASH_TARBALL)
+	rm -rf $(BASH_BUILD) && mkdir -p $(BUILD)
+	tar -xJf $(BASH_TARBALL) -C $(BUILD)
+	cd $(BASH_BUILD) && ./configure CC=$(MUSL_CC) --prefix=/usr --without-bash-malloc \
+		--disable-nls --enable-static-link=no > configure.log
+	$(MAKE) -C $(BASH_BUILD) > $(BASH_BUILD)/build.log
+	strip $@
+
+bash: $(BASH)
+
+# ---- /linux ----
+
+$(LINUX_ROOT)/.done: $(BUSYBOX) $(BASH) $(MUSL_LIBC) tools/make-linux-root.sh
+	tools/make-linux-root.sh $(LINUX_ROOT) $(MUSL_LIBC) $(BUSYBOX) \
+		$(BUSYBOX_BUILD)/busybox.links $(BASH)
+	touch $@
 
 $(BUILD)/disk-content: $(DISK_CONTENT_FILES) $(BUILD)/programs/hello-world
 	rm -rf $@
@@ -250,6 +290,6 @@ clean:
 	rm -rf $(BUILD)
 
 distclean: clean
-	rm -rf limine $(BUSYBOX_SRC)
+	rm -rf limine $(BUSYBOX_SRC) $(BASH_TARBALL)
 
 -include $(OBJS:.o=.d) $(USER_OBJS:.o=.d)

@@ -44,7 +44,7 @@ static bool start_vinit(void) {
         return false;
     }
     char *argv[] = {"/bin/vinit"};
-    char *envp[] = {"PATH=/bin:/linux/bin", "HOME=/", "TERM=vt100"};
+    char *envp[] = {"PATH=/bin:/linux/bin:/linux/usr/bin:/linux/sbin:/linux/usr/sbin", "HOME=/", "TERM=vt100"};
     struct spawn_request request = {
         .path = "/bin/vinit", .argv = argv, .argc = 1, .envp = envp, .envc = 3,
     };

@@ -141,7 +141,66 @@ static int64_t lx(int64_t result) {
     return -LE_EINVAL;
 }
 
-/* ---- Paths ---- */
+/* ---- Paths ----
+ *
+ * Linux programs expect a Linux file system layout: /lib/ld-musl-x86_64.so.1,
+ * /bin/sh, /usr/lib... Those live under /linux, so that Vexa's own / stays
+ * Vexa's. An absolute path from a Linux program is looked up under /linux
+ * first, and used as it is if nothing is there (so /dev, /tmp, /mnt and
+ * Vexa's own programs are still reachable). The root itself isn't redirected.
+ * FreeBSD's Linux emulation works the same way. */
+
+#define LINUX_ROOT "/linux"
+#define LINUX_ROOT_LENGTH (sizeof(LINUX_ROOT) - 1)
+
+static bool under_linux_root(const char *path) {
+    return memcmp(path, LINUX_ROOT, LINUX_ROOT_LENGTH) == 0 &&
+           (path[LINUX_ROOT_LENGTH] == '/' || path[LINUX_ROOT_LENGTH] == '\0');
+}
+
+static bool is_directory(const char *path, size_t length) {
+    struct vx_stat st;
+    return vfs_stat(path, length, &st) == 0 && st.type == VX_TYPE_DIRECTORY;
+}
+
+static char *linux_translate_path(const char *path) {
+    if (path[0] != '/' || path[1] == '\0' || under_linux_root(path)) {
+        return NULL;
+    }
+    size_t length = strlen(path);
+    char *candidate = kmalloc(LINUX_ROOT_LENGTH + length + 1);
+    if (!candidate) {
+        return NULL;
+    }
+    memcpy(candidate, LINUX_ROOT, LINUX_ROOT_LENGTH);
+    memcpy(candidate + LINUX_ROOT_LENGTH, path, length + 1);
+    struct vx_stat st;
+    if (vfs_lstat(candidate, LINUX_ROOT_LENGTH + length, &st) == 0) {
+        return candidate;
+    }
+    /* Something new (a file being created): it goes under /linux if its
+     * directory exists only there. */
+    size_t parent = length;
+    while (parent > 0 && path[parent - 1] != '/') {
+        parent--;
+    }
+    if (parent > 1 && is_directory(candidate, LINUX_ROOT_LENGTH + parent - 1) &&
+        !is_directory(path, parent - 1)) {
+        return candidate;
+    }
+    kfree(candidate);
+    return NULL;
+}
+
+/* Makes a (normalized, absolute) path Linux-relative: see above. Takes over `path`. */
+static char *linux_path(char *path) {
+    char *translated = path ? linux_translate_path(path) : NULL;
+    if (translated) {
+        kfree(path);
+        return translated;
+    }
+    return path;
+}
 
 /* Copies a path from user memory and makes it absolute: relative to the
  * directory open at `dirfd`, or to the current directory for AT_FDCWD. */
@@ -161,7 +220,7 @@ static int64_t path_at(int64_t dirfd, uint64_t user_path, char **out) {
         return -LE_ENOENT;
     }
     if (buffer[0] == '/' || (int)dirfd == LINUX_AT_FDCWD) {
-        *out = process_absolute_path(me(), buffer, length);
+        *out = linux_path(process_absolute_path(me(), buffer, length));
         kfree(buffer);
         return *out ? 0 : -LE_ENOMEM;
     }
@@ -183,7 +242,7 @@ static int64_t path_at(int64_t dirfd, uint64_t user_path, char **out) {
         memcpy(joined, dir->path, base);
         joined[base] = '/';
         memcpy(joined + base + 1, buffer, length + 1);
-        *out = process_absolute_path(me(), joined, base + 1 + length);
+        *out = linux_path(process_absolute_path(me(), joined, base + 1 + length));
         kfree(joined);
     }
     vfs_close(dir);
@@ -1147,11 +1206,16 @@ static int64_t sys_fchdir(struct interrupt_frame *f, uint64_t fd, uint64_t a1, u
 
 static int64_t sys_getcwd(struct interrupt_frame *f, uint64_t buffer, uint64_t size, uint64_t a2,
                           uint64_t a3, uint64_t a4, uint64_t a5) {
-    size_t length = strlen(me()->cwd) + 1;
+    /* Inside /linux, show the path the program would use: /usr, not /linux/usr. */
+    const char *cwd = me()->cwd;
+    if (under_linux_root(cwd) && cwd[LINUX_ROOT_LENGTH] == '/') {
+        cwd += LINUX_ROOT_LENGTH;
+    }
+    size_t length = strlen(cwd) + 1;
     if (size < length) {
         return -LE_ERANGE;
     }
-    return copy_to_user(buffer, me()->cwd, length) ? (int64_t)length : -LE_EFAULT;
+    return copy_to_user(buffer, cwd, length) ? (int64_t)length : -LE_EFAULT;
 }
 
 static int64_t sys_umask(struct interrupt_frame *f, uint64_t mask, uint64_t a1, uint64_t a2,
@@ -1174,6 +1238,11 @@ static int64_t sys_accept_quietly(struct interrupt_frame *f, uint64_t a0, uint64
 static int64_t sys_not_permitted(struct interrupt_frame *f, uint64_t a0, uint64_t a1,
                                  uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5) {
     return -LE_EPERM;
+}
+
+static int64_t sys_not_a_socket(struct interrupt_frame *f, uint64_t a0, uint64_t a1,
+                                uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5) {
+    return -LE_ENOTSOCK; /* No sockets until Phase 7, so no handle is one. */
 }
 
 static int64_t sys_no_such_call_quietly(struct interrupt_frame *f, uint64_t a0, uint64_t a1,
@@ -2378,6 +2447,8 @@ static const linux_fn syscalls[] = {
     CALL(getpid, sys_getpid),
     CALL(sendfile, sys_sendfile),
     CALL(socket, sys_no_such_call_quietly),
+    CALL(getsockname, sys_not_a_socket),
+    CALL(getpeername, sys_not_a_socket),
     CALL(clone, sys_clone),
     CALL(fork, sys_fork),
     CALL(vfork, sys_fork),
@@ -2533,4 +2604,5 @@ const struct personality linux_personality = {
     .deliver_signal = linux_deliver_signal,
     .fork_data = linux_fork_data,
     .free_data = linux_free_data,
+    .translate_path = linux_translate_path,
 };

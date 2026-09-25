@@ -97,7 +97,7 @@ static uint64_t push_string(struct stack_builder *b, const char *s) {
  *          then the strings they point to, near the top of the stack. */
 static int build_stack(struct address_space *as, char *const *argv, size_t argc,
                        char *const *envp, size_t envc, const struct elf_image *image,
-                       uint64_t *stack_pointer) {
+                       uint64_t interp_base, uint64_t *stack_pointer) {
     size_t total = 0;
     for (size_t i = 0; i < argc; i++) {
         total += strlen(argv[i]) + 1;
@@ -133,7 +133,7 @@ static int build_stack(struct address_space *as, char *const *argv, size_t argc,
     vector[n++] = 0;
     uint64_t aux[][2] = {
         {AT_PHDR, image->phdr_address}, {AT_PHENT, image->phent}, {AT_PHNUM, image->phnum},
-        {AT_PAGESZ, PAGE_SIZE}, {AT_BASE, 0}, {AT_FLAGS, 0}, {AT_ENTRY, image->entry},
+        {AT_PAGESZ, PAGE_SIZE}, {AT_BASE, interp_base}, {AT_FLAGS, 0}, {AT_ENTRY, image->entry},
         {AT_UID, 0}, {AT_EUID, 0}, {AT_GID, 0}, {AT_EGID, 0}, {AT_PLATFORM, platform},
         {AT_HWCAP, 0}, {AT_CLKTCK, 100}, {AT_SECURE, 0}, {AT_RANDOM, random_at},
         {AT_EXECFN, execfn}, {AT_NULL, 0},
@@ -153,23 +153,71 @@ static int build_stack(struct address_space *as, char *const *argv, size_t argc,
     return 0;
 }
 
-int process_load(const char *path, char *const *argv, size_t argc, char *const *envp,
-                 size_t envc, struct address_space **as_out, uint64_t *entry,
-                 uint64_t *stack_pointer, const struct personality **personality,
-                 const char **reason) {
-    struct file *file;
-    int error = vfs_open(path, strlen(path), VX_OPEN_READ, &file);
+#define MAX_SCRIPT_DEPTH 4 /* A script whose interpreter is a script... */
+#define SHEBANG_MAX 256
+
+/* A copy of `path` as `personality` finds it (see struct personality). */
+static char *path_for(const struct personality *personality, const char *path) {
+    char *translated = personality && personality->translate_path
+                           ? personality->translate_path(path)
+                           : NULL;
+    if (translated) {
+        return translated;
+    }
+    char *copy = kmalloc(strlen(path) + 1);
+    if (copy) {
+        strcpy(copy, path);
+    }
+    return copy;
+}
+
+static int open_program(const char *path, struct file **out, const char **reason) {
+    int error = vfs_open(path, strlen(path), VX_OPEN_READ, out);
     if (error) {
         *reason = vfs_error_name(error);
         return error;
     }
     struct vx_stat stat;
-    vfs_file_stat(file, &stat);
+    vfs_file_stat(*out, &stat);
     if (stat.type != VX_TYPE_FILE) {
-        vfs_close(file);
+        vfs_close(*out);
         *reason = stat.type == VX_TYPE_DIRECTORY ? "is a directory" : "not a file";
         return stat.type == VX_TYPE_DIRECTORY ? -VX_EISDIR : -VX_EACCES;
     }
+    return 0;
+}
+
+/* "#!interpreter [argument]": runs the interpreter with the script's path
+ * (and the optional argument) in front of the script's own arguments. */
+static int load_script(const char *path, const char *line, char *const *argv, size_t argc,
+                       char *const *envp, size_t envc, const struct personality *caller,
+                       int depth, struct address_space **as_out, uint64_t *entry,
+                       uint64_t *stack_pointer, const struct personality **personality,
+                       const char **reason);
+
+static int load_program(const char *path, char *const *argv, size_t argc, char *const *envp,
+                        size_t envc, const struct personality *caller, int depth,
+                        struct address_space **as_out, uint64_t *entry,
+                        uint64_t *stack_pointer, const struct personality **personality,
+                        const char **reason) {
+    struct file *file;
+    int error = open_program(path, &file, reason);
+    if (error) {
+        return error;
+    }
+    char start[SHEBANG_MAX + 1];
+    int64_t n = vfs_pread(file, start, SHEBANG_MAX, 0);
+    if (n >= 2 && start[0] == '#' && start[1] == '!') {
+        vfs_close(file);
+        if (depth >= MAX_SCRIPT_DEPTH) {
+            *reason = "scripts nested too deeply";
+            return -VX_ENOEXEC;
+        }
+        start[n] = '\0';
+        return load_script(path, start + 2, argv, argc, envp, envc, caller, depth, as_out,
+                           entry, stack_pointer, personality, reason);
+    }
+
     struct address_space *as = vm_create();
     if (!as) {
         vfs_close(file);
@@ -177,14 +225,37 @@ int process_load(const char *path, char *const *argv, size_t argc, char *const *
         return -VX_ENOMEM;
     }
     struct elf_image image;
-    error = elf_load(as, file, &image, reason);
+    error = elf_load(as, file, ELF_PROGRAM_BASE, &image, reason);
     vfs_close(file);
+    uint64_t start_at = image.entry, interp_base = 0;
+    if (!error && image.interp[0]) {
+        /* A dynamically linked program: its loader starts first, finds the
+         * program through the auxiliary vector, and links it. */
+        char *interp_path = path_for(image.personality, image.interp);
+        struct file *interp;
+        error = interp_path ? open_program(interp_path, &interp, reason) : -VX_ENOMEM;
+        kfree(interp_path);
+        if (error == -VX_ENOENT) {
+            *reason = "its dynamic loader (PT_INTERP) is missing";
+        }
+        if (!error) {
+            struct elf_image loader;
+            error = elf_load(as, interp, ELF_INTERP_BASE, &loader, reason);
+            vfs_close(interp);
+            if (!error && loader.interp[0]) {
+                *reason = "its dynamic loader is itself dynamically linked";
+                error = -VX_ENOEXEC;
+            }
+            start_at = loader.entry;
+            interp_base = loader.base;
+        }
+    }
     if (!error) {
         as->heap_start = as->heap_end = image.heap_start;
         error = vm_add_area(as, USER_STACK_TOP - USER_STACK_SIZE, USER_STACK_TOP, VM_WRITE);
     }
     if (!error) {
-        error = build_stack(as, argv, argc, envp, envc, &image, stack_pointer);
+        error = build_stack(as, argv, argc, envp, envc, &image, interp_base, stack_pointer);
         if (error) {
             *reason = error == -VX_E2BIG ? "arguments too long" : "out of memory";
         }
@@ -194,9 +265,78 @@ int process_load(const char *path, char *const *argv, size_t argc, char *const *
         return error;
     }
     *as_out = as;
-    *entry = image.entry;
+    *entry = start_at;
     *personality = image.personality;
     return 0;
+}
+
+static int load_script(const char *path, const char *line, char *const *argv, size_t argc,
+                       char *const *envp, size_t envc, const struct personality *caller,
+                       int depth, struct address_space **as_out, uint64_t *entry,
+                       uint64_t *stack_pointer, const struct personality **personality,
+                       const char **reason) {
+    /* The interpreter, then at most one argument: the rest of the line. */
+    const char *p = line;
+    while (*p == ' ' || *p == '\t') {
+        p++;
+    }
+    const char *interp_start = p;
+    while (*p && *p != ' ' && *p != '\t' && *p != '\n') {
+        p++;
+    }
+    size_t interp_length = (size_t)(p - interp_start);
+    while (*p == ' ' || *p == '\t') {
+        p++;
+    }
+    const char *arg_start = p;
+    while (*p && *p != '\n') {
+        p++;
+    }
+    if (!*p || interp_length == 0) {
+        *reason = "a script's #! line is empty or too long";
+        return -VX_ENOEXEC;
+    }
+    const char *arg_end = p;
+    while (arg_end > arg_start && (arg_end[-1] == ' ' || arg_end[-1] == '\t' || arg_end[-1] == '\r')) {
+        arg_end--;
+    }
+    char interp[SHEBANG_MAX + 1], arg[SHEBANG_MAX + 1];
+    memcpy(interp, interp_start, interp_length);
+    interp[interp_length] = '\0';
+    size_t arg_length = (size_t)(arg_end - arg_start);
+    memcpy(arg, arg_start, arg_length);
+    arg[arg_length] = '\0';
+
+    /* New arguments: interpreter [arg] script-path original-arguments-after-argv[0]. */
+    size_t new_argc = 0;
+    char **new_argv = kmalloc((argc + 3) * sizeof(char *));
+    char *interp_path = new_argv ? path_for(caller, interp) : NULL;
+    if (!interp_path) {
+        kfree(new_argv);
+        *reason = "out of memory";
+        return -VX_ENOMEM;
+    }
+    new_argv[new_argc++] = interp;
+    if (arg_length) {
+        new_argv[new_argc++] = arg;
+    }
+    new_argv[new_argc++] = (char *)path;
+    for (size_t i = 1; i < argc; i++) {
+        new_argv[new_argc++] = argv[i];
+    }
+    int error = load_program(interp_path, new_argv, new_argc, envp, envc, caller, depth + 1,
+                             as_out, entry, stack_pointer, personality, reason);
+    kfree(interp_path);
+    kfree(new_argv);
+    return error;
+}
+
+int process_load(const char *path, char *const *argv, size_t argc, char *const *envp,
+                 size_t envc, const struct personality *caller, struct address_space **as_out,
+                 uint64_t *entry, uint64_t *stack_pointer,
+                 const struct personality **personality, const char **reason) {
+    return load_program(path, argv, argc, envp, envc, caller, 0, as_out, entry, stack_pointer,
+                        personality, reason);
 }
 
 /* ---- Starting ---- */
@@ -226,7 +366,8 @@ struct process *process_spawn(const struct spawn_request *request, int *error,
     }
 
     *error = process_load(request->path, request->argv, request->argc, request->envp,
-                          request->envc, &process->address_space, &process->entry,
+                          request->envc, request->parent ? request->parent->personality : NULL,
+                          &process->address_space, &process->entry,
                           &process->stack_pointer, &process->personality, reason);
     process->handles = *error ? NULL : handle_table_create();
     if (!*error && !process->handles) {
@@ -382,7 +523,8 @@ int process_exec(const char *path, char *const *argv, size_t argc, char *const *
     struct address_space *as;
     uint64_t entry, stack_pointer;
     const struct personality *personality;
-    int error = process_load(path, argv, argc, envp, envc, &as, &entry, &stack_pointer,
+    int error = process_load(path, argv, argc, envp, envc, process->personality, &as, &entry,
+                             &stack_pointer,
                              &personality, reason);
     if (error) {
         return error; /* The old program carries on. */
