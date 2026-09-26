@@ -1,6 +1,7 @@
 /* files: a file manager window. It lists a directory (folders first); a
- * double click (or Enter) opens a folder, shows an image in the viewer,
- * runs a program from /bin, and opens anything else in the text editor.
+ * double click (or Enter) opens a folder, starts an app (a .vxapp bundle,
+ * shown with its icon, like a file), runs a program from /bin, and opens
+ * anything else with the app for its type (<vexa/app.h>).
  * Up (or Backspace) goes to the parent folder; the path at the top can be
  * typed into.
  */
@@ -8,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <vexa/app.h>
 #include <vexa/font.h>
 #include <vexa/gui.h>
 #include <vexa/syscall.h>
@@ -24,6 +26,8 @@ struct item {
     char name[256];
     uint32_t type;
     uint64_t size;
+    bool app;                /* A .vxapp bundle. */
+    struct vx_image *icon;   /* An app's icon. */
 };
 
 static struct vx_window *window;
@@ -43,7 +47,7 @@ static int list_rows(void) {
 
 static int compare(const void *a, const void *b) {
     const struct item *x = a, *y = b;
-    bool dx = x->type == VX_TYPE_DIRECTORY, dy = y->type == VX_TYPE_DIRECTORY;
+    bool dx = x->type == VX_TYPE_DIRECTORY && !x->app, dy = y->type == VX_TYPE_DIRECTORY && !y->app;
     if (dx != dy) {
         return dx ? -1 : 1;
     }
@@ -55,6 +59,9 @@ static void join(char *out, size_t size, const char *dir, const char *name) {
 }
 
 static void load(void) {
+    for (int i = 0; i < item_count; i++) {
+        vx_image_free(items[i].icon);
+    }
     item_count = 0;
     selected = -1;
     top = 0;
@@ -75,6 +82,8 @@ static void load(void) {
             item->name[sizeof(item->name) - 1] = '\0';
             item->type = entries[i].type;
             item->size = 0;
+            item->app = false;
+            item->icon = NULL;
             char path[800];
             join(path, sizeof(path), cwd, item->name);
             struct vx_stat stat;
@@ -83,6 +92,12 @@ static void load(void) {
                 if (item->type == VX_TYPE_SYMLINK && stat.type == VX_TYPE_DIRECTORY) {
                     item->type = VX_TYPE_DIRECTORY; /* A link to a folder opens like one. */
                 }
+            }
+            struct vx_app app;
+            if (item->type == VX_TYPE_DIRECTORY && vx_app_is_bundle(item->name) &&
+                vx_app_load(path, &app) == 0) {
+                item->app = true;
+                item->icon = app.icon[0] ? vx_image_load(app.icon, VX_IMAGE_ALPHA) : NULL;
             }
         }
     }
@@ -126,9 +141,12 @@ static void up(void) {
     go(parent);
 }
 
-static bool ends_with(const char *name, const char *suffix) {
-    size_t n = strlen(name), m = strlen(suffix);
-    return n >= m && !strcmp(name + n - m, suffix);
+static void start(int process, const char *what) {
+    if (process < 0) {
+        snprintf(status, sizeof(status), "Can't start %s: %s", what, vx_strerror(process));
+    } else {
+        vx_close(process); /* It runs on its own. */
+    }
 }
 
 static void run(const char *program, const char *argument) {
@@ -141,12 +159,7 @@ static void run(const char *program, const char *argument) {
         .argv = argv, .argc = argument ? 2 : 1, .envp = (const char *const *)environ,
         .envc = envc, .handles = {0, 1, 2}, .flags = VX_SPAWN_NEW_GROUP,
     };
-    int process = vx_spawn(program, &spawn);
-    if (process < 0) {
-        snprintf(status, sizeof(status), "Can't start %s: %s", program, vx_strerror(process));
-    } else {
-        vx_close(process); /* It runs on its own. */
-    }
+    start(vx_spawn(program, &spawn), program);
 }
 
 static void open_item(int index) {
@@ -156,15 +169,17 @@ static void open_item(int index) {
     struct item *item = &items[index];
     char path[800];
     join(path, sizeof(path), cwd, item->name);
-    if (item->type == VX_TYPE_DIRECTORY) {
+    struct vx_app app;
+    if (item->app && vx_app_load(path, &app) == 0) {
+        start(vx_app_open(&app, NULL), app.name);
+    } else if (item->type == VX_TYPE_DIRECTORY) {
         go(path);
-    } else if (ends_with(item->name, ".png") || ends_with(item->name, ".bmp") ||
-               ends_with(item->name, ".ppm")) {
-        run("/bin/view", path);
     } else if (!strcmp(cwd, "/bin")) {
         run(path, NULL);
+    } else if (vx_app_for_file(path, &app) == 0) {
+        start(vx_app_open(&app, path), app.name);
     } else {
-        run("/bin/edit", path);
+        snprintf(status, sizeof(status), "No app opens %s", item->name);
     }
 }
 
@@ -194,7 +209,9 @@ static void draw_icon(struct vx_surface *s, int x, int y, uint32_t type) {
 }
 
 static void format_size(char *out, size_t size, const struct item *item) {
-    if (item->type == VX_TYPE_DIRECTORY) {
+    if (item->app) {
+        snprintf(out, size, "app");
+    } else if (item->type == VX_TYPE_DIRECTORY) {
         snprintf(out, size, "folder");
     } else if (item->size < 1024) {
         snprintf(out, size, "%lu B", (unsigned long)item->size);
@@ -222,11 +239,20 @@ static void draw(void) {
         if (top + i == selected) {
             vx_fill(s, 10, y, w - 20, ROW, VX_COLOR_SELECTED);
         }
-        draw_icon(s, 16, y + 2, item->type);
-        char size[32];
+        if (item->icon) {
+            vx_blit_alpha(s, 15, y + 1, 18, 18, &item->icon->surface);
+        } else {
+            draw_icon(s, 16, y + 2, item->type);
+        }
+        char size[32], name[256];
         format_size(size, sizeof(size), item);
+        /* Apps without ".vxapp", as Finder shows them. */
+        snprintf(name, sizeof(name), "%s", item->name);
+        if (item->app) {
+            name[strlen(name) - strlen(VX_APP_EXTENSION)] = '\0';
+        }
         int size_x = w - 24 - (int)strlen(size) * FONT_WIDTH;
-        vx_draw_text_fit(s, 38, y + 2, size_x - 48, item->name, VX_COLOR_TEXT, VX_TRANSPARENT);
+        vx_draw_text_fit(s, 38, y + 2, size_x - 48, name, VX_COLOR_TEXT, VX_TRANSPARENT);
         vx_draw_text(s, size_x, y + 2, size, VX_COLOR_DIM, VX_TRANSPARENT);
     }
     if (item_count > rows) { /* Where we are in a long list. */

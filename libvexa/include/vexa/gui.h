@@ -117,14 +117,20 @@ struct vx_image {
 };
 
 /* Reads a PNG (8 bits per channel, not interlaced), BMP (24 or 32 bits) or
- * PPM (P6) file. Transparent pixels are blended onto `background`. NULL if
- * the file can't be read or decoded. */
+ * PPM (P6) file. Transparent pixels are blended onto `background`, or with
+ * VX_IMAGE_ALPHA kept: pixels are then 0xAARRGGBB, for vx_blit_alpha. NULL
+ * if the file can't be read or decoded. */
+#define VX_IMAGE_ALPHA 0xff000000u
 struct vx_image *vx_image_load(const char *path, uint32_t background);
 struct vx_image *vx_image_decode(const void *data, size_t size, uint32_t background);
 void vx_image_free(struct vx_image *image);
 /* Draws `from` scaled into a rectangle of `to` (nearest pixel). */
 void vx_blit_scaled(struct vx_surface *to, int x, int y, int width, int height,
                     const struct vx_surface *from);
+/* Draws a VX_IMAGE_ALPHA image scaled into a rectangle of `to`, blended
+ * onto what's there (made smaller, pixels are averaged: icons). */
+void vx_blit_alpha(struct vx_surface *to, int x, int y, int width, int height,
+                   const struct vx_surface *from);
 
 /* ---- The desktop ---- */
 

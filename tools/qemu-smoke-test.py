@@ -120,6 +120,9 @@ TYPED_COMMANDS = [
     # starts in the middle of the 1280x800 screen; QEMU can drop part of a
     # long move, so those are split); Ctrl+Alt+T opens another; Ctrl+Alt+Q
     # goes back.
+    # Apps are .vxapp bundles in /apps; their programs are linked in /bin.
+    ("ls /apps", "Terminal.vxapp", 10),
+    ("ls -l /bin", "files -> /apps/Files.vxapp/Contents/Vexa/files", 10),
     ("input", "PS/2 mouse", 10),
     ("desktop", 'desktop: window 1 "Terminal"', 30),
     ("@type echo from-the-window > /dev/console", "from-the-window", 30),
@@ -148,9 +151,10 @@ TYPED_COMMANDS = [
     ("@mouse_move 463 -11", None, 5),
     ("@mouse_button 1", "desktop: asked window 3 to close", 10),
     ("@mouse_button 0", "desktop: closed window 3", 10),
-    # Notifications, and the image viewer (PNG) from the terminal.
+    # Notifications, and the image viewer (PNG) from the terminal, through
+    # open: the app for .png files (from the .vxapp bundles in /apps).
     ("@type notify Test: a notification", 'desktop: notification "Test: a notification"', 20),
-    ("@type view /share/pictures/aurora.png", 'desktop: window 4 "aurora.png - Image Viewer"', 30),
+    ("@type open /share/pictures/aurora.png", 'desktop: window 4 "aurora.png - Image Viewer"', 30),
     # A double click on the Files icon (on the desktop's left edge).
     ("@mouse_move -454 23", None, 5),
     ("@double-click", "desktop: starting Files", 10),

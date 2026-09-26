@@ -67,6 +67,7 @@ PROGRAMS := $(notdir $(wildcard userland/*))
 PROGRAM_BINS := $(addprefix $(BUILD)/programs/,$(PROGRAMS))
 INITRAMFS := $(BUILD)/initramfs.tar
 ROOTFS_FILES := $(shell find rootfs -type f)
+APP_FILES := $(shell find apps -type f)
 
 # BusyBox, the first Linux program Vexa runs: built from a pinned release with
 # musl (a static binary), and put in /linux/bin. It's GPL-2.0, so
@@ -201,14 +202,25 @@ $(BUILD)/programs/%: $(CRT0) $(LIBVEXA_SO) $(LIBVEXA_OBJS) libvexa/program.ld \
 LINUX_IN_MEMORY := etc var root
 LINUX_ON_CD := bin lib sbin usr
 
-# The starting root file system: rootfs/ plus the programs in /bin, as a tar
-# archive (ustar, with fixed owners and times so builds are reproducible).
-$(INITRAMFS): $(PROGRAM_BINS) $(LIBVEXA_SO) $(VEXA_LD) $(ROOTFS_FILES) $(LINUX_TREE)
+# The starting root file system: rootfs/ plus the programs in /bin and the
+# apps in /apps, as a tar archive (ustar, with fixed owners and times so
+# builds are reproducible).
+$(INITRAMFS): $(PROGRAM_BINS) $(LIBVEXA_SO) $(VEXA_LD) $(ROOTFS_FILES) $(APP_FILES) $(LINUX_TREE)
 	rm -rf $(BUILD)/rootfs
 	mkdir -p $(BUILD)/rootfs/bin $(BUILD)/rootfs/lib
 	cp -R rootfs/. $(BUILD)/rootfs/
 	cp $(PROGRAM_BINS) $(BUILD)/rootfs/bin/
 	cp $(LIBVEXA_SO) $(VEXA_LD) $(BUILD)/rootfs/lib/
+	# Apps (.vxapp bundles): each app's program moves into its bundle, and
+	# /bin keeps a link to it for the command line.
+	cp -R apps $(BUILD)/rootfs/apps
+	for bundle in $(BUILD)/rootfs/apps/*.vxapp; do \
+		exe=$$(sed -n 's/^executable=//p' $$bundle/Contents/Info.conf); \
+		case $$exe in /*) continue;; esac; \
+		mkdir -p $$bundle/Contents/Vexa && \
+		mv $(BUILD)/rootfs/bin/$$exe $$bundle/Contents/Vexa/ && \
+		ln -s /apps/$${bundle##*/}/Contents/Vexa/$$exe $(BUILD)/rootfs/bin/$$exe || exit 1; \
+	done
 	# /linux: the files that change (etc, var, root) are here, in memory;
 	# the programs and libraries stay on the boot CD (see make_iso).
 	if [ -n "$(LINUX_TREE)" ]; then \

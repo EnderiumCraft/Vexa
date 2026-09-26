@@ -210,6 +210,10 @@ Native track:
       notifications, snapping windows to the edges, Linux programs in the menu from
       their `.desktop` files; GTK windows with their own title bars, whose buttons and
       dragging work through Xvexa standing in for a window manager (0.15.0)
+- [x] Apps as bundles, as on macOS: `/apps/Name.vxapp` (Info.conf, the program, an
+      icon); the menu, desktop icons and shortcuts come from them, Files shows them
+      as apps and opens files with the app for their type, `open` from the command
+      line; a picture as the default wallpaper (0.16.0)
 
 Linux track:
 - [x] The X Window System built from source with musl: the X libraries, X.Org's

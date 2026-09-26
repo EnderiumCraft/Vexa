@@ -8,7 +8,8 @@
 /*
  * Images: PNG (8-bit gray, gray+alpha, RGB, RGBA and palette, not
  * interlaced), BMP (24 and 32 bits, uncompressed) and PPM (P6), decoded
- * into 0xRRGGBB pixels. Alpha is blended onto a background color.
+ * into 0xRRGGBB pixels. Alpha is blended onto a background color, or kept
+ * (VX_IMAGE_ALPHA: 0xAARRGGBB).
  *
  * PNG data is zlib-compressed: inflate() below is a small decoder of
  * DEFLATE (RFC 1951), with the fixed and dynamic Huffman codes.
@@ -262,6 +263,9 @@ static bool inflate_zlib(const uint8_t *data, size_t size, uint8_t *out, size_t 
 /* ---- Pixels ---- */
 
 static uint32_t blend(uint32_t r, uint32_t g, uint32_t b, uint32_t a, uint32_t background) {
+    if (background == VX_IMAGE_ALPHA) {
+        return a << 24 | r << 16 | g << 8 | b;
+    }
     uint32_t br = (background >> 16) & 0xff, bg = (background >> 8) & 0xff, bb = background & 0xff;
     r = (r * a + br * (255 - a)) / 255;
     g = (g * a + bg * (255 - a)) / 255;
@@ -373,9 +377,9 @@ static struct vx_image *load_png(const uint8_t *data, size_t size, uint32_t back
             for (int x = 0; x < width; x++) {
                 const uint8_t *p = line + x * channels;
                 switch (color) {
-                case 0: out[x] = (uint32_t)p[0] * 0x010101; break;
+                case 0: out[x] = blend(p[0], p[0], p[0], 255, background); break;
                 case 4: out[x] = blend(p[0], p[0], p[0], p[1], background); break;
-                case 2: out[x] = (uint32_t)p[0] << 16 | p[1] << 8 | p[2]; break;
+                case 2: out[x] = blend(p[0], p[1], p[2], 255, background); break;
                 case 6: out[x] = blend(p[0], p[1], p[2], p[3], background); break;
                 case 3: {
                     const uint8_t *e = palette + p[0] * 4;
@@ -478,6 +482,12 @@ struct vx_image *vx_image_decode(const void *data, size_t size, uint32_t backgro
     if (!image) {
         image = load_ppm(bytes, size);
     }
+    if (image && background == VX_IMAGE_ALPHA && !(bytes[0] == 0x89 && bytes[1] == 'P')) {
+        struct vx_surface *s = &image->surface; /* BMP and PPM: opaque. */
+        for (long i = 0; i < (long)s->width * s->height; i++) {
+            s->pixels[i] |= VX_IMAGE_ALPHA;
+        }
+    }
     return image;
 }
 
@@ -524,6 +534,51 @@ void vx_blit_scaled(struct vx_surface *to, int x, int y, int width, int height,
             if (tx >= 0 && tx < to->width) {
                 line[tx] = source[col * from->width / width];
             }
+        }
+    }
+}
+
+void vx_blit_alpha(struct vx_surface *to, int x, int y, int width, int height,
+                   const struct vx_surface *from) {
+    if (width <= 0 || height <= 0) {
+        return;
+    }
+    for (int row = 0; row < height; row++) {
+        int ty = y + row;
+        if (ty < 0 || ty >= to->height) {
+            continue;
+        }
+        /* The source pixels this one covers (at least one). */
+        int y0 = row * from->height / height, y1 = (row + 1) * from->height / height;
+        y1 = y1 > y0 ? y1 : y0 + 1;
+        uint32_t *line = to->pixels + (long)ty * to->stride;
+        for (int col = 0; col < width; col++) {
+            int tx = x + col;
+            if (tx < 0 || tx >= to->width) {
+                continue;
+            }
+            int x0 = col * from->width / width, x1 = (col + 1) * from->width / width;
+            x1 = x1 > x0 ? x1 : x0 + 1;
+            /* Average, weighting colors by alpha. */
+            uint32_t r = 0, g = 0, b = 0, a = 0, n = 0;
+            for (int sy = y0; sy < y1; sy++) {
+                const uint32_t *source = from->pixels + (long)sy * from->stride;
+                for (int sx = x0; sx < x1; sx++, n++) {
+                    uint32_t p = source[sx], pa = p >> 24;
+                    a += pa;
+                    r += ((p >> 16) & 0xff) * pa;
+                    g += ((p >> 8) & 0xff) * pa;
+                    b += (p & 0xff) * pa;
+                }
+            }
+            if (a == 0) {
+                continue;
+            }
+            r /= a, g /= a, b /= a, a /= n;
+            uint32_t d = line[tx];
+            uint32_t dr = (d >> 16) & 0xff, dg = (d >> 8) & 0xff, db = d & 0xff;
+            line[tx] = ((r * a + dr * (255 - a)) / 255) << 16 | ((g * a + dg * (255 - a)) / 255) << 8 |
+                       ((b * a + db * (255 - a)) / 255);
         }
     }
 }

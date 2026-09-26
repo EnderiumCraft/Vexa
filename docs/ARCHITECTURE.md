@@ -111,6 +111,7 @@ abi/vexa/                 the native interface's numbers and constants, shared b
                           the kernel and libvexa
 libvexa/                  Vexa's C library
 userland/                 native programs: vinit, vsh, utilities, compositor
+apps/                     the desktop apps' bundles (Name.vxapp: Info.conf, icon)
 ```
 
 All of these exist today except the compositor, along with `fs/` (file systems) under
@@ -206,6 +207,18 @@ PACKET command), as `cd0`... with 2048-byte sectors.
   `window->surface`, `vx_window_present`, and `vx_gui_wait` for key, pointer and close
   events. A window made with `VX_WINDOW_RESIZABLE` gets `VX_GUI_RESIZE` events and
   answers with `vx_window_resize`, which hands the desktop a new buffer.
+- **Apps** are bundles, as on macOS: a folder `/apps/Name.vxapp` with
+  `Contents/Info.conf` (name, executable, icon, the file types it opens, a shortcut,
+  its place in the menu, whether it has a desktop icon), `Contents/Vexa/<program>`
+  and `Contents/Resources/icon.png` (48x48 with transparency, drawn by
+  `tools/make-app-icons.py`). `<vexa/app.h>` reads them (`vx_app_list`,
+  `vx_app_find`, `vx_app_for_file`, `vx_app_open`); the desktop builds its menu,
+  icons and shortcuts from them, Files shows a bundle as an app and opens files with
+  the app for their type, and `open` does the same from the command line. The
+  build moves each app's program into its bundle and leaves a link in `/bin`
+  (`/bin/files`), so the command line still finds them. An app's executable may be
+  an absolute path: `XTerm.vxapp` runs `/linux/usr/bin/xsession`, and is left out
+  when the Linux files aren't there.
 - **X** runs as Linux programs. Xvexa (`third_party/xvexa`) is a kdrive X server
   built into X.Org's source tree, and it talks the desktop protocol itself, so the
   Linux subsystem needs nothing graphics-specific for it: local sockets, shared file

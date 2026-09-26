@@ -42,6 +42,9 @@ runs X programs such as `xterm` in windows of their own on it. The kernel:
   edge, and its own apps: a terminal, Files, a text editor, an image viewer (PNG, BMP,
   PPM) and Settings (wallpaper, clock, time zone); the default wallpaper is
   `/share/pictures/meadow.png`
+- keeps its desktop apps as bundles, as macOS does: `/apps/Files.vxapp` is a folder
+  with the program, its icon and an `Info.conf` saying what it is and which files it
+  opens; the menu, the desktop icons, Files and `open` all work from them
 - runs the X Window System through the Linux subsystem: Xvexa, an X server (X.Org's,
   built with musl) that shows each X window as a desktop window of its own, with
   TrueType fonts (FreeType, fontconfig, Xft and DejaVu), `xterm`, and GTK 3 programs
@@ -94,6 +97,7 @@ the `vexa:/>` prompt:
 | `ln -s`, `cat /proc/meminfo` | symbolic links; `/proc` |
 | `desktop` | the graphical desktop, with a terminal window; the Vexa menu (top left) and the icons on the left start programs, Alt+Tab switches windows, dragging a window to an edge snaps it, Ctrl+Alt+T opens a terminal, Ctrl+Alt+F Files, Ctrl+Alt+E the text editor, Ctrl+Alt+X an `xterm` (an X program), Ctrl+Alt+Q goes back to the text console |
 | `files`, `edit <file>`, `view <image>`, `settings` | the desktop's apps, from its terminal: `view /share/pictures/aurora.png` |
+| `open <file>`, `open -a <app>` | opens a file with its app, a folder in Files, or starts an app, like macOS's `open`: `open /share/pictures/aurora.png`, `open -a Editor notes.txt` |
 | `notify <text>` | a notification on the desktop |
 | `input` | the keyboard and mouse; `input watch 1` shows what the mouse reports |
 | `net` | network interfaces and addresses (Linux: `ifconfig`, `route -n`) |

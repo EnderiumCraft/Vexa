@@ -17,6 +17,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <vexa/app.h>
 #include <vexa/desktop.h>
 #include <vexa/font.h>
 #include <vexa/gui.h>
@@ -174,19 +175,26 @@ static struct rect work_area(void) {
 /* ---- The menu ---- */
 
 enum menu_action {
-    RUN_TERMINAL, RUN_FILES, RUN_EDITOR, RUN_SETTINGS, RUN_ABOUT, RUN_X,
+    RUN_APP,       /* An app from /apps (see <vexa/app.h>). */
     RUN_LINUX_APP, /* An X program from /linux/usr/share/applications, through xrun. */
     SEPARATOR, LEAVE
 };
+
+/* The apps in /apps, and their icons. */
+#define MAX_APPS 32
+static struct vx_app apps[MAX_APPS];
+static struct vx_image *app_icons[MAX_APPS];
+static int app_count;
 
 #define MAX_MENU_ITEMS 24
 #define MAX_ARGS 4
 #define APPLICATIONS "/linux/usr/share/applications"
 
 static struct menu_item {
-    char label[40];
+    char label[48];
     const char *keys;
     enum menu_action action;
+    int app; /* RUN_APP: which. */
     char args[MAX_ARGS][64]; /* RUN_LINUX_APP: the program and its arguments. */
     int arg_count;
 } menu_items[MAX_MENU_ITEMS];
@@ -304,15 +312,34 @@ static int compare_labels(const void *a, const void *b) {
     return strcmp(((const struct menu_item *)a)->label, ((const struct menu_item *)b)->label);
 }
 
+static void load_apps(void) {
+    for (int i = 0; i < app_count; i++) {
+        vx_image_free(app_icons[i]);
+    }
+    app_count = vx_app_list(apps, MAX_APPS);
+    for (int i = 0; i < app_count; i++) {
+        app_icons[i] = apps[i].icon[0] ? vx_image_load(apps[i].icon, VX_IMAGE_ALPHA) : NULL;
+    }
+}
+
+/* The apps in the menu: Vexa's, or the Linux ones. */
+static void add_app_items(bool is_linux) {
+    for (int i = 0; i < app_count; i++) {
+        if (apps[i].menu && apps[i].is_linux == is_linux) {
+            struct menu_item *item = add_menu_item(apps[i].name, apps[i].shortcut, RUN_APP);
+            if (item) {
+                item->app = i;
+            }
+        }
+    }
+}
+
 static void build_menu(void) {
+    load_apps();
     menu_item_count = 0;
-    add_menu_item("Terminal", "Ctrl+Alt+T", RUN_TERMINAL);
-    add_menu_item("Files", "Ctrl+Alt+F", RUN_FILES);
-    add_menu_item("Text Editor", "Ctrl+Alt+E", RUN_EDITOR);
-    add_menu_item("Settings", "", RUN_SETTINGS);
-    add_menu_item("About Vexa", "", RUN_ABOUT);
+    add_app_items(false);
     add_menu_item("", "", SEPARATOR);
-    add_menu_item("XTerm", "Ctrl+Alt+X", RUN_X);
+    add_app_items(true);
     /* Linux programs, by name. */
     int first = menu_item_count;
     int handle = vx_open(APPLICATIONS, VX_OPEN_READ);
@@ -625,8 +652,15 @@ static void draw_menu(struct vx_surface *view, int ox, int oy) {
             if (i == menu_hot) {
                 vx_fill(view, ox + r.x + 4, oy + top, r.width - 8, h, COLOR_MENU_HOT);
             }
-            vx_draw_text(view, ox + r.x + 12, oy + top + 4, menu_items[i].label,
-                         COLOR_PANEL_TEXT, VX_TRANSPARENT);
+            int text_x = ox + r.x + 12;
+            if (menu_items[i].action == RUN_APP && app_icons[menu_items[i].app]) {
+                vx_blit_alpha(view, text_x, oy + top + 4, 16, 16, &app_icons[menu_items[i].app]->surface);
+            }
+            if (menu_items[i].action == RUN_APP || menu_items[i].action == RUN_LINUX_APP) {
+                text_x += 24;
+            }
+            vx_draw_text(view, text_x, oy + top + 4, menu_items[i].label, COLOR_PANEL_TEXT,
+                         VX_TRANSPARENT);
             int keys = (int)strlen(menu_items[i].keys) * FONT_WIDTH;
             vx_draw_text(view, ox + r.x + r.width - keys - 12, oy + top + 4, menu_items[i].keys,
                          COLOR_PANEL_DIM, VX_TRANSPARENT);
@@ -645,23 +679,33 @@ static void draw_outline(struct vx_surface *view, struct rect r, int thickness, 
 
 /* ---- Desktop icons ---- */
 
-enum icon { ICON_TERMINAL, ICON_FILES, ICON_EDITOR, ICON_SETTINGS, ICON_X };
-
-static const struct {
-    const char *label;
-    enum icon icon;
-    enum menu_action action;
-} launchers[] = {
-    {"Terminal", ICON_TERMINAL, RUN_TERMINAL},
-    {"Files", ICON_FILES, RUN_FILES},
-    {"Editor", ICON_EDITOR, RUN_EDITOR},
-    {"Settings", ICON_SETTINGS, RUN_SETTINGS},
-    {"XTerm", ICON_X, RUN_X},
-};
-#define LAUNCHERS (int)(sizeof(launchers) / sizeof(launchers[0]))
+/* The apps with desktop=yes, in the menu's order. */
+static int launcher_apps[MAX_APPS];
+static int launcher_count;
+#define LAUNCHERS launcher_count
 #define LAUNCHER_WIDTH 72
 #define LAUNCHER_HEIGHT 72
 static int selected_launcher = -1;
+
+static void find_launchers(void) {
+    launcher_count = 0;
+    for (int i = 0; i < app_count; i++) {
+        if (apps[i].desktop) {
+            launcher_apps[launcher_count++] = i;
+        }
+    }
+}
+
+/* An icon's label: the bundle's name, as a file manager shows it
+ * ("Editor" for Editor.vxapp). */
+static void launcher_label(int i, char *out, size_t size) {
+    const char *bundle = apps[launcher_apps[i]].bundle, *slash = strrchr(bundle, '/');
+    snprintf(out, size, "%s", slash ? slash + 1 : bundle);
+    char *dot = strrchr(out, '.');
+    if (dot) {
+        *dot = '\0';
+    }
+}
 
 /* A column along the left edge, left of where windows open. */
 static struct rect launcher_rect(int i) {
@@ -674,60 +718,26 @@ static struct rect launchers_area(void) {
                          12 + LAUNCHERS * (LAUNCHER_HEIGHT + 4)};
 }
 
-/* The icons: 40x40 pictures made of rectangles. */
-static void draw_icon(struct vx_surface *s, int x, int y, enum icon icon) {
-    switch (icon) {
-    case ICON_TERMINAL:
-        vx_fill(s, x, y + 2, 40, 34, 0x3a2a5c);
-        vx_fill(s, x + 2, y + 4, 36, 30, 0x0e0818);
-        vx_draw_text(s, x + 5, y + 10, ">_", 0x7ee787, VX_TRANSPARENT);
-        break;
-    case ICON_FILES:
-        vx_fill(s, x + 2, y + 6, 16, 5, 0xd9ad3c);
-        vx_fill(s, x + 2, y + 10, 36, 26, 0xf2cc60);
-        vx_fill(s, x + 2, y + 16, 36, 1, 0xd9ad3c);
-        break;
-    case ICON_EDITOR:
-        vx_fill(s, x + 6, y + 2, 28, 36, 0xe4dcf2);
-        for (int i = 0; i < 5; i++) {
-            vx_fill(s, x + 10, y + 9 + i * 5, i == 4 ? 12 : 20, 2, 0x8a80a3);
-        }
-        vx_fill(s, x + 28, y + 20, 4, 16, 0xb07cff); /* A pencil. */
-        vx_fill(s, x + 29, y + 36, 2, 2, 0x2c1d4a);
-        break;
-    case ICON_SETTINGS: /* A gear: teeth around a ring. */
-        for (int dy = -14; dy <= 14; dy++) {
-            for (int dx = -14; dx <= 14; dx++) {
-                int r2 = dx * dx + dy * dy;
-                bool ring = r2 <= 12 * 12 && r2 >= 5 * 5;
-                bool tooth = r2 <= 15 * 15 && r2 > 12 * 12 &&
-                             ((dx > -4 && dx < 4) || (dy > -4 && dy < 4) ||
-                              (dx - dy > -5 && dx - dy < 5) || (dx + dy > -5 && dx + dy < 5));
-                if (ring || tooth) {
-                    vx_fill(s, x + 20 + dx, y + 20 + dy, 1, 1, 0x79a8ff);
-                }
-            }
-        }
-        break;
-    case ICON_X:
-        vx_fill(s, x + 2, y + 2, 36, 36, 0x0e0818);
-        for (int i = 0; i < 28; i++) { /* A big X. */
-            vx_fill(s, x + 6 + i, y + 6 + i, 3, 2, 0xe4dcf2);
-            vx_fill(s, x + 32 - i, y + 6 + i, 3, 2, 0xe4dcf2);
-        }
-        break;
-    }
-}
-
 static void draw_launchers(struct vx_surface *view, int ox, int oy) {
     for (int i = 0; i < LAUNCHERS; i++) {
         struct rect r = launcher_rect(i);
         if (i == selected_launcher) {
             vx_fill(view, ox + r.x, oy + r.y, r.width, r.height, COLOR_BUTTON_HOT);
         }
-        draw_icon(view, ox + r.x + (r.width - 40) / 2, oy + r.y + 6, launchers[i].icon);
-        int text = (int)strlen(launchers[i].label) * FONT_WIDTH;
-        vx_draw_text(view, ox + r.x + (r.width - text) / 2, oy + r.y + 50, launchers[i].label,
+        struct vx_image *icon = app_icons[launcher_apps[i]];
+        int icon_x = ox + r.x + (r.width - 48) / 2, icon_y = oy + r.y + 3;
+        if (icon) {
+            vx_blit_alpha(view, icon_x, icon_y, 48, 48, &icon->surface);
+        } else {
+            vx_fill(view, icon_x + 4, icon_y + 4, 40, 40, COLOR_PANEL_LINE);
+        }
+        char label[64];
+        launcher_label(i, label, sizeof(label));
+        int text = (int)strlen(label) * FONT_WIDTH;
+        /* A shadow keeps the label readable on a picture. */
+        vx_draw_text(view, ox + r.x + (r.width - text) / 2 + 1, oy + r.y + 54, label, 0x000000,
+                     VX_TRANSPARENT);
+        vx_draw_text(view, ox + r.x + (r.width - text) / 2, oy + r.y + 53, label,
                      COLOR_PANEL_TEXT, VX_TRANSPARENT);
     }
 }
@@ -1345,6 +1355,7 @@ static void client_message(int client) {
         read_config();
         make_wallpaper();
         build_menu();
+        find_launchers();
         add_damage((struct rect){0, 0, screen.width, screen.height});
         printf("desktop: settings reloaded\n");
         break;
@@ -1358,6 +1369,8 @@ static void client_message(int client) {
 }
 
 /* ---- Programs ---- */
+
+static void add_child(int process);
 
 /* Starts a program: argv[0] is its path. */
 static void launch_argv(const char *const *argv, int argc) {
@@ -1375,6 +1388,11 @@ static void launch_argv(const char *const *argv, int argc) {
         printf("desktop: can't start %s: %s\n", path, vx_strerror(process));
         return;
     }
+    add_child(process);
+}
+
+/* A program the desktop started: waited for when it ends. */
+static void add_child(int process) {
     for (int i = 0; i < MAX_CHILDREN; i++) {
         if (children[i] < 0) {
             children[i] = process;
@@ -1398,25 +1416,26 @@ static void reap_children(void) {
     }
 }
 
-static void run(enum menu_action action) {
-    switch (action) {
-    case RUN_TERMINAL: launch("/bin/term"); break;
-    case RUN_FILES: launch("/bin/files"); break;
-    case RUN_EDITOR: launch("/bin/edit"); break;
-    case RUN_SETTINGS: launch("/bin/settings"); break;
-    case RUN_ABOUT: launch("/bin/about"); break;
-    /* X programs, if the Linux subsystem is there. */
-    case RUN_X: launch("/linux/usr/bin/xsession"); break;
-    case LEAVE: quit = true; break;
-    case RUN_LINUX_APP:
-    case SEPARATOR: break;
+static void run_app(int i) {
+    int process = vx_app_open(&apps[i], NULL);
+    if (process < 0) {
+        printf("desktop: can't start %s: %s\n", apps[i].name, vx_strerror(process));
+        return;
     }
+    add_child(process);
 }
 
 static void run_menu_item(int index) {
     struct menu_item *item = &menu_items[index];
+    if (item->action == LEAVE) {
+        quit = true;
+        return;
+    }
+    if (item->action == RUN_APP) {
+        run_app(item->app);
+        return;
+    }
     if (item->action != RUN_LINUX_APP) {
-        run(item->action);
         return;
     }
     const char *argv[MAX_ARGS + 1] = {"/linux/usr/bin/xrun"};
@@ -1479,24 +1498,17 @@ static void key_event(int key, int value) {
         break;
     }
     if (ctrl && alt && value == 1) {
-        if (key == 20) { /* T */
-            run(RUN_TERMINAL);
-            return;
-        }
-        if (key == 45) { /* X */
-            run(RUN_X);
-            return;
-        }
-        if (key == 33) { /* F */
-            run(RUN_FILES);
-            return;
-        }
-        if (key == 18) { /* E */
-            run(RUN_EDITOR);
-            return;
+        /* Apps' shortcuts ("Ctrl+Alt+T"). */
+        for (int i = 0; i < app_count; i++) {
+            const char *s = apps[i].shortcut;
+            if (!strncmp(s, "Ctrl+Alt+", 9) && s[9] && !s[10] && key < (int)sizeof(keymap) &&
+                keymap[key] == (s[9] | 0x20)) {
+                run_app(i);
+                return;
+            }
         }
         if (key == 16) { /* Q */
-            run(LEAVE);
+            quit = true;
             return;
         }
     }
@@ -1632,8 +1644,10 @@ static void button_event(int bit, bool down) {
         long now = vx_uptime();
         if (hit >= 0 && hit == selected_launcher && now - last_click_ms < DOUBLE_CLICK_MS &&
             last_click_window == NULL) {
-            printf("desktop: starting %s\n", launchers[hit].label);
-            run(launchers[hit].action);
+            char label[64];
+            launcher_label(hit, label, sizeof(label));
+            printf("desktop: starting %s\n", label);
+            run_app(launcher_apps[hit]);
         }
         if (hit != selected_launcher) {
             selected_launcher = hit;
@@ -1849,6 +1863,7 @@ static bool setup(void) {
     read_config();
     make_wallpaper();
     build_menu();
+    find_launchers();
     keyboard = open_input(VX_INPUT_KEYS);
     mouse = open_input(VX_INPUT_POINTER);
 
