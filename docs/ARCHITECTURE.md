@@ -218,7 +218,13 @@ PACKET command), as `cd0`... with 2048-byte sectors.
   build moves each app's program into its bundle and leaves a link in `/bin`
   (`/bin/files`), so the command line still finds them. An app's executable may be
   an absolute path: `XTerm.vxapp` runs `/linux/usr/bin/xsession`, and is left out
-  when the Linux files aren't there.
+  when the Linux files aren't there. The desktop looks at `/apps` every two seconds,
+  so copying a bundle there installs an app and removing it uninstalls it.
+- **Files** works on whole folders with `<vexa/files.h>` (`vx_copy_tree`,
+  `vx_remove_tree`, `vx_move`, which copies and removes across file systems,
+  `vx_tree_size`, `vx_unique_name`); its clipboard is a file (`/tmp/.files-clipboard`)
+  so every Files window shares it, deleting moves things to `/Trash`, and its
+  right-click menus, like the desktop's, are `vx_draw_menu` (`<vexa/gui.h>`).
 - **X** runs as Linux programs. Xvexa (`third_party/xvexa`) is a kdrive X server
   built into X.Org's source tree, and it talks the desktop protocol itself, so the
   Linux subsystem needs nothing graphics-specific for it: local sockets, shared file

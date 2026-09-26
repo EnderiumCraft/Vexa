@@ -742,6 +742,58 @@ static void draw_launchers(struct vx_surface *view, int ox, int oy) {
     }
 }
 
+/* ---- The desktop's right-click menu ---- */
+
+enum popup_action { POP_TERMINAL, POP_FILES, POP_SETTINGS, POP_ABOUT, POP_OPEN, POP_SHOW, POP_NONE };
+
+#define MAX_POPUP 8
+static struct vx_menu_item popup_items[MAX_POPUP];
+static enum popup_action popup_actions[MAX_POPUP];
+static int popup_count, popup_x, popup_y, popup_hot = -1, popup_launcher = -1;
+static bool popup_open;
+
+static struct rect popup_rect(void) {
+    int w, h;
+    vx_menu_size(popup_items, popup_count, &w, &h);
+    return (struct rect){popup_x, popup_y, w + 3, h + 3}; /* With its shadow. */
+}
+
+static void popup_add(const char *label, const char *keys, enum popup_action action) {
+    popup_items[popup_count] = (struct vx_menu_item){label, keys, false};
+    popup_actions[popup_count++] = action;
+}
+
+/* On an icon: its app; elsewhere: the desktop's. */
+static void open_popup(int launcher) {
+    popup_count = 0;
+    popup_launcher = launcher;
+    if (launcher >= 0) {
+        popup_add("Open", NULL, POP_OPEN);
+        popup_add("Show in Files", NULL, POP_SHOW);
+    } else {
+        popup_add("New Terminal", "Ctrl+Alt+T", POP_TERMINAL);
+        popup_add("Open Files", "Ctrl+Alt+F", POP_FILES);
+        popup_add(NULL, NULL, POP_NONE);
+        popup_add("Change Wallpaper...", NULL, POP_SETTINGS);
+        popup_add("About Vexa", NULL, POP_ABOUT);
+    }
+    int w, h;
+    vx_menu_size(popup_items, popup_count, &w, &h);
+    popup_x = pointer_x + w + 4 > screen.width ? screen.width - w - 4 : pointer_x;
+    popup_y = pointer_y + h + 4 > screen.height ? screen.height - h - 4 : pointer_y;
+    popup_hot = -1;
+    popup_open = true;
+    add_damage(popup_rect());
+    printf("desktop: menu at %d,%d\n", pointer_x, pointer_y);
+}
+
+static void close_popup(void) {
+    if (popup_open) {
+        popup_open = false;
+        add_damage(popup_rect());
+    }
+}
+
 /* ---- Notifications ---- */
 
 static struct rect note_rect(int i) {
@@ -898,6 +950,9 @@ static void compose(struct rect area) {
     }
     if (menu_open) {
         draw_menu(&view, ox, oy);
+    }
+    if (popup_open) {
+        vx_draw_menu(&view, ox + popup_x, oy + popup_y, popup_items, popup_count, popup_hot);
     }
     const char *const *shape = resize_cursor ? resize_shape : cursor_shape;
     for (int row = 0; row < CURSOR_HEIGHT; row++) {
@@ -1425,6 +1480,97 @@ static void run_app(int i) {
     add_child(process);
 }
 
+/* An app by its bundle's name ("Terminal" for Terminal.vxapp), or -1. */
+static int app_named(const char *stem) {
+    for (int i = 0; i < app_count; i++) {
+        const char *file = strrchr(apps[i].bundle, '/');
+        size_t n = strlen(stem);
+        if (file && !strncmp(file + 1, stem, n) && !strcmp(file + 1 + n, VX_APP_EXTENSION)) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static void run_named(const char *stem, const char *file) {
+    int i = app_named(stem);
+    if (i < 0) {
+        printf("desktop: no %s app\n", stem);
+        return;
+    }
+    int process = vx_app_open(&apps[i], file);
+    if (process >= 0) {
+        add_child(process);
+    }
+}
+
+static void run_popup_item(int index) {
+    switch (popup_actions[index]) {
+    case POP_TERMINAL: run_named("Terminal", NULL); break;
+    case POP_FILES: run_named("Files", NULL); break;
+    case POP_SETTINGS: run_named("Settings", NULL); break;
+    case POP_ABOUT: run_named("About", NULL); break;
+    case POP_OPEN:
+        if (popup_launcher >= 0 && popup_launcher < LAUNCHERS) {
+            run_app(launcher_apps[popup_launcher]);
+        }
+        break;
+    case POP_SHOW: run_named("Files", VX_APPS_DIR); break;
+    case POP_NONE: break;
+    }
+}
+
+/* The names in /apps, as one number: when it changes, an app was added
+ * (copied in: installed) or removed, and the menu and icons are made again. */
+static unsigned long apps_signature(void) {
+    unsigned long hash = 5381;
+    int handle = vx_open(VX_APPS_DIR, VX_OPEN_READ);
+    if (handle < 0) {
+        return 0;
+    }
+    struct vx_dir_entry entries[16];
+    long n;
+    while ((n = vx_read_dir(handle, entries, 16)) > 0) {
+        for (long i = 0; i < n; i++) {
+            unsigned long h = 5381; /* Each name's hash, added: the order doesn't matter. */
+            for (const char *c = entries[i].name; *c; c++) {
+                h = h * 33 + (unsigned char)*c;
+            }
+            hash += h;
+        }
+    }
+    vx_close(handle);
+    return hash;
+}
+
+static unsigned long apps_seen;
+static long apps_checked_ms;
+
+static void check_apps(void) {
+    long now = vx_uptime();
+    if (now - apps_checked_ms < 2000) {
+        return;
+    }
+    apps_checked_ms = now;
+    unsigned long signature = apps_signature();
+    if (signature == apps_seen) {
+        return;
+    }
+    bool first = apps_seen == 0;
+    apps_seen = signature;
+    if (first) {
+        return;
+    }
+    close_popup();
+    set_menu(false);
+    add_damage(launchers_area());
+    build_menu();
+    find_launchers();
+    selected_launcher = -1;
+    add_damage(launchers_area());
+    printf("desktop: apps changed: %d apps\n", app_count);
+}
+
 static void run_menu_item(int index) {
     struct menu_item *item = &menu_items[index];
     if (item->action == LEAVE) {
@@ -1617,6 +1763,32 @@ static void button_event(int bit, bool down) {
     if (left_down) {
         printf("desktop: left button at %d,%d\n", pointer_x, pointer_y);
     }
+    bool right_down = bit == 2 && down && !(before & 2);
+    if ((left_down || right_down) && popup_open) {
+        /* A click on an item runs it; anywhere else it just closes the menu. */
+        int item = vx_menu_item_at(popup_items, popup_count, popup_x, popup_y, pointer_x, pointer_y);
+        close_popup();
+        if (item >= 0) {
+            printf("desktop: menu item \"%s\"\n", popup_items[item].label);
+            run_popup_item(item);
+        }
+        return;
+    }
+    if (right_down && pointer_y >= PANEL_HEIGHT && !window_at(pointer_x, pointer_y)) {
+        set_menu(false);
+        int hit = -1;
+        for (int i = 0; i < LAUNCHERS; i++) {
+            if (inside(launcher_rect(i), pointer_x, pointer_y)) {
+                hit = i;
+            }
+        }
+        if (hit != selected_launcher) {
+            selected_launcher = hit;
+            add_damage(launchers_area());
+        }
+        open_popup(hit);
+        return;
+    }
     if (left_down && menu_open && pointer_y >= PANEL_HEIGHT) {
         /* A click on an item runs it; anywhere else it just closes the menu. */
         int item = menu_item_at(pointer_x, pointer_y);
@@ -1769,6 +1941,14 @@ static void pointer_moved(int dx, int dy, int wheel) {
                 add_damage(menu_rect());
             }
         }
+        if (popup_open) {
+            int hot = vx_menu_item_at(popup_items, popup_count, popup_x, popup_y, pointer_x,
+                                      pointer_y);
+            if (hot != popup_hot) {
+                popup_hot = hot;
+                add_damage(popup_rect());
+            }
+        }
         add_damage(cursor_rect());
         if (drag != IDLE) {
             return;
@@ -1906,6 +2086,7 @@ int main(int argc, char **argv) {
             shown_minute = minute;
             add_damage(panel_rect());
         }
+        check_apps(); /* (At most every two seconds.) */
         redraw_damage();
         fflush(stdout);
         struct vx_poll polls[3 + MAX_CLIENTS];

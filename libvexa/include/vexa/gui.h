@@ -110,6 +110,23 @@ bool vx_field_key(char *text, size_t size, const struct vx_gui_event *event);
 /* True if (px, py) is inside the rectangle. */
 bool vx_inside(int px, int py, int x, int y, int width, int height);
 
+/* A pop-up menu (a right click's), drawn at (x, y) in a surface. An item
+ * without a label is a line between groups. */
+struct vx_menu_item {
+    const char *label;
+    const char *keys;  /* A shortcut shown on the right, or NULL. */
+    bool disabled;
+};
+#define VX_MENU_ITEM_HEIGHT 22
+#define VX_MENU_SEPARATOR_HEIGHT 9
+/* Its size. */
+void vx_menu_size(const struct vx_menu_item *items, int count, int *width, int *height);
+/* Draws it; `hot` is the item under the pointer (or -1). */
+void vx_draw_menu(struct vx_surface *s, int x, int y, const struct vx_menu_item *items, int count,
+                  int hot);
+/* The item at (px, py), or -1 (outside, a line, or disabled). */
+int vx_menu_item_at(const struct vx_menu_item *items, int count, int x, int y, int px, int py);
+
 /* ---- Images ---- */
 
 struct vx_image {

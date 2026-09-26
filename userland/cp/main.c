@@ -1,6 +1,8 @@
-/* cp: copy a file, or several files into a directory. */
+/* cp: copy a file, or several files into a directory. -r copies
+ * directories with everything in them. */
 #include <stdio.h>
 #include <string.h>
+#include <vexa/files.h>
 #include <vexa/syscall.h>
 
 static int copy(const char *from, const char *to) {
@@ -35,8 +37,11 @@ static int copy(const char *from, const char *to) {
 }
 
 int main(int argc, char **argv) {
+    int recursive = argc > 1 && strcmp(argv[1], "-r") == 0;
+    argv += recursive;
+    argc -= recursive;
     if (argc < 3) {
-        fprintf(stderr, "usage: cp from to, or cp file... directory\n");
+        fprintf(stderr, "usage: cp [-r] from to, or cp [-r] file... directory\n");
         return 2;
     }
     const char *target = argv[argc - 1];
@@ -54,6 +59,15 @@ int main(int argc, char **argv) {
             snprintf(path, sizeof(path), "%s/%s", target, base ? base + 1 : argv[i]);
         } else {
             snprintf(path, sizeof(path), "%s", target);
+        }
+        if (vx_stat(argv[i], &st) == 0 && st.type == VX_TYPE_DIRECTORY) {
+            long error = recursive ? vx_copy_tree(argv[i], path) : -VX_EISDIR;
+            if (error) {
+                fprintf(stderr, "cp: %s: %s%s\n", argv[i], vx_strerror(error),
+                        recursive ? "" : " (use -r)");
+                status = 1;
+            }
+            continue;
         }
         status |= copy(argv[i], path);
     }

@@ -2,41 +2,11 @@
  * everything in them. */
 #include <stdio.h>
 #include <string.h>
+#include <vexa/files.h>
 #include <vexa/syscall.h>
 
 static int remove_tree(const char *path) {
-    struct vx_stat st;
-    if (vx_stat(path, &st) == 0 && st.type == VX_TYPE_DIRECTORY) {
-        int dir = vx_open(path, VX_OPEN_READ);
-        if (dir >= 0) {
-            struct vx_dir_entry entry;
-            char child[512];
-            /* Removing entries while listing shifts later ones, so start over each time. */
-            for (;;) {
-                long n = vx_read_dir(dir, &entry, 1);
-                if (n <= 0) {
-                    break;
-                }
-                if (strcmp(entry.name, ".") == 0 || strcmp(entry.name, "..") == 0) {
-                    continue;
-                }
-                snprintf(child, sizeof(child), "%s/%s", path, entry.name);
-                if (remove_tree(child)) {
-                    vx_close(dir);
-                    return 1;
-                }
-                vx_close(dir);
-                dir = vx_open(path, VX_OPEN_READ);
-                if (dir < 0) {
-                    break;
-                }
-            }
-            if (dir >= 0) {
-                vx_close(dir);
-            }
-        }
-    }
-    long error = vx_remove(path);
+    long error = vx_remove_tree(path);
     if (error) {
         fprintf(stderr, "rm: %s: %s\n", path, vx_strerror(error));
         return 1;

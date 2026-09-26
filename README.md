@@ -44,7 +44,12 @@ runs X programs such as `xterm` in windows of their own on it. The kernel:
   `/share/pictures/meadow.png`
 - keeps its desktop apps as bundles, as macOS does: `/apps/Files.vxapp` is a folder
   with the program, its icon and an `Info.conf` saying what it is and which files it
-  opens; the menu, the desktop icons, Files and `open` all work from them
+  opens; the menu, the desktop icons, Files and `open` all work from them, and
+  copying a `.vxapp` into `/apps` installs it (the desktop notices)
+- manages files like Finder: copy, cut and paste (Ctrl+C, X, V), rename (F2), New
+  Folder, Move to Trash (`/Trash`, Delete) and Empty Trash, Get Info (Ctrl+I, with
+  folder sizes and an app's details), Show Package Contents, Ctrl+L to type a
+  location, Ctrl+H for hidden files; right-click menus in Files and on the desktop
 - runs the X Window System through the Linux subsystem: Xvexa, an X server (X.Org's,
   built with musl) that shows each X window as a desktop window of its own, with
   TrueType fonts (FreeType, fontconfig, Xft and DejaVu), `xterm`, and GTK 3 programs
@@ -96,7 +101,7 @@ the `vexa:/>` prompt:
 | `sh`, `busybox` | BusyBox's shell; `busybox` alone lists its commands |
 | `ln -s`, `cat /proc/meminfo` | symbolic links; `/proc` |
 | `desktop` | the graphical desktop, with a terminal window; the Vexa menu (top left) and the icons on the left start programs, Alt+Tab switches windows, dragging a window to an edge snaps it, Ctrl+Alt+T opens a terminal, Ctrl+Alt+F Files, Ctrl+Alt+E the text editor, Ctrl+Alt+X an `xterm` (an X program), Ctrl+Alt+Q goes back to the text console |
-| `files`, `edit <file>`, `view <image>`, `settings` | the desktop's apps, from its terminal: `view /share/pictures/aurora.png` |
+| `files`, `edit <file>`, `view <image>`, `settings` | the desktop's apps, from its terminal: `view /share/pictures/aurora.png`; in Files, a right click shows what you can do (copy, rename, Get Info, Move to Trash...) |
 | `open <file>`, `open -a <app>` | opens a file with its app, a folder in Files, or starts an app, like macOS's `open`: `open /share/pictures/aurora.png`, `open -a Editor notes.txt` |
 | `notify <text>` | a notification on the desktop |
 | `input` | the keyboard and mouse; `input watch 1` shows what the mouse reports |

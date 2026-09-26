@@ -214,6 +214,11 @@ Native track:
       icon); the menu, desktop icons and shortcuts come from them, Files shows them
       as apps and opens files with the app for their type, `open` from the command
       line; a picture as the default wallpaper (0.16.0)
+- [x] Files manages files: copy, cut and paste (a clipboard shared by Files
+      windows), rename, New Folder, Move to Trash and Empty Trash, Get Info, Show
+      Package Contents, right-click menus (a libvexa widget) there and on the
+      desktop; the desktop notices apps copied into or removed from `/apps`;
+      `cp -r`, and libvexa's `<vexa/files.h>` for whole folders (0.17.0)
 
 Linux track:
 - [x] The X Window System built from source with musl: the X libraries, X.Org's

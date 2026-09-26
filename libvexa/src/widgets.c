@@ -78,3 +78,69 @@ bool vx_field_key(char *text, size_t size, const struct vx_gui_event *event) {
 bool vx_inside(int px, int py, int x, int y, int width, int height) {
     return px >= x && py >= y && px < x + width && py < y + height;
 }
+
+static int menu_item_height(const struct vx_menu_item *item) {
+    return item->label ? VX_MENU_ITEM_HEIGHT : VX_MENU_SEPARATOR_HEIGHT;
+}
+
+void vx_menu_size(const struct vx_menu_item *items, int count, int *width, int *height) {
+    int widest = 0;
+    *height = 8;
+    for (int i = 0; i < count; i++) {
+        *height += menu_item_height(&items[i]);
+        if (items[i].label) {
+            int w = (int)strlen(items[i].label) * FONT_WIDTH;
+            if (items[i].keys) {
+                w += (int)(strlen(items[i].keys) + 3) * FONT_WIDTH;
+            }
+            widest = w > widest ? w : widest;
+        }
+    }
+    *width = widest + 32 < 160 ? 160 : widest + 32;
+}
+
+void vx_draw_menu(struct vx_surface *s, int x, int y, const struct vx_menu_item *items, int count,
+                  int hot) {
+    int width, height;
+    vx_menu_size(items, count, &width, &height);
+    vx_fill(s, x + 3, y + 3, width, height, 0x06030c); /* A shadow. */
+    vx_fill(s, x, y, width, height, VX_COLOR_VIEW);
+    vx_draw_outline(s, x, y, width, height, VX_COLOR_LINE);
+    int top = y + 4;
+    for (int i = 0; i < count; i++) {
+        int h = menu_item_height(&items[i]);
+        if (!items[i].label) {
+            vx_fill(s, x + 8, top + h / 2, width - 16, 1, VX_COLOR_LINE);
+        } else {
+            if (i == hot && !items[i].disabled) {
+                vx_fill(s, x + 4, top, width - 8, h, VX_COLOR_SELECTED);
+            }
+            uint32_t color = items[i].disabled ? VX_COLOR_DIM : VX_COLOR_TEXT;
+            vx_draw_text(s, x + 14, top + (h - FONT_HEIGHT) / 2, items[i].label, color,
+                         VX_TRANSPARENT);
+            if (items[i].keys) {
+                int keys = (int)strlen(items[i].keys) * FONT_WIDTH;
+                vx_draw_text(s, x + width - keys - 14, top + (h - FONT_HEIGHT) / 2, items[i].keys,
+                             VX_COLOR_DIM, VX_TRANSPARENT);
+            }
+        }
+        top += h;
+    }
+}
+
+int vx_menu_item_at(const struct vx_menu_item *items, int count, int x, int y, int px, int py) {
+    int width, height;
+    vx_menu_size(items, count, &width, &height);
+    if (!vx_inside(px, py, x, y, width, height)) {
+        return -1;
+    }
+    int top = y + 4;
+    for (int i = 0; i < count; i++) {
+        int h = menu_item_height(&items[i]);
+        if (py >= top && py < top + h) {
+            return items[i].label && !items[i].disabled ? i : -1;
+        }
+        top += h;
+    }
+    return -1;
+}

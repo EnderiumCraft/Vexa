@@ -123,6 +123,11 @@ TYPED_COMMANDS = [
     # Apps are .vxapp bundles in /apps; their programs are linked in /bin.
     ("ls /apps", "Terminal.vxapp", 10),
     ("ls -l /bin", "files -> /apps/Files.vxapp/Contents/Vexa/files", 10),
+    # cp -r and rm -r, on a bundle.
+    ("cp -r /apps/About.vxapp /tmp/About.vxapp", None, 5),
+    ("ls /tmp/About.vxapp/Contents", "Resources", 10),
+    ("rm -r /tmp/About.vxapp", None, 5),
+    ("ls /tmp/About.vxapp", "ls: /tmp/About.vxapp: ", 10),
     ("input", "PS/2 mouse", 10),
     ("desktop", 'desktop: window 1 "Terminal"', 30),
     ("@type echo from-the-window > /dev/console", "from-the-window", 30),
@@ -159,6 +164,39 @@ TYPED_COMMANDS = [
     ("@mouse_move -454 23", None, 5),
     ("@double-click", "desktop: starting Files", 10),
     ("@mouse_move 0 0", 'desktop: window 5 is now called "/ - Files"', 30),
+    # Files (at 208,194, with the keyboard): to /apps (Ctrl+L, a path), copy an app and paste
+    # it (the desktop notices a new app), rename it, Get Info, Move to Trash
+    # (the app is gone again), back up.
+    ("@sendkey ctrl-l", None, 2),
+    ("@type /apps", 'desktop: window 5 is now called "/apps - Files"', 10),
+    ("@sendkey down", None, 2),
+    ("@sendkey ctrl-c", "files: copied /apps/About.vxapp", 10),
+    ("@sendkey ctrl-v", "files: pasted /apps/About.vxapp to /apps/About 2.vxapp", 10),
+    ("@mouse_move 0 0", "desktop: apps changed", 10),
+    ("@sendkey f2", None, 2),
+] + [("@sendkey backspace", None, 1)] * 13 + [
+    ("@type Hello.vxapp", "files: renamed /apps/About 2.vxapp to /apps/Hello.vxapp", 10),
+    ("@sendkey ctrl-i", "files: info for Hello.vxapp: App", 10),
+    ("@sendkey esc", None, 2),
+    ("@sendkey delete", "files: moved /apps/Hello.vxapp to the Trash", 10),
+    ("@sendkey backspace", 'desktop: window 5 is now called "/ - Files"', 10),
+    # Right clicks: in Files' list (its menu), then on the desktop, whose
+    # menu starts "About Vexa"; then the pointer goes back to the Files icon.
+    ("@mouse_move 300 221", None, 5),
+    ("@mouse_move 368 221", None, 5),
+    ("@mouse_button 2", "files: menu for /", 10),
+    ("@mouse_button 0", None, 2),
+    ("@sendkey esc", None, 2),
+    ("@mouse_move 292 58", None, 5),
+    ("@mouse_button 2", "desktop: menu at 1000,650", 10),
+    ("@mouse_button 0", None, 2),
+    ("@mouse_move 20 90", None, 5),
+    ("@mouse_button 1", 'desktop: menu item "About Vexa"', 10),
+    ("@mouse_button 0", 'desktop: window 6 "About Vexa"', 20),
+    ("@mouse_move -245 -148", None, 5),
+    ("@mouse_move -245 -148", None, 5),
+    ("@mouse_move -245 -147", None, 5),
+    ("@mouse_move -245 -147", None, 5),
     # Dragging the terminal by its title bar to the left edge: half the screen.
     ("@mouse_move 280 -15", None, 5),
     ("@mouse_move 280 -15", None, 5),
