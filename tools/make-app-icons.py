@@ -132,6 +132,119 @@ def xterm():
     return im
 
 
+def page(fold=(210, 204, 226)):
+    """A sheet of paper with a folded corner."""
+    im = canvas()
+    d = ImageDraw.Draw(im)
+    d.polygon([(9 * S, 3 * S), (30 * S, 3 * S), (39 * S, 12 * S), (39 * S, 45 * S), (9 * S, 45 * S)],
+              fill=(246, 243, 252, 255), outline=(170, 160, 200, 255), width=S)
+    d.polygon([(30 * S, 3 * S), (30 * S, 12 * S), (39 * S, 12 * S)], fill=fold + (255,),
+              outline=(170, 160, 200, 255))
+    return im, d
+
+
+def document():
+    return page()[0]
+
+
+def text_file():
+    im, d = page()
+    for i in range(6):
+        w = 20 if i % 3 != 2 else 12
+        d.line([(14 * S, (18 + i * 4) * S), ((14 + w) * S, (18 + i * 4) * S)],
+               fill=(138, 128, 163, 255), width=int(1.5 * S))
+    return im
+
+
+def image_file():
+    im, d = page((150, 190, 240))
+    d.rectangle([13 * S, 18 * S, 35 * S, 38 * S], fill=(120, 175, 245, 255))
+    d.ellipse([27 * S, 20 * S, 32 * S, 25 * S], fill=(255, 220, 90, 255))
+    d.polygon([(13 * S, 38 * S), (20 * S, 27 * S), (26 * S, 34 * S), (29 * S, 30 * S), (35 * S, 38 * S)],
+              fill=(60, 150, 80, 255))
+    return im
+
+
+def program():
+    im = gradient_tile((70, 60, 110), (30, 24, 52), 5, 8, 43, 40, 5)
+    d = ImageDraw.Draw(im)
+    d.rectangle([5 * S, 8 * S, 43 * S, 14 * S], fill=(110, 90, 170, 255))
+    d.line([(12 * S, 21 * S), (18 * S, 26 * S), (12 * S, 31 * S)], fill=(126, 231, 135, 255),
+           width=3 * S)
+    d.line([(21 * S, 32 * S), (30 * S, 32 * S)], fill=(126, 231, 135, 255), width=3 * S)
+    return im
+
+
+def device():
+    im = canvas()
+    d = ImageDraw.Draw(im)
+    box(d, 12, 12, 36, 36, 3, (90, 130, 220, 255))
+    box(d, 17, 17, 31, 31, 2, (60, 90, 170, 255))
+    for i in range(4):
+        y = 15 + i * 6
+        d.rectangle([7 * S, y * S, 12 * S, (y + 2) * S], fill=(170, 180, 200, 255))
+        d.rectangle([36 * S, y * S, 41 * S, (y + 2) * S], fill=(170, 180, 200, 255))
+    return im
+
+
+def computer():
+    im = canvas()
+    d = ImageDraw.Draw(im)
+    box(d, 4, 7, 44, 35, 3, (60, 64, 80, 255))
+    inner = gradient_tile((110, 70, 200), (40, 20, 80), 7, 10, 41, 32, 1)
+    im.alpha_composite(inner)
+    d.polygon([(19 * S, 35 * S), (29 * S, 35 * S), (31 * S, 42 * S), (17 * S, 42 * S)],
+              fill=(150, 155, 170, 255))
+    d.rectangle([13 * S, 42 * S, 35 * S, 44 * S], fill=(120, 125, 140, 255))
+    return im
+
+
+def disk():
+    im = canvas()
+    d = ImageDraw.Draw(im)
+    box(d, 4, 14, 44, 36, 4, (190, 195, 205, 255))
+    box(d, 4, 28, 44, 36, 4, (150, 155, 168, 255))
+    d.ellipse([36 * S, 30 * S, 40 * S, 34 * S], fill=(90, 220, 120, 255))
+    return im
+
+
+def trash():
+    im = canvas()
+    d = ImageDraw.Draw(im)
+    d.polygon([(10 * S, 13 * S), (38 * S, 13 * S), (35 * S, 44 * S), (13 * S, 44 * S)],
+              fill=(200, 205, 215, 255), outline=(130, 135, 150, 255), width=S)
+    box(d, 7, 8, 41, 13, 2, (170, 175, 190, 255))
+    box(d, 19, 4, 29, 8, 2, (170, 175, 190, 255))
+    for x in (17, 24, 31):
+        d.line([(x * S, 18 * S), (x * S, 40 * S)], fill=(140, 145, 160, 255), width=2 * S)
+    return im
+
+
+def apps_folder():
+    im = files()
+    d = ImageDraw.Draw(im)
+    for i in range(2):
+        for j in range(2):
+            x, y = 16 + i * 9, 23 + j * 8
+            box(d, x, y, x + 6, y + 6, 1.5, (255, 255, 255, 230))
+    return im
+
+
+def pictures_folder():
+    im = files()
+    d = ImageDraw.Draw(im)
+    d.ellipse([28 * S, 24 * S, 33 * S, 29 * S], fill=(255, 255, 255, 230))
+    d.polygon([(14 * S, 37 * S), (21 * S, 27 * S), (27 * S, 37 * S)], fill=(255, 255, 255, 230))
+    return im
+
+
+# Files' own pictures (Files.vxapp/Contents/Resources): kinds of files, places.
+FILE_ICONS = {
+    "folder": files, "document": document, "text": text_file, "image": image_file,
+    "program": program, "device": device, "computer": computer, "disk": disk,
+    "trash": trash, "apps": apps_folder, "pictures": pictures_folder,
+}
+
 ICONS = {
     "Terminal": terminal, "Files": files, "Editor": editor, "Viewer": viewer,
     "Settings": settings, "About": about, "XTerm": xterm,
@@ -143,5 +256,10 @@ if __name__ == "__main__":
         im = shadow(draw()).resize((SIZE, SIZE), Image.LANCZOS)
         out = os.path.join(root, name + ".vxapp", "Contents", "Resources", "icon.png")
         os.makedirs(os.path.dirname(out), exist_ok=True)
+        im.save(out, optimize=True)
+        print(out)
+    for name, draw in FILE_ICONS.items():
+        im = shadow(draw()).resize((SIZE, SIZE), Image.LANCZOS)
+        out = os.path.join(root, "Files.vxapp", "Contents", "Resources", name + ".png")
         im.save(out, optimize=True)
         print(out)

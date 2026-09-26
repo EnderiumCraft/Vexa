@@ -1,19 +1,27 @@
-/* files: a file manager window, in the manner of macOS's Finder.
+/* files: Vexa's file manager, in the manner of macOS's Finder.
  *
- * It lists a folder (folders first). A double click (or Enter) opens a
- * folder, starts an app (a .vxapp bundle, shown with its icon, like a
- * file), runs a program from /bin, and opens anything else with the app for
- * its type (<vexa/app.h>). A right click opens a menu: Open, Show Package
- * Contents, Get Info, Rename, Copy, Cut, Paste, Move to Trash; on the empty
- * part of the list, New Folder, Paste, Open in Terminal and, in the Trash,
- * Empty Trash. The keyboard does the same: Ctrl+C, Ctrl+X, Ctrl+V,
- * Ctrl+I, F2, Delete, Ctrl+Shift+N. Up (or Backspace) goes to the parent
- * folder; the path at the top can be typed into (Ctrl+L). Names starting
- * with a dot are hidden, as in Finder, until Ctrl+H.
+ * A window with a sidebar (places, and disks), a toolbar (Back, Forward,
+ * Up, the location, list or icon view, search) and the folder: as a list
+ * with columns (name, kind, size, modified; a click on a heading sorts by
+ * it) or as icons (pictures show as thumbnails). Apps (.vxapp bundles) show
+ * as apps, with their icons.
+ *
+ * A double click (or Enter) opens: a folder, an app, a program in /bin,
+ * or a file with the app for its type (<vexa/app.h>). Ctrl-click and
+ * Shift-click select several things; dragging them onto a folder or a place
+ * moves them (Ctrl: copies). Space shows a Quick Look of an image or a text
+ * file. A right click opens a menu: Open, Show Package Contents, Get Info,
+ * Rename, Duplicate, Make Alias, Copy, Cut, Paste, Move to Trash; on the
+ * empty part, New Folder, New Text Document, Paste, Open in Terminal and, in
+ * the Trash, Empty Trash. The keyboard does the same: Ctrl+C, X, V, D, I,
+ * A (all), F (search), L (location), H (hidden files), 1 and 2 (list,
+ * icons), F2, Delete, Ctrl+Shift+N; Alt+Left and Right go back and forward,
+ * Backspace up; typing a name's first letters goes to it.
  *
  * The clipboard is a file (CLIPBOARD) that every Files window shares.
  * Deleted things go to /Trash first. Copying a .vxapp into /apps installs
- * an app: the desktop notices it.
+ * an app: the desktop notices it. What Files does is also printed (its
+ * output is the desktop's log when the desktop started it).
  */
 #include <stdbool.h>
 #include <stdio.h>
@@ -25,138 +33,376 @@
 #include <vexa/gui.h>
 #include <vexa/syscall.h>
 
-#define WIDTH 620
-#define HEIGHT 440
-#define TOOLBAR 36
+#define WIDTH 780
+#define HEIGHT 500
+#define TOOLBAR 40
 #define STATUS 22
+#define SIDEBAR 160
 #define ROW 20
+#define HEADER 20
+#define CELL_W 104
+#define CELL_H 90
 #define MAX_ENTRIES 1024
 #define DOUBLE_CLICK_MS 500
 #define TRASH "/Trash"
 #define CLIPBOARD "/tmp/.files-clipboard"
-#define PATH_X 214 /* The path field, after the buttons. */
+#define RESOURCES "/apps/Files.vxapp/Contents/Resources"
+#define MAX_HISTORY 32
+#define MAX_THUMB_BYTES (8 * 1024 * 1024)
+
+/* ---- What's shown ---- */
+
+enum kind { K_FOLDER, K_APP, K_IMAGE, K_TEXT, K_PROGRAM, K_DEVICE, K_LINK, K_DOCUMENT };
+static const char *const kind_names[] = {"Folder", "App", "Image", "Text", "Program",
+                                         "Device", "Link", "Document"};
 
 struct item {
     char name[256];
     uint32_t type;
     uint64_t size;
-    bool app;              /* A .vxapp bundle. */
-    struct vx_image *icon; /* An app's icon. */
+    long long modified;
+    enum kind kind;
+    bool link;               /* A symbolic link (to what `kind` says). */
+    bool app;                /* A .vxapp bundle. */
+    bool selected;
+    struct vx_image *icon;   /* An app's icon. */
+    struct vx_image *thumb;  /* A picture's thumbnail (icon view). */
+    bool thumb_tried;
 };
 
 static struct vx_window *window;
 static char cwd[512] = "/";
-static char typed[512];
-static bool typing; /* The path field has the keyboard. */
 static struct item items[MAX_ENTRIES];
-static int item_count, selected = -1, top;
-static int hot_button = -1;
-static long last_click_ms;
-static int last_click;
-static char status[160];
-static bool ctrl, shift;
-static bool show_hidden; /* Names starting with a dot. */
+static int item_count;
+static int shown[MAX_ENTRIES]; /* The items that pass the search, in order. */
+static int shown_count;
+static int cursor = -1, anchor = -1; /* Positions in shown[]. */
+static int top;                      /* The first row in view. */
+static bool icon_view;
+static bool show_hidden;
+static enum { SORT_NAME, SORT_KIND, SORT_SIZE, SORT_MODIFIED } sort_by;
+static bool sort_down; /* Reversed. */
+static bool ctrl, shift, alt;
 
-/* The toolbar's buttons. */
-static const struct {
-    const char *label;
-    int x, width;
-} buttons[] = {{"Up", 8, 36}, {"Home", 48, 48}, {"Apps", 100, 48}, {"Trash", 152, 56}};
-#define BUTTONS (int)(sizeof(buttons) / sizeof(buttons[0]))
+static char message[200];
+static long message_ms;
 
-/* What has the keyboard and pointer besides the list: a menu, renaming,
- * a question, or an item's information. */
-static enum { NORMAL, MENU, RENAMING, CONFIRM, INFO } mode;
+/* Typing into the location or the search field. */
+static enum { FIELD_NONE, FIELD_PATH, FIELD_SEARCH } field;
+static char typed[512];
+static char search[64];
 
-/* ---- The folder ---- */
+static enum { NORMAL, MENU, RENAMING, CONFIRM, INFO, PREVIEW } mode;
 
-static int list_rows(void) {
-    return (window->surface.height - TOOLBAR - STATUS - 8) / ROW;
-}
+static char back_stack[MAX_HISTORY][512], forward_stack[MAX_HISTORY][512];
+static int back_count, forward_count;
 
-static int compare(const void *a, const void *b) {
-    const struct item *x = a, *y = b;
-    bool dx = x->type == VX_TYPE_DIRECTORY && !x->app, dy = y->type == VX_TYPE_DIRECTORY && !y->app;
-    if (dx != dy) {
-        return dx ? -1 : 1;
-    }
-    return strcmp(x->name, y->name);
-}
+/* Files' own pictures, from its bundle. */
+static struct vx_image *kind_icons[8], *place_icons[8], *disk_icon;
 
-static void item_path(char *out, size_t size, int index) {
-    vx_join_path(out, size, cwd, items[index].name);
-}
+/* ---- Small helpers ---- */
 
-static void set_status(const char *text) {
-    snprintf(status, sizeof(status), "%s", text);
-    printf("files: %s\n", text); /* (The desktop's output: a log.) */
+static void say(const char *text) {
+    snprintf(message, sizeof(message), "%s", text);
+    message_ms = vx_uptime();
+    printf("files: %s\n", text);
     fflush(stdout);
 }
 
-static void select_item(int index);
+static const char *base_name(const char *path) {
+    const char *slash = strrchr(path, '/');
+    return slash && slash[1] ? slash + 1 : path;
+}
 
-/* Reads the folder again, selecting `name` if it's given. */
-static void load(const char *name) {
+static bool ends_with(const char *text, const char *suffix) {
+    size_t n = strlen(text), m = strlen(suffix);
+    return n >= m && !strcmp(text + n - m, suffix);
+}
+
+static bool same_letters(char a, char b) {
+    return (a | 0x20) == (b | 0x20);
+}
+
+/* True if `text` has `part` in it, ignoring case. */
+static bool contains(const char *text, const char *part) {
+    size_t n = strlen(part);
+    for (; *text; text++) {
+        size_t i = 0;
+        while (i < n && text[i] && same_letters(text[i], part[i])) {
+            i++;
+        }
+        if (i == n) {
+            return true;
+        }
+    }
+    return n == 0;
+}
+
+static struct item *at(int position) {
+    return position >= 0 && position < shown_count ? &items[shown[position]] : NULL;
+}
+
+static void item_path(char *out, size_t size, const struct item *item) {
+    vx_join_path(out, size, cwd, item->name);
+}
+
+static struct vx_image *resource(const char *name) {
+    char path[160];
+    snprintf(path, sizeof(path), "%s/%s.png", RESOURCES, name);
+    return vx_image_load(path, VX_IMAGE_ALPHA);
+}
+
+static void load_resources(void) {
+    static const char *const kinds[] = {"folder", "folder", "image", "text",
+                                        "program", "device", "document", "document"};
+    for (int i = 0; i < 8; i++) {
+        kind_icons[i] = resource(kinds[i]);
+    }
+    disk_icon = resource("disk");
+}
+
+static enum kind kind_of_name(const char *name, uint32_t type) {
+    if (type == VX_TYPE_DIRECTORY) {
+        return K_FOLDER;
+    }
+    if (type == VX_TYPE_CHAR_DEVICE || type == VX_TYPE_BLOCK_DEVICE || type == VX_TYPE_SOCKET) {
+        return K_DEVICE;
+    }
+    const char *dot = strrchr(name, '.');
+    if (dot) {
+        static const char *const images[] = {".png", ".bmp", ".ppm", ".PNG"};
+        static const char *const texts[] = {".txt", ".conf", ".md", ".c", ".h", ".py", ".sh",
+                                            ".log", ".desktop", ".ini", ".json", ".xml"};
+        for (size_t i = 0; i < sizeof(images) / sizeof(images[0]); i++) {
+            if (!strcmp(dot, images[i])) {
+                return K_IMAGE;
+            }
+        }
+        for (size_t i = 0; i < sizeof(texts) / sizeof(texts[0]); i++) {
+            if (!strcmp(dot, texts[i])) {
+                return K_TEXT;
+            }
+        }
+    }
+    return K_DOCUMENT;
+}
+
+/* ---- The sidebar: places, then disks ---- */
+
+struct place {
+    char label[40];
+    char path[256];
+    struct vx_image **icon;
+};
+#define MAX_PLACES 16
+static struct place places[MAX_PLACES];
+static int place_count, disks_start;
+static int drop_place = -1; /* Where a drag would drop, or -1. */
+
+static void find_places(void) {
+    static const struct {
+        const char *label, *path, *icon;
+    } fixed[] = {
+        {"Vexa", "/", "computer"}, {"Apps", VX_APPS_DIR, "apps"},
+        {"Pictures", "/share/pictures", "pictures"}, {"Temporary", "/tmp", "folder"},
+        {"Trash", TRASH, "trash"},
+    };
+    place_count = 0;
+    for (size_t i = 0; i < sizeof(fixed) / sizeof(fixed[0]); i++) {
+        if (!place_icons[i]) {
+            place_icons[i] = resource(fixed[i].icon);
+        }
+        struct place *p = &places[place_count++];
+        snprintf(p->label, sizeof(p->label), "%s", fixed[i].label);
+        snprintf(p->path, sizeof(p->path), "%s", fixed[i].path);
+        p->icon = &place_icons[i];
+    }
+    disks_start = place_count;
+    /* The boot CD, and what's mounted in /mnt. */
+    struct vx_stat stat;
+    char cdrom[256] = "";
+    long got = vx_readlink("/cdrom", cdrom, sizeof(cdrom) - 1);
+    cdrom[got > 0 ? got : 0] = '\0';
+    if (vx_stat("/cdrom", &stat) == 0 && stat.type == VX_TYPE_DIRECTORY) {
+        struct place *p = &places[place_count++];
+        snprintf(p->label, sizeof(p->label), "Boot CD");
+        snprintf(p->path, sizeof(p->path), "/cdrom");
+        p->icon = &disk_icon;
+    }
+    int handle = vx_open("/mnt", VX_OPEN_READ);
+    if (handle >= 0) {
+        struct vx_dir_entry entries[16];
+        long n;
+        while ((n = vx_read_dir(handle, entries, 16)) > 0) {
+            for (long i = 0; i < n && place_count < MAX_PLACES; i++) {
+                char path[300];
+                snprintf(path, sizeof(path), "/mnt/%s", entries[i].name);
+                if (entries[i].name[0] == '.' || entries[i].type != VX_TYPE_DIRECTORY ||
+                    !strcmp(path, cdrom)) { /* (The boot CD is there already.) */
+                    continue;
+                }
+                struct place *p = &places[place_count++];
+                snprintf(p->label, sizeof(p->label), "%s", entries[i].name);
+                snprintf(p->path, sizeof(p->path), "/mnt/%s", entries[i].name);
+                p->icon = &disk_icon;
+            }
+        }
+        vx_close(handle);
+    }
+}
+
+static int place_y(int i) {
+    return TOOLBAR + 28 + i * 24 + (i >= disks_start ? 28 : 0);
+}
+
+static int place_at(int x, int y) {
+    if (x >= SIDEBAR) {
+        return -1;
+    }
+    for (int i = 0; i < place_count; i++) {
+        if (y >= place_y(i) && y < place_y(i) + 24) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+/* ---- The folder ---- */
+
+static int compare(const void *a, const void *b) {
+    const struct item *x = &items[*(const int *)a], *y = &items[*(const int *)b];
+    bool dx = x->kind == K_FOLDER, dy = y->kind == K_FOLDER; /* Folders first. */
+    if (dx != dy) {
+        return dx ? -1 : 1;
+    }
+    int order = 0;
+    switch (sort_by) {
+    case SORT_KIND: order = strcmp(kind_names[x->kind], kind_names[y->kind]); break;
+    case SORT_SIZE: order = x->size < y->size ? -1 : x->size > y->size; break;
+    case SORT_MODIFIED: order = x->modified < y->modified ? -1 : x->modified > y->modified; break;
+    case SORT_NAME: break;
+    }
+    if (!order) {
+        order = strcmp(x->name, y->name);
+    }
+    return sort_down ? -order : order;
+}
+
+/* Works out shown[] from the items: the search, then the order. */
+static void arrange(void) {
+    shown_count = 0;
+    for (int i = 0; i < item_count; i++) {
+        if (contains(items[i].name, search)) {
+            shown[shown_count++] = i;
+        } else {
+            items[i].selected = false;
+        }
+    }
+    qsort(shown, (size_t)shown_count, sizeof(shown[0]), compare);
+    cursor = anchor = -1;
+    for (int i = 0; i < shown_count && cursor < 0; i++) {
+        if (items[shown[i]].selected) {
+            cursor = anchor = i;
+        }
+    }
+    top = 0;
+}
+
+static void free_items(void) {
     for (int i = 0; i < item_count; i++) {
         vx_image_free(items[i].icon);
+        vx_image_free(items[i].thumb);
     }
     item_count = 0;
-    selected = -1;
-    top = 0;
+}
+
+static void load(void) {
+    free_items();
+    shown_count = 0;
     int handle = vx_open(cwd, VX_OPEN_READ);
     if (handle < 0) {
-        snprintf(status, sizeof(status), "Can't open %s: %s", cwd, vx_strerror(handle));
+        snprintf(message, sizeof(message), "Can't open %s: %s", cwd, vx_strerror(handle));
+        message_ms = vx_uptime();
         return;
     }
     struct vx_dir_entry entries[32];
     long n;
     while ((n = vx_read_dir(handle, entries, 32)) > 0) {
         for (long i = 0; i < n && item_count < MAX_ENTRIES; i++) {
-            if (!strcmp(entries[i].name, ".") || !strcmp(entries[i].name, "..") ||
-                (entries[i].name[0] == '.' && !show_hidden)) {
+            const char *name = entries[i].name;
+            if (!strcmp(name, ".") || !strcmp(name, "..") || (name[0] == '.' && !show_hidden)) {
                 continue;
             }
             struct item *item = &items[item_count++];
-            snprintf(item->name, sizeof(item->name), "%s", entries[i].name);
+            memset(item, 0, sizeof(*item));
+            snprintf(item->name, sizeof(item->name), "%s", name);
             item->type = entries[i].type;
-            item->size = 0;
-            item->app = false;
-            item->icon = NULL;
+            item->link = item->type == VX_TYPE_SYMLINK;
             char path[800];
-            vx_join_path(path, sizeof(path), cwd, item->name);
+            item_path(path, sizeof(path), item);
             struct vx_stat stat;
-            if (vx_stat(path, &stat) == 0) {
+            uint32_t type = item->type;
+            if (vx_stat(path, &stat) == 0) { /* What a link points to. */
                 item->size = stat.size;
-                if (item->type == VX_TYPE_SYMLINK && stat.type == VX_TYPE_DIRECTORY) {
-                    item->type = VX_TYPE_DIRECTORY; /* A link to a folder opens like one. */
-                }
+                item->modified = stat.modified;
+                type = stat.type;
+            }
+            item->kind = kind_of_name(name, type);
+            if (type == VX_TYPE_FILE && !strcmp(cwd, "/bin")) {
+                item->kind = K_PROGRAM;
             }
             struct vx_app app;
-            if (item->type == VX_TYPE_DIRECTORY && vx_app_is_bundle(item->name) &&
-                vx_app_load(path, &app) == 0) {
+            if (type == VX_TYPE_DIRECTORY && vx_app_is_bundle(name) && vx_app_load(path, &app) == 0) {
                 item->app = true;
+                item->kind = K_APP;
                 item->icon = app.icon[0] ? vx_image_load(app.icon, VX_IMAGE_ALPHA) : NULL;
             }
         }
     }
     vx_close(handle);
-    qsort(items, item_count, sizeof(items[0]), compare);
-    snprintf(status, sizeof(status), "%d item%s", item_count, item_count == 1 ? "" : "s");
+    arrange();
     char title[600];
     snprintf(title, sizeof(title), "%s - Files", cwd);
     vx_window_set_title(window, title);
-    for (int i = 0; name && i < item_count; i++) {
-        if (!strcmp(items[i].name, name)) {
-            select_item(i);
+    find_places();
+}
+
+static void select_only(int position);
+
+static void select_names(char names[][256], int count) {
+    for (int n = 0; n < count; n++) {
+        for (int i = 0; i < shown_count; i++) {
+            if (!strcmp(items[shown[i]].name, names[n])) {
+                items[shown[i]].selected = true;
+                if (n == 0) {
+                    cursor = anchor = i;
+                }
+            }
         }
     }
 }
 
-static void go(const char *path) {
+/* After an operation: read the folder again, with these names selected. */
+static void reload_selecting(char names[][256], int count) {
+    load();
+    select_names(names, count);
+}
+
+static void go_to(const char *path, bool remember) {
     struct vx_stat stat;
     if (vx_stat(path, &stat) || stat.type != VX_TYPE_DIRECTORY) {
-        snprintf(status, sizeof(status), "Not a folder: %s", path);
+        char text[600];
+        snprintf(text, sizeof(text), "Not a folder: %s", path);
+        say(text);
         return;
+    }
+    if (remember && strcmp(path, cwd)) {
+        if (back_count == MAX_HISTORY) {
+            memmove(back_stack, back_stack + 1, sizeof(back_stack[0]) * (MAX_HISTORY - 1));
+            back_count--;
+        }
+        snprintf(back_stack[back_count++], sizeof(back_stack[0]), "%s", cwd);
+        forward_count = 0;
     }
     char resolved[512];
     if (vx_chdir(path) == 0 && vx_getcwd(resolved, sizeof(resolved)) >= 0) {
@@ -164,29 +410,143 @@ static void go(const char *path) {
     } else {
         snprintf(cwd, sizeof(cwd), "%s", path);
     }
-    load(NULL);
+    search[0] = '\0';
+    if (field == FIELD_SEARCH) {
+        field = FIELD_NONE;
+    }
+    load();
+}
+
+static void go(const char *path) {
+    go_to(path, true);
+}
+
+static void go_back(void) {
+    if (back_count) {
+        if (forward_count < MAX_HISTORY) {
+            snprintf(forward_stack[forward_count++], sizeof(forward_stack[0]), "%s", cwd);
+        }
+        char path[512];
+        snprintf(path, sizeof(path), "%s", back_stack[--back_count]);
+        go_to(path, false);
+    }
+}
+
+static void go_forward(void) {
+    if (forward_count) {
+        if (back_count < MAX_HISTORY) {
+            snprintf(back_stack[back_count++], sizeof(back_stack[0]), "%s", cwd);
+        }
+        char path[512];
+        snprintf(path, sizeof(path), "%s", forward_stack[--forward_count]);
+        go_to(path, false);
+    }
 }
 
 static void up(void) {
     if (!strcmp(cwd, "/")) {
         return;
     }
-    char parent[512], *slash;
+    char parent[512], child[256];
     snprintf(parent, sizeof(parent), "%s", cwd);
-    slash = strrchr(parent, '/');
+    snprintf(child, sizeof(child), "%s", base_name(cwd));
+    char *slash = strrchr(parent, '/');
     if (slash == parent) {
         parent[1] = '\0';
     } else if (slash) {
         *slash = '\0';
     }
     go(parent);
+    char names[1][256];
+    snprintf(names[0], sizeof(names[0]), "%s", child);
+    select_names(names, 1); /* The folder we came from. */
+}
+
+/* ---- Selection ---- */
+
+static int selected_count(void) {
+    int n = 0;
+    for (int i = 0; i < shown_count; i++) {
+        n += items[shown[i]].selected;
+    }
+    return n;
+}
+
+static void clear_selection(void) {
+    for (int i = 0; i < item_count; i++) {
+        items[i].selected = false;
+    }
+}
+
+static int columns(void);
+static int visible_rows(void);
+
+static void keep_in_view(int position) {
+    int per_row = icon_view ? columns() : 1;
+    int row = position / per_row;
+    if (row < top) {
+        top = row;
+    } else if (row >= top + visible_rows()) {
+        top = row - visible_rows() + 1;
+    }
+}
+
+static void select_only(int position) {
+    clear_selection();
+    if (shown_count == 0) {
+        cursor = anchor = -1;
+        return;
+    }
+    position = position < 0 ? 0 : position >= shown_count ? shown_count - 1 : position;
+    items[shown[position]].selected = true;
+    cursor = anchor = position;
+    keep_in_view(position);
+}
+
+/* Shift: everything from the anchor to here. */
+static void select_to(int position) {
+    if (shown_count == 0) {
+        return;
+    }
+    position = position < 0 ? 0 : position >= shown_count ? shown_count - 1 : position;
+    if (anchor < 0) {
+        anchor = position;
+    }
+    clear_selection();
+    int from = anchor < position ? anchor : position, to = anchor < position ? position : anchor;
+    for (int i = from; i <= to; i++) {
+        items[shown[i]].selected = true;
+    }
+    cursor = position;
+    keep_in_view(position);
+}
+
+static void move_cursor(int to) {
+    if (shift) {
+        select_to(to);
+    } else {
+        select_only(to);
+    }
+}
+
+/* The selected items' paths (at most `max`). */
+static int selected_paths(char paths[][512], int max) {
+    int n = 0;
+    for (int i = 0; i < shown_count && n < max; i++) {
+        if (items[shown[i]].selected) {
+            item_path(paths[n++], 512, &items[shown[i]]);
+        }
+    }
+    return n;
 }
 
 /* ---- Opening ---- */
 
-static void start(int process, const char *what) {
+static void started(int process, const char *what) {
     if (process < 0) {
-        snprintf(status, sizeof(status), "Can't start %s: %s", what, vx_strerror(process));
+        char text[300];
+        snprintf(text, sizeof(text), "Can't start %s: %s", what, vx_strerror(process));
+        say(text);
     } else {
         vx_close(process); /* It runs on its own. */
     }
@@ -202,165 +562,259 @@ static void run(const char *program, const char *argument) {
         .argv = argv, .argc = argument ? 2 : 1, .envp = (const char *const *)environ,
         .envc = envc, .handles = {0, 1, 2}, .flags = VX_SPAWN_NEW_GROUP,
     };
-    start(vx_spawn(program, &spawn), program);
+    started(vx_spawn(program, &spawn), program);
 }
 
-static void open_item(int index) {
-    if (index < 0 || index >= item_count) {
+static void open_item(struct item *item) {
+    if (!item) {
         return;
     }
-    struct item *item = &items[index];
     char path[800];
-    item_path(path, sizeof(path), index);
+    item_path(path, sizeof(path), item);
     struct vx_app app;
     if (item->app && vx_app_load(path, &app) == 0) {
-        start(vx_app_open(&app, NULL), app.name);
-    } else if (item->type == VX_TYPE_DIRECTORY) {
+        started(vx_app_open(&app, NULL), app.name);
+    } else if (item->kind == K_FOLDER) {
         go(path);
-    } else if (!strcmp(cwd, "/bin")) {
+    } else if (item->kind == K_PROGRAM) {
         run(path, NULL);
     } else if (vx_app_for_file(path, &app) == 0) {
-        start(vx_app_open(&app, path), app.name);
+        started(vx_app_open(&app, path), app.name);
     } else {
-        snprintf(status, sizeof(status), "No app opens %s", item->name);
+        char text[300];
+        snprintf(text, sizeof(text), "No app opens %s", item->name);
+        say(text);
     }
 }
 
-static void open_with(int index, const char *app_name) {
+/* Enter: the selection (folders: only the first, which we go into). */
+static void open_selection(void) {
+    for (int i = 0; i < shown_count; i++) {
+        struct item *item = &items[shown[i]];
+        if (item->selected && !(item->kind == K_FOLDER && !item->app)) {
+            open_item(item);
+        }
+    }
+    for (int i = 0; i < shown_count; i++) {
+        struct item *item = &items[shown[i]];
+        if (item->selected && item->kind == K_FOLDER && !item->app) {
+            open_item(item);
+            return;
+        }
+    }
+}
+
+static void open_with(struct item *item, const char *app_name) {
     struct vx_app app;
     char path[800];
-    item_path(path, sizeof(path), index);
+    item_path(path, sizeof(path), item);
     if (vx_app_find(app_name, &app) == 0) {
-        start(vx_app_open(&app, path), app.name);
+        started(vx_app_open(&app, path), app.name);
     }
 }
 
-/* ---- The clipboard: "copy" or "cut", then a path. ---- */
+/* ---- The clipboard: "copy" or "cut", then a path a line. ---- */
 
-static bool read_clipboard(char *path, size_t size, bool *cut) {
+#define MAX_CLIP 64
+
+static int read_clipboard(char paths[][512], int max, bool *cut) {
     int handle = vx_open(CLIPBOARD, VX_OPEN_READ);
     if (handle < 0) {
-        return false;
+        return 0;
     }
-    char text[600];
+    static char text[MAX_CLIP * 520];
     long n = vx_read(handle, text, sizeof(text) - 1);
     vx_close(handle);
     text[n > 0 ? n : 0] = '\0';
-    char *newline = strchr(text, '\n');
-    if (!newline || !newline[1]) {
-        return false;
+    char *line = text, *next = strchr(line, '\n');
+    if (!next) {
+        return 0;
     }
-    *newline = '\0';
-    *cut = !strcmp(text, "cut");
-    snprintf(path, size, "%s", newline + 1);
-    return vx_lstat(path, &(struct vx_stat){0}) == 0;
+    *next++ = '\0';
+    *cut = !strcmp(line, "cut");
+    int count = 0;
+    for (line = next; line && *line && count < max; line = next) {
+        next = strchr(line, '\n');
+        if (next) {
+            *next++ = '\0';
+        }
+        if (vx_lstat(line, &(struct vx_stat){0}) == 0) {
+            snprintf(paths[count++], 512, "%s", line);
+        }
+    }
+    return count;
 }
 
-static void write_clipboard(const char *verb, const char *path) {
-    int handle = vx_open(CLIPBOARD, VX_OPEN_WRITE | VX_OPEN_CREATE | VX_OPEN_TRUNCATE);
-    if (handle >= 0) {
-        char text[600];
-        int n = snprintf(text, sizeof(text), "%s\n%s", verb, path);
-        vx_write(handle, text, (size_t)n);
-        vx_close(handle);
-    }
+static bool can_paste(void) {
+    static char paths[1][512];
+    bool cut;
+    return read_clipboard(paths, 1, &cut) > 0;
 }
 
-static void copy_item(int index, bool cut) {
-    if (index < 0) {
+static void copy_selection(bool cut) {
+    static char paths[MAX_CLIP][512];
+    int n = selected_paths(paths, MAX_CLIP);
+    if (!n) {
         return;
     }
-    char path[800], message[900];
-    item_path(path, sizeof(path), index);
-    write_clipboard(cut ? "cut" : "copy", path);
-    snprintf(message, sizeof(message), "%s %s", cut ? "cut" : "copied", path);
-    set_status(message);
+    int handle = vx_open(CLIPBOARD, VX_OPEN_WRITE | VX_OPEN_CREATE | VX_OPEN_TRUNCATE);
+    if (handle >= 0) {
+        vx_write(handle, cut ? "cut\n" : "copy\n", cut ? 4 : 5);
+        for (int i = 0; i < n; i++) {
+            vx_write(handle, paths[i], strlen(paths[i]));
+            vx_write(handle, "\n", 1);
+        }
+        vx_close(handle);
+    }
+    char text[700];
+    if (n == 1) {
+        snprintf(text, sizeof(text), "%s %s", cut ? "cut" : "copied", paths[0]);
+    } else {
+        snprintf(text, sizeof(text), "%s %d items", cut ? "cut" : "copied", n);
+    }
+    say(text);
 }
 
-static const char *base_name(const char *path) {
-    const char *slash = strrchr(path, '/');
-    return slash && slash[1] ? slash + 1 : path;
+/* Copies or moves paths into a folder; returns how many made it. */
+static int transfer(char paths[][512], int count, const char *into, bool move,
+                    char names[][256]) {
+    int done = 0;
+    for (int i = 0; i < count; i++) {
+        char name[256], to[800], text[1400];
+        /* Not a folder into itself, and moving to where it is does nothing. */
+        char parent[512];
+        snprintf(parent, sizeof(parent), "%s", paths[i]);
+        char *slash = strrchr(parent, '/');
+        if (slash) {
+            slash == parent ? (void)(parent[1] = '\0') : (void)(*slash = '\0');
+        }
+        if (move && !strcmp(parent, into)) {
+            continue;
+        }
+        size_t n = strlen(paths[i]);
+        if (!strcmp(into, paths[i]) || (!strncmp(into, paths[i], n) && into[n] == '/')) {
+            snprintf(text, sizeof(text), "Can't put %s inside itself", base_name(paths[i]));
+            say(text);
+            continue;
+        }
+        vx_unique_name(into, base_name(paths[i]), name, sizeof(name));
+        vx_join_path(to, sizeof(to), into, name);
+        long error = move ? vx_move(paths[i], to) : vx_copy_tree(paths[i], to);
+        if (error) {
+            snprintf(text, sizeof(text), "Can't %s %s: %s", move ? "move" : "copy", paths[i],
+                     vx_strerror(error));
+            say(text);
+            continue;
+        }
+        if (names) {
+            snprintf(names[done], 256, "%s", name);
+        }
+        done++;
+        snprintf(text, sizeof(text), "%s %s to %s", move ? "moved" : "pasted", paths[i], to);
+        say(text);
+    }
+    return done;
 }
 
 static void paste(void) {
-    char from[512], name[256], to[800], message[1400];
+    static char paths[MAX_CLIP][512], names[MAX_CLIP][256];
     bool cut;
-    if (!read_clipboard(from, sizeof(from), &cut)) {
-        set_status("Nothing to paste");
+    int n = read_clipboard(paths, MAX_CLIP, &cut);
+    if (!n) {
+        say("Nothing to paste");
         return;
     }
-    vx_unique_name(cwd, base_name(from), name, sizeof(name));
-    vx_join_path(to, sizeof(to), cwd, name);
-    long error = cut ? vx_move(from, to) : vx_copy_tree(from, to);
-    if (error) {
-        snprintf(message, sizeof(message), "Can't paste %s: %s", from, vx_strerror(error));
-        set_status(message);
-        return;
-    }
+    int done = transfer(paths, n, cwd, cut, names);
     if (cut) {
-        vx_remove(CLIPBOARD); /* It's moved; there's nothing to paste again. */
+        vx_remove(CLIPBOARD); /* They've moved; there's nothing to paste again. */
     }
-    load(name);
-    snprintf(message, sizeof(message), "%s %s to %s", cut ? "moved" : "pasted", from, to);
-    set_status(message);
+    reload_selecting(names, done);
+}
+
+static void duplicate(void) {
+    static char paths[MAX_CLIP][512], names[MAX_CLIP][256];
+    int n = selected_paths(paths, MAX_CLIP);
+    reload_selecting(names, transfer(paths, n, cwd, false, names));
+}
+
+static void make_alias(void) {
+    static char paths[MAX_CLIP][512], names[MAX_CLIP][256];
+    int n = selected_paths(paths, MAX_CLIP), done = 0;
+    for (int i = 0; i < n; i++) {
+        char wanted[300], to[800], text[1400];
+        snprintf(wanted, sizeof(wanted), "%s alias", base_name(paths[i]));
+        vx_unique_name(cwd, wanted, names[done], 256);
+        vx_join_path(to, sizeof(to), cwd, names[done]);
+        long error = vx_symlink(paths[i], to);
+        snprintf(text, sizeof(text), error ? "Can't make an alias of %s: %s" : "alias %s%s",
+                 error ? paths[i] : to, error ? vx_strerror(error) : "");
+        say(text);
+        done += !error;
+    }
+    reload_selecting(names, done);
 }
 
 static bool in_trash(void) {
     return !strcmp(cwd, TRASH);
 }
 
-static void trash_item(int index) {
-    if (index < 0) {
-        return;
-    }
-    char path[800], name[256], to[800], message[1700];
-    item_path(path, sizeof(path), index);
+static void trash_selection(void) {
+    static char paths[MAX_CLIP][512];
+    int n = selected_paths(paths, MAX_CLIP), first = cursor;
     vx_mkdir(TRASH);
-    vx_unique_name(TRASH, items[index].name, name, sizeof(name));
-    vx_join_path(to, sizeof(to), TRASH, name);
-    long error = vx_move(path, to);
-    if (error) {
-        snprintf(message, sizeof(message), "Can't move %s to the Trash: %s", path, vx_strerror(error));
-        set_status(message);
-        return;
+    for (int i = 0; i < n; i++) {
+        char name[256], to[800], text[1400];
+        vx_unique_name(TRASH, base_name(paths[i]), name, sizeof(name));
+        vx_join_path(to, sizeof(to), TRASH, name);
+        long error = vx_move(paths[i], to);
+        if (error) {
+            snprintf(text, sizeof(text), "Can't move %s to the Trash: %s", paths[i], vx_strerror(error));
+        } else {
+            snprintf(text, sizeof(text), "moved %s to the Trash", paths[i]);
+        }
+        say(text);
     }
-    load(NULL);
-    select_item(index);
-    snprintf(message, sizeof(message), "moved %s to the Trash", path);
-    set_status(message);
+    load();
+    if (first >= 0 && shown_count) {
+        select_only(first);
+    }
 }
 
-static void delete_item(int index) {
-    char path[800], message[900];
-    item_path(path, sizeof(path), index);
-    long error = vx_remove_tree(path);
-    snprintf(message, sizeof(message), error ? "Can't delete %s: %s" : "deleted %s", path,
-             error ? vx_strerror(error) : "");
-    load(NULL);
-    set_status(message);
+static void delete_selection(void) {
+    static char paths[MAX_CLIP][512];
+    int n = selected_paths(paths, MAX_CLIP);
+    for (int i = 0; i < n; i++) {
+        char text[700];
+        long error = vx_remove_tree(paths[i]);
+        snprintf(text, sizeof(text), error ? "Can't delete %s: %s" : "deleted %s%s", paths[i],
+                 error ? vx_strerror(error) : "");
+        say(text);
+    }
+    load();
 }
 
 static void empty_trash(void) {
     long error = vx_remove_tree(TRASH);
     vx_mkdir(TRASH);
     if (in_trash()) {
-        load(NULL);
+        load();
     }
-    set_status(error ? "Can't empty the Trash" : "emptied the Trash");
+    say(error ? "Can't empty the Trash" : "emptied the Trash");
 }
 
-/* ---- Renaming (and naming a new folder) ---- */
+/* ---- Renaming, and naming new things ---- */
 
 static char new_name[256];
-static int renaming = -1;
+static int renaming = -1; /* An item (not a position). */
 
-static void start_rename(int index) {
-    if (index < 0) {
+static void start_rename(void) {
+    struct item *item = at(cursor);
+    if (!item) {
         return;
     }
-    select_item(index);
-    renaming = index;
-    snprintf(new_name, sizeof(new_name), "%s", items[index].name);
+    select_only(cursor);
+    renaming = shown[cursor];
+    snprintf(new_name, sizeof(new_name), "%s", item->name);
     mode = RENAMING;
 }
 
@@ -370,42 +824,52 @@ static void finish_rename(void) {
         return;
     }
     if (strchr(new_name, '/')) {
-        set_status("A name can't have a / in it");
+        say("A name can't have a / in it");
         return;
     }
-    char from[800], to[800], message[1700];
-    item_path(from, sizeof(from), renaming);
+    char from[800], to[800], text[1700];
+    item_path(from, sizeof(from), &items[renaming]);
     vx_join_path(to, sizeof(to), cwd, new_name);
     long error = vx_move(from, to);
     if (error) {
-        snprintf(message, sizeof(message), "Can't rename to %s: %s", new_name, vx_strerror(error));
-        set_status(message);
+        snprintf(text, sizeof(text), "Can't rename to %s: %s", new_name, vx_strerror(error));
+        say(text);
         return;
     }
-    char keep[256];
-    snprintf(keep, sizeof(keep), "%s", new_name);
-    load(keep);
-    snprintf(message, sizeof(message), "renamed %s to %s", from, to);
-    set_status(message);
+    char names[1][256];
+    snprintf(names[0], sizeof(names[0]), "%s", new_name);
+    reload_selecting(names, 1);
+    snprintf(text, sizeof(text), "renamed %s to %s", from, to);
+    say(text);
 }
 
-static void new_folder(void) {
-    char name[256], path[800], message[900];
-    vx_unique_name(cwd, "untitled folder", name, sizeof(name));
-    vx_join_path(path, sizeof(path), cwd, name);
-    long error = vx_mkdir(path);
+/* A new folder or text file, named right away (as Finder does). */
+static void new_thing(bool folder) {
+    char names[1][256], path[800], text[900];
+    vx_unique_name(cwd, folder ? "untitled folder" : "untitled.txt", names[0], sizeof(names[0]));
+    vx_join_path(path, sizeof(path), cwd, names[0]);
+    long error;
+    if (folder) {
+        error = vx_mkdir(path);
+    } else {
+        int handle = vx_open(path, VX_OPEN_WRITE | VX_OPEN_CREATE);
+        error = handle < 0 ? handle : 0;
+        if (handle >= 0) {
+            vx_close(handle);
+        }
+    }
     if (error) {
-        snprintf(message, sizeof(message), "Can't make a folder: %s", vx_strerror(error));
-        set_status(message);
+        snprintf(text, sizeof(text), "Can't make %s: %s", names[0], vx_strerror(error));
+        say(text);
         return;
     }
-    load(name);
-    snprintf(message, sizeof(message), "new folder %s", path);
-    set_status(message);
-    start_rename(selected); /* Name it right away, as Finder does. */
+    reload_selecting(names, 1);
+    snprintf(text, sizeof(text), "new %s %s", folder ? "folder" : "file", path);
+    say(text);
+    start_rename();
 }
 
-/* ---- A question: emptying the Trash, or deleting from it ---- */
+/* ---- A question before deleting for good ---- */
 
 static enum { ASK_EMPTY_TRASH, ASK_DELETE } question;
 
@@ -414,37 +878,19 @@ static void ask(int what) {
     mode = CONFIRM;
 }
 
+static void answer(bool yes) {
+    mode = NORMAL;
+    if (yes) {
+        question == ASK_EMPTY_TRASH ? empty_trash() : delete_selection();
+    }
+}
+
 /* ---- Get Info ---- */
 
-static int info_item = -1; /* -1: the folder itself. */
 #define INFO_LINES 9
 static char info_labels[INFO_LINES][16], info_values[INFO_LINES][200];
 static int info_count;
 static struct vx_image *info_icon;
-static int info_lines(char labels[INFO_LINES][16], char values[INFO_LINES][200],
-                      struct vx_image **icon);
-
-static void show_info(int index) {
-    info_item = index;
-    /* Worked out once: a folder's size means reading all of it. */
-    info_count = info_lines(info_labels, info_values, &info_icon);
-    mode = INFO;
-    printf("files: info for %s: %s, %s\n", info_values[0], info_values[1], info_values[2]);
-    fflush(stdout);
-}
-
-/* "2026-09-26 10:54" (UTC) from seconds since 1970. */
-static void format_date(char *out, size_t size, long long seconds) {
-    long long days = seconds / 86400, rest = seconds % 86400;
-    /* Days to a civil date (Howard Hinnant's algorithm). */
-    long long z = days + 719468, era = z / 146097;
-    long long doe = z - era * 146097, yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
-    long long y = yoe + era * 400, doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    long long mp = (5 * doy + 2) / 153, d = doy - (153 * mp + 2) / 5 + 1;
-    long long m = mp < 10 ? mp + 3 : mp - 9;
-    snprintf(out, size, "%04lld-%02lld-%02lld %02lld:%02lld UTC", y + (m <= 2), m, d, rest / 3600,
-             rest / 60 % 60);
-}
 
 static void format_bytes(char *out, size_t size, unsigned long long bytes) {
     if (bytes < 1024) {
@@ -457,211 +903,322 @@ static void format_bytes(char *out, size_t size, unsigned long long bytes) {
     }
 }
 
-static const char *kind_of(const char *path, const struct vx_stat *stat, bool app) {
-    if (app) {
-        return "App";
+/* "2026-09-26 10:54" (UTC) from seconds since 1970. */
+static void format_date(char *out, size_t size, long long seconds) {
+    if (seconds <= 0) {
+        snprintf(out, size, "--");
+        return;
     }
-    if (stat->type == VX_TYPE_DIRECTORY) {
-        return "Folder";
-    }
-    if (stat->type == VX_TYPE_SYMLINK) {
-        return "Link";
-    }
-    if (stat->type == VX_TYPE_CHAR_DEVICE || stat->type == VX_TYPE_BLOCK_DEVICE) {
-        return "Device";
-    }
-    if (stat->type == VX_TYPE_SOCKET) {
-        return "Socket";
-    }
-    const char *dot = strrchr(base_name(path), '.');
-    if (dot && (!strcmp(dot, ".png") || !strcmp(dot, ".bmp") || !strcmp(dot, ".ppm"))) {
-        return "Image";
-    }
-    if (dot && (!strcmp(dot, ".txt") || !strcmp(dot, ".conf") || !strcmp(dot, ".md"))) {
-        return "Text";
-    }
-    return "File";
+    long long days = seconds / 86400, rest = seconds % 86400;
+    /* Days to a civil date (Howard Hinnant's algorithm). */
+    long long z = days + 719468, era = z / 146097;
+    long long doe = z - era * 146097, yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    long long y = yoe + era * 400, doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    long long mp = (5 * doy + 2) / 153, d = doy - (153 * mp + 2) / 5 + 1;
+    long long m = mp < 10 ? mp + 3 : mp - 9;
+    snprintf(out, size, "%04lld-%02lld-%02lld %02lld:%02lld", y + (m <= 2), m, d, rest / 3600,
+             rest / 60 % 60);
 }
 
-/* The lines of the Get Info panel: labels and values. */
-static int info_lines(char labels[INFO_LINES][16], char values[INFO_LINES][200], struct vx_image **icon) {
+static struct vx_image *icon_for(const struct item *item);
+
+static void show_info(void) {
+    int n = 0, count = selected_count();
+    struct item *item = count == 1 ? at(cursor) : NULL;
     char path[800];
-    if (info_item >= 0) {
-        item_path(path, sizeof(path), info_item);
-    } else {
-        snprintf(path, sizeof(path), "%s", cwd);
-    }
-    struct vx_stat stat = {0}, target = {0};
-    vx_lstat(path, &stat);
-    vx_stat(path, &target);
-    bool app = info_item >= 0 ? items[info_item].app : vx_app_is_bundle(path);
-    *icon = info_item >= 0 ? items[info_item].icon : NULL;
-    int n = 0;
 #define LINE(label, ...) \
-    (snprintf(labels[n], 16, "%s", label), snprintf(values[n], 200, __VA_ARGS__), n++)
-    LINE("Name:", "%s", base_name(path));
-    LINE("Kind:", "%s", kind_of(path, &stat, app));
-    if (stat.type == VX_TYPE_DIRECTORY || (stat.type == VX_TYPE_SYMLINK && target.type == VX_TYPE_DIRECTORY)) {
+    (snprintf(info_labels[n], 16, "%s", label), snprintf(info_values[n], 200, __VA_ARGS__), n++)
+    if (count > 1) { /* Several things: how many, and their size. */
+        static char paths[MAX_CLIP][512];
+        int got = selected_paths(paths, MAX_CLIP);
+        unsigned long long total = 0;
         long files = 0;
+        for (int i = 0; i < got; i++) {
+            total += vx_tree_size(paths[i], &files);
+        }
         char bytes[64];
-        format_bytes(bytes, sizeof(bytes), vx_tree_size(path, &files));
+        format_bytes(bytes, sizeof(bytes), total);
+        LINE("Name:", "%d items", count);
+        LINE("Kind:", "Selection");
         LINE("Size:", "%s in %ld file%s", bytes, files, files == 1 ? "" : "s");
+        LINE("Where:", "%s", cwd);
+        info_icon = kind_icons[K_DOCUMENT];
     } else {
+        if (item) {
+            item_path(path, sizeof(path), item);
+        } else {
+            snprintf(path, sizeof(path), "%s", cwd); /* Nothing selected: the folder. */
+        }
+        struct vx_stat stat = {0}, target = {0};
+        vx_lstat(path, &stat);
+        vx_stat(path, &target);
+        bool app = item ? item->app : vx_app_is_bundle(path);
+        enum kind kind = item ? item->kind : K_FOLDER;
+        info_icon = item ? icon_for(item) : kind_icons[K_FOLDER];
+        LINE("Name:", "%s", base_name(path));
+        LINE("Kind:", "%s%s", kind_names[kind], stat.type == VX_TYPE_SYMLINK ? " (alias)" : "");
         char bytes[64];
-        format_bytes(bytes, sizeof(bytes), target.size);
-        LINE("Size:", "%s", bytes);
-    }
-    char where[512];
-    snprintf(where, sizeof(where), "%s", path);
-    char *slash = strrchr(where, '/');
-    if (slash) {
-        slash == where ? (void)(where[1] = '\0') : (void)(*slash = '\0');
-    }
-    LINE("Where:", "%s", where);
-    if (stat.modified) {
-        char date[64];
-        format_date(date, sizeof(date), stat.modified);
-        LINE("Modified:", "%s", date);
-    }
-    if (stat.type == VX_TYPE_SYMLINK) {
-        char to[200];
-        long got = vx_readlink(path, to, sizeof(to) - 1);
-        to[got > 0 ? got : 0] = '\0';
-        LINE("Points to:", "%s", to);
-    }
-    struct vx_app a;
-    if (app && vx_app_load(path, &a) == 0) {
-        LINE("App name:", "%s", a.name);
-        LINE("Program:", "%s", a.executable);
-        LINE("Opens:", "%s", a.opens[0] ? a.opens : "(no files)");
-    } else if (stat.type == VX_TYPE_FILE && vx_app_for_file(path, &a) == 0) {
-        LINE("Opens with:", "%s", a.name);
+        if (target.type == VX_TYPE_DIRECTORY) {
+            long files = 0;
+            format_bytes(bytes, sizeof(bytes), vx_tree_size(path, &files));
+            LINE("Size:", "%s in %ld file%s", bytes, files, files == 1 ? "" : "s");
+        } else {
+            format_bytes(bytes, sizeof(bytes), target.size);
+            LINE("Size:", "%s", bytes);
+        }
+        char where[512];
+        snprintf(where, sizeof(where), "%s", path);
+        char *slash = strrchr(where, '/');
+        if (slash) {
+            slash == where ? (void)(where[1] = '\0') : (void)(*slash = '\0');
+        }
+        LINE("Where:", "%s", where);
+        if (stat.modified) {
+            char date[64];
+            format_date(date, sizeof(date), stat.modified);
+            LINE("Modified:", "%s UTC", date);
+        }
+        if (stat.type == VX_TYPE_SYMLINK) {
+            char to[200];
+            long got = vx_readlink(path, to, sizeof(to) - 1);
+            to[got > 0 ? got : 0] = '\0';
+            LINE("Original:", "%s", to);
+        }
+        struct vx_app a;
+        if (app && vx_app_load(path, &a) == 0) {
+            LINE("App name:", "%s", a.name);
+            LINE("Program:", "%s", a.executable);
+            LINE("Opens:", "%s", a.opens[0] ? a.opens : "(no files)");
+        } else if (target.type == VX_TYPE_FILE && vx_app_for_file(path, &a) == 0) {
+            LINE("Opens with:", "%s", a.name);
+        }
     }
 #undef LINE
-    return n;
-}
-
-/* ---- The context menu ---- */
-
-enum action {
-    ACT_OPEN, ACT_SHOW_CONTENTS, ACT_OPEN_IN_EDITOR, ACT_INFO, ACT_RENAME, ACT_COPY, ACT_CUT,
-    ACT_PASTE, ACT_TRASH, ACT_DELETE, ACT_NEW_FOLDER, ACT_TERMINAL, ACT_EMPTY_TRASH, ACT_NONE
-};
-
-#define MAX_MENU 16
-static struct vx_menu_item menu[MAX_MENU];
-static enum action menu_actions[MAX_MENU];
-static int menu_count, menu_x, menu_y, menu_hot = -1;
-
-static void add(const char *label, const char *keys, enum action action, bool disabled) {
-    menu[menu_count] = (struct vx_menu_item){label, keys, disabled};
-    menu_actions[menu_count++] = action;
-}
-
-static void open_menu(int x, int y) {
-    char clip[512];
-    bool cut, can_paste = read_clipboard(clip, sizeof(clip), &cut);
-    menu_count = 0;
-    if (selected >= 0) {
-        struct item *item = &items[selected];
-        add("Open", "Enter", ACT_OPEN, false);
-        if (item->app) {
-            add("Show Package Contents", NULL, ACT_SHOW_CONTENTS, false);
-        } else if (item->type != VX_TYPE_DIRECTORY) {
-            add("Open in Text Editor", NULL, ACT_OPEN_IN_EDITOR, false);
-        }
-        add(NULL, NULL, ACT_NONE, false);
-        add("Get Info", "Ctrl+I", ACT_INFO, false);
-        add("Rename", "F2", ACT_RENAME, false);
-        add(NULL, NULL, ACT_NONE, false);
-        add("Copy", "Ctrl+C", ACT_COPY, false);
-        add("Cut", "Ctrl+X", ACT_CUT, false);
-        add("Paste", "Ctrl+V", ACT_PASTE, !can_paste);
-        add(NULL, NULL, ACT_NONE, false);
-        if (in_trash()) {
-            add("Delete Immediately", "Delete", ACT_DELETE, false);
-        } else {
-            add("Move to Trash", "Delete", ACT_TRASH, false);
-        }
-    } else {
-        add("New Folder", "Ctrl+Shift+N", ACT_NEW_FOLDER, false);
-        add("Paste", "Ctrl+V", ACT_PASTE, !can_paste);
-        add(NULL, NULL, ACT_NONE, false);
-        add("Get Info", "Ctrl+I", ACT_INFO, false);
-        add("Open in Terminal", NULL, ACT_TERMINAL, false);
-        if (in_trash()) {
-            add(NULL, NULL, ACT_NONE, false);
-            add("Empty Trash", NULL, ACT_EMPTY_TRASH, item_count == 0);
-        }
-    }
-    /* Inside the window. */
-    int w, h;
-    vx_menu_size(menu, menu_count, &w, &h);
-    menu_x = x + w > window->surface.width - 4 ? window->surface.width - w - 4 : x;
-    menu_y = y + h > window->surface.height - 4 ? window->surface.height - h - 4 : y;
-    menu_x = menu_x < 0 ? 0 : menu_x;
-    menu_y = menu_y < 0 ? 0 : menu_y;
-    menu_hot = -1;
-    mode = MENU;
-    printf("files: menu for %s\n", selected >= 0 ? items[selected].name : cwd);
+    info_count = n;
+    mode = INFO;
+    printf("files: info for %s: %s, %s\n", info_values[0], info_values[1], info_values[2]);
     fflush(stdout);
 }
 
-static void act(enum action action) {
+/* ---- Quick Look ---- */
+
+static struct vx_image *preview_image;
+static char *preview_text;
+static char preview_name[256];
+
+static void close_preview(void) {
+    vx_image_free(preview_image);
+    free(preview_text);
+    preview_image = NULL;
+    preview_text = NULL;
     mode = NORMAL;
-    switch (action) {
-    case ACT_OPEN: open_item(selected); break;
-    case ACT_SHOW_CONTENTS: {
-        char path[800];
-        item_path(path, sizeof(path), selected);
-        go(path);
-        break;
+}
+
+static void quick_look(void) {
+    struct item *item = at(cursor);
+    if (!item) {
+        return;
     }
-    case ACT_OPEN_IN_EDITOR: open_with(selected, "Editor"); break;
-    case ACT_INFO: show_info(selected); break;
-    case ACT_RENAME: start_rename(selected); break;
-    case ACT_COPY: copy_item(selected, false); break;
-    case ACT_CUT: copy_item(selected, true); break;
-    case ACT_PASTE: paste(); break;
-    case ACT_TRASH: trash_item(selected); break;
-    case ACT_DELETE: ask(ASK_DELETE); break;
-    case ACT_NEW_FOLDER: new_folder(); break;
-    case ACT_TERMINAL: run("/bin/term", NULL); break; /* It starts here: our folder. */
-    case ACT_EMPTY_TRASH: ask(ASK_EMPTY_TRASH); break;
-    case ACT_NONE: break;
+    char path[800];
+    item_path(path, sizeof(path), item);
+    snprintf(preview_name, sizeof(preview_name), "%s", item->name);
+    if (item->kind == K_IMAGE) {
+        preview_image = vx_image_load(path, VX_COLOR_VIEW);
+    } else if (item->kind == K_TEXT || item->kind == K_DOCUMENT) {
+        int handle = vx_open(path, VX_OPEN_READ);
+        if (handle >= 0) {
+            preview_text = malloc(8192);
+            long n = preview_text ? vx_read(handle, preview_text, 8191) : 0;
+            if (preview_text) {
+                preview_text[n > 0 ? n : 0] = '\0';
+            }
+            vx_close(handle);
+        }
     }
+    mode = PREVIEW;
+    printf("files: quick look at %s\n", item->name);
+    fflush(stdout);
+}
+
+/* ---- Layout ---- */
+
+static int main_x(void) {
+    return SIDEBAR + 4;
+}
+
+static int main_w(void) {
+    return window->surface.width - main_x() - 8;
+}
+
+static int list_y(void) {
+    return TOOLBAR + 2 + (icon_view ? 0 : HEADER);
+}
+
+static int list_h(void) {
+    return window->surface.height - STATUS - list_y() - 4;
+}
+
+static int columns(void) {
+    int n = main_w() / CELL_W;
+    return n < 1 ? 1 : n;
+}
+
+static int visible_rows(void) {
+    int n = list_h() / (icon_view ? CELL_H : ROW);
+    return n < 1 ? 1 : n;
+}
+
+static int total_rows(void) {
+    return icon_view ? (shown_count + columns() - 1) / columns() : shown_count;
+}
+
+static void scroll(int by) {
+    int max = total_rows() - visible_rows();
+    top += by;
+    top = top > max ? max : top;
+    top = top < 0 ? 0 : top;
+}
+
+/* Where a position is drawn (its whole cell or row). */
+static bool cell(int position, int *x, int *y, int *w, int *h) {
+    if (icon_view) {
+        int row = position / columns() - top, col = position % columns();
+        *x = main_x() + col * CELL_W;
+        *y = list_y() + row * CELL_H;
+        *w = CELL_W;
+        *h = CELL_H;
+        return row >= 0 && row < visible_rows();
+    }
+    int row = position - top;
+    *x = main_x();
+    *y = list_y() + row * ROW;
+    *w = main_w();
+    *h = ROW;
+    return row >= 0 && row < visible_rows();
+}
+
+static int position_at(int px, int py) {
+    if (px < main_x() || py < list_y() || py >= list_y() + list_h()) {
+        return -1;
+    }
+    if (icon_view) {
+        int col = (px - main_x()) / CELL_W, row = (py - list_y()) / CELL_H + top;
+        int position = row * columns() + col;
+        return col < columns() && position < shown_count ? position : -1;
+    }
+    int position = (py - list_y()) / ROW + top;
+    return position < shown_count ? position : -1;
+}
+
+/* The toolbar. */
+enum { B_BACK, B_FORWARD, B_UP, B_LIST, B_ICONS, BUTTON_COUNT };
+
+static void button_rect(int b, int *x, int *w) {
+    int width = window->surface.width;
+    switch (b) {
+    case B_BACK: *x = 8, *w = 28; return;
+    case B_FORWARD: *x = 38, *w = 28; return;
+    case B_UP: *x = 68, *w = 28; return;
+    case B_LIST: *x = width - 176 - 104, *w = 48; return;
+    case B_ICONS: *x = width - 176 - 54, *w = 48; return;
+    }
+}
+
+static int path_x(void) {
+    return 104;
+}
+
+static int path_w(void) {
+    int x, w;
+    button_rect(B_LIST, &x, &w);
+    return x - 8 - path_x();
+}
+
+static int search_x(void) {
+    return window->surface.width - 168;
+}
+
+/* List columns: kind, size, modified (from the right). */
+#define COL_MODIFIED 136
+#define COL_SIZE 80
+#define COL_KIND 90
+
+static int column_x(int which) { /* 0 name, 1 kind, 2 size, 3 modified */
+    int right = main_x() + main_w() - 12;
+    switch (which) {
+    case 3: return right - COL_MODIFIED;
+    case 2: return right - COL_MODIFIED - COL_SIZE;
+    case 1: return right - COL_MODIFIED - COL_SIZE - COL_KIND;
+    }
+    return main_x() + 30;
 }
 
 /* ---- Drawing ---- */
 
-static void draw_icon(struct vx_surface *s, int x, int y, uint32_t type) {
-    if (type == VX_TYPE_DIRECTORY) { /* A folder. */
-        vx_fill(s, x, y + 3, 6, 2, 0xf2cc60);
-        vx_fill(s, x, y + 5, 14, 9, 0xf2cc60);
-        vx_fill(s, x + 1, y + 7, 12, 6, 0xd9ad3c);
-    } else if (type == VX_TYPE_SYMLINK) { /* An arrow. */
-        vx_fill(s, x + 2, y + 8, 9, 2, 0x56d4dd);
-        vx_fill(s, x + 9, y + 5, 2, 8, 0x56d4dd);
-        vx_fill(s, x + 11, y + 7, 2, 4, 0x56d4dd);
-    } else if (type == VX_TYPE_CHAR_DEVICE || type == VX_TYPE_BLOCK_DEVICE) { /* A chip. */
-        vx_fill(s, x + 2, y + 4, 10, 10, 0x79a8ff);
-        for (int i = 0; i < 3; i++) {
-            vx_fill(s, x, y + 5 + i * 3, 2, 1, 0x79a8ff);
-            vx_fill(s, x + 12, y + 5 + i * 3, 2, 1, 0x79a8ff);
+static struct vx_image *icon_for(const struct item *item) {
+    if (item->icon) {
+        return item->icon;
+    }
+    return kind_icons[item->kind];
+}
+
+static bool wants_thumbnail(const struct item *item) {
+    return item->kind == K_IMAGE && item->size <= MAX_THUMB_BYTES && !item->thumb_tried;
+}
+
+/* Makes a picture's thumbnail (reading a big picture takes a while, so this
+ * happens one at a time when nothing else is going on: see main). */
+static void make_thumbnail(struct item *item) {
+    {
+        item->thumb_tried = true;
+        char path[800];
+        item_path(path, sizeof(path), item);
+        struct vx_image *full = vx_image_load(path, VX_IMAGE_ALPHA);
+        if (full) {
+            int w = full->surface.width, h = full->surface.height;
+            int tw = w >= h ? 56 : 56 * w / h, th = w >= h ? 56 * h / w : 56;
+            tw = tw < 1 ? 1 : tw;
+            th = th < 1 ? 1 : th;
+            struct vx_image *thumb = malloc(sizeof(*thumb));
+            uint32_t *pixels = thumb ? calloc((size_t)tw * th, 4) : NULL;
+            if (pixels) {
+                thumb->surface = (struct vx_surface){pixels, tw, th, tw};
+                vx_blit_scaled(&thumb->surface, 0, 0, tw, th, &full->surface);
+                for (long i = 0; i < (long)tw * th; i++) {
+                    pixels[i] |= VX_IMAGE_ALPHA; /* (Scaled pixels keep alpha; show them solid.) */
+                }
+                item->thumb = thumb;
+            } else {
+                free(thumb);
+            }
+            vx_image_free(full);
         }
-    } else { /* A page. */
-        vx_fill(s, x + 2, y + 2, 10, 13, 0xe4dcf2);
-        vx_fill(s, x + 4, y + 6, 6, 1, 0x8a80a3);
-        vx_fill(s, x + 4, y + 9, 6, 1, 0x8a80a3);
-        vx_fill(s, x + 4, y + 12, 4, 1, 0x8a80a3);
     }
 }
 
-static void format_size(char *out, size_t size, const struct item *item) {
-    if (item->app) {
-        snprintf(out, size, "app");
-    } else if (item->type == VX_TYPE_DIRECTORY) {
-        snprintf(out, size, "folder");
+/* The first picture in view without a thumbnail yet, or NULL. */
+static struct item *next_thumbnail(void) {
+    if (!icon_view || mode != NORMAL) {
+        return NULL;
+    }
+    for (int i = top * columns(); i < shown_count && i < (top + visible_rows()) * columns(); i++) {
+        if (wants_thumbnail(&items[shown[i]])) {
+            return &items[shown[i]];
+        }
+    }
+    return NULL;
+}
+
+static void draw_link_badge(struct vx_surface *s, int x, int y) {
+    vx_fill(s, x, y, 9, 9, 0xffffff);
+    vx_fill(s, x + 2, y + 5, 4, 2, 0x202020);
+    vx_fill(s, x + 4, y + 2, 2, 5, 0x202020);
+    vx_fill(s, x + 3, y + 2, 4, 1, 0x202020);
+}
+
+static void short_size(char *out, size_t size, const struct item *item) {
+    if (item->kind == K_FOLDER || item->kind == K_APP || item->kind == K_DEVICE) {
+        snprintf(out, size, "--");
     } else if (item->size < 1024) {
         snprintf(out, size, "%lu B", (unsigned long)item->size);
     } else if (item->size < 1024 * 1024) {
@@ -671,159 +1228,554 @@ static void format_size(char *out, size_t size, const struct item *item) {
     }
 }
 
+/* The name as shown: apps without ".vxapp", as Finder shows them. */
+static void shown_name(char *out, size_t size, const struct item *item) {
+    snprintf(out, size, "%s", item->name);
+    if (item->app && ends_with(out, VX_APP_EXTENSION)) {
+        out[strlen(out) - strlen(VX_APP_EXTENSION)] = '\0';
+    }
+}
+
+static int drop_position = -1; /* A folder a drag would drop into, or -1. */
+
+static void draw_list(struct vx_surface *s) {
+    int x0 = main_x(), w = main_w();
+    /* Headings: a click sorts; the sorted one has an arrow. */
+    vx_fill(s, x0, TOOLBAR + 2, w, HEADER, VX_COLOR_WINDOW);
+    static const char *const headings[] = {"Name", "Kind", "Size", "Modified"};
+    for (int c = 0; c < 4; c++) {
+        char text[32];
+        bool sorted = (int)sort_by == c;
+        snprintf(text, sizeof(text), "%s%s", headings[c], sorted ? (sort_down ? " v" : " ^") : "");
+        vx_draw_text(s, column_x(c), TOOLBAR + 4, text, sorted ? VX_COLOR_ACCENT : VX_COLOR_DIM,
+                     VX_TRANSPARENT);
+    }
+    vx_fill(s, x0, list_y() - 1, w, 1, VX_COLOR_LINE);
+    for (int i = top; i < shown_count && i < top + visible_rows(); i++) {
+        struct item *item = &items[shown[i]];
+        int x, y, cw, ch;
+        cell(i, &x, &y, &cw, &ch);
+        if (i % 2) {
+            vx_fill(s, x, y, cw, ch, 0x160e29); /* Stripes. */
+        }
+        if (item->selected || i == drop_position) {
+            vx_fill(s, x + 2, y, cw - 4, ch, i == drop_position ? VX_COLOR_ACCENT : VX_COLOR_SELECTED);
+        }
+        struct vx_image *icon = icon_for(item);
+        if (icon) {
+            vx_blit_alpha(s, x + 7, y + 1, 18, 18, &icon->surface);
+        }
+        if (item->link) {
+            draw_link_badge(s, x + 5, y + 11);
+        }
+        char name[256], size[32], date[32];
+        shown_name(name, sizeof(name), item);
+        short_size(size, sizeof(size), item);
+        format_date(date, sizeof(date), item->modified);
+        if (mode == RENAMING && shown[i] == renaming) {
+            vx_draw_field(s, column_x(0) - 4, y - 2, column_x(1) - column_x(0) - 4, new_name, true);
+        } else {
+            vx_draw_text_fit(s, column_x(0), y + 2, column_x(1) - column_x(0) - 12, name,
+                             VX_COLOR_TEXT, VX_TRANSPARENT);
+        }
+        vx_draw_text_fit(s, column_x(1), y + 2, COL_KIND - 8, kind_names[item->kind],
+                         VX_COLOR_DIM, VX_TRANSPARENT);
+        vx_draw_text(s, column_x(2), y + 2, size, VX_COLOR_DIM, VX_TRANSPARENT);
+        vx_draw_text_fit(s, column_x(3), y + 2, COL_MODIFIED, date, VX_COLOR_DIM, VX_TRANSPARENT);
+    }
+}
+
+static void draw_icons(struct vx_surface *s) {
+    for (int i = top * columns(); i < shown_count; i++) {
+        struct item *item = &items[shown[i]];
+        int x, y, cw, ch;
+        if (!cell(i, &x, &y, &cw, &ch)) {
+            break;
+        }
+        bool hot = item->selected || i == drop_position;
+        if (hot) {
+            vx_fill(s, x + 22, y + 4, 60, 58, i == drop_position ? VX_COLOR_ACCENT : 0x2c1d4a);
+        }
+        struct vx_image *thumb = item->thumb;
+        if (thumb) {
+            int tw = thumb->surface.width, th = thumb->surface.height;
+            int tx = x + (cw - tw) / 2, ty = y + 5 + (56 - th) / 2;
+            vx_fill(s, tx - 1, ty - 1, tw + 2, th + 2, 0xe4dcf2);
+            vx_blit_alpha(s, tx, ty, tw, th, &thumb->surface);
+        } else {
+            struct vx_image *icon = icon_for(item);
+            if (icon) {
+                vx_blit_alpha(s, x + (cw - 48) / 2, y + 9, 48, 48, &icon->surface);
+            }
+        }
+        if (item->link) {
+            draw_link_badge(s, x + (cw - 48) / 2 + 2, y + 46);
+        }
+        char name[256];
+        shown_name(name, sizeof(name), item);
+        if (mode == RENAMING && shown[i] == renaming) {
+            vx_draw_field(s, x + 2, y + 64, cw - 4, new_name, true);
+            continue;
+        }
+        /* Two lines of the name, centered. */
+        int fits = (cw - 8) / FONT_WIDTH, length = (int)strlen(name);
+        for (int line = 0; line < 2 && line * fits < length; line++) {
+            char part[64];
+            int n = length - line * fits;
+            n = n > fits ? fits : n;
+            if (line == 1 && length > 2 * fits) { /* Too long: "..." at the end. */
+                n = fits;
+                memcpy(part, name + fits, (size_t)n - 3);
+                strcpy(part + n - 3, "...");
+            } else {
+                memcpy(part, name + line * fits, (size_t)n);
+                part[n] = '\0';
+            }
+            int tw = (int)strlen(part) * FONT_WIDTH;
+            int ty = y + 64 + line * (FONT_HEIGHT + 1);
+            if (item->selected) {
+                vx_fill(s, x + (cw - tw) / 2 - 3, ty - 1, tw + 6, FONT_HEIGHT + 2, VX_COLOR_SELECTED);
+            }
+            vx_draw_text(s, x + (cw - tw) / 2, ty, part, VX_COLOR_TEXT, VX_TRANSPARENT);
+        }
+    }
+}
+
+static void draw_sidebar(struct vx_surface *s) {
+    int h = s->height;
+    vx_fill(s, 0, TOOLBAR, SIDEBAR, h - TOOLBAR - STATUS, 0x140c26);
+    vx_fill(s, SIDEBAR - 1, TOOLBAR, 1, h - TOOLBAR - STATUS, VX_COLOR_LINE);
+    vx_draw_text(s, 12, TOOLBAR + 8, "Places", VX_COLOR_DIM, VX_TRANSPARENT);
+    if (place_count > disks_start) {
+        vx_draw_text(s, 12, place_y(disks_start) - 22, "Disks", VX_COLOR_DIM, VX_TRANSPARENT);
+    }
+    for (int i = 0; i < place_count; i++) {
+        int y = place_y(i);
+        bool here = !strcmp(cwd, places[i].path);
+        if (here || i == drop_place) {
+            vx_fill(s, 4, y, SIDEBAR - 9, 22, i == drop_place ? VX_COLOR_ACCENT : VX_COLOR_SELECTED);
+        }
+        if (*places[i].icon) {
+            vx_blit_alpha(s, 12, y + 2, 18, 18, &(*places[i].icon)->surface);
+        }
+        vx_draw_text_fit(s, 36, y + 3, SIDEBAR - 44, places[i].label, VX_COLOR_TEXT, VX_TRANSPARENT);
+    }
+}
+
+static void draw_toolbar(struct vx_surface *s, int hot) {
+    static const char *const labels[] = {"<", ">", "^", "List", "Icons"};
+    vx_fill(s, 0, 0, s->width, TOOLBAR, VX_COLOR_WINDOW);
+    vx_fill(s, 0, TOOLBAR - 1, s->width, 1, VX_COLOR_LINE);
+    for (int b = 0; b < BUTTON_COUNT; b++) {
+        int x, w;
+        button_rect(b, &x, &w);
+        bool on = (b == B_LIST && !icon_view) || (b == B_ICONS && icon_view);
+        bool off = (b == B_BACK && !back_count) || (b == B_FORWARD && !forward_count) ||
+                   (b == B_UP && !strcmp(cwd, "/"));
+        vx_draw_button(s, x, 8, w, 24, labels[b], hot == b || on);
+        if (off) {
+            vx_draw_text(s, x + (w - FONT_WIDTH) / 2, 12, labels[b], VX_COLOR_DIM, VX_COLOR_BUTTON);
+        }
+    }
+    vx_draw_field(s, path_x(), 8, path_w(), field == FIELD_PATH ? typed : cwd, field == FIELD_PATH);
+    vx_draw_field(s, search_x(), 8, 160, search, field == FIELD_SEARCH);
+    if (!search[0] && field != FIELD_SEARCH) {
+        vx_draw_text(s, search_x() + 6, 12, "Search", VX_COLOR_DIM, VX_TRANSPARENT);
+    }
+}
+
+static void draw_status(struct vx_surface *s) {
+    char text[240];
+    int h = s->height, count = selected_count();
+    if (message[0] && vx_uptime() - message_ms < 5000) {
+        snprintf(text, sizeof(text), "%s", message);
+    } else if (count) {
+        snprintf(text, sizeof(text), "%d of %d selected", count, shown_count);
+    } else {
+        snprintf(text, sizeof(text), "%d item%s%s%s", shown_count, shown_count == 1 ? "" : "s",
+                 search[0] ? " matching " : "", search);
+    }
+    vx_fill(s, 0, h - STATUS, s->width, STATUS, VX_COLOR_WINDOW);
+    vx_fill(s, 0, h - STATUS, s->width, 1, VX_COLOR_LINE);
+    vx_draw_text_fit(s, 10, h - STATUS + 3, s->width - 20, text, VX_COLOR_DIM, VX_TRANSPARENT);
+}
+
 /* A panel in the middle of the window (dialogs). */
+static void panel_rect(int width, int height, int *x, int *y) {
+    *x = (window->surface.width - width) / 2;
+    *y = (window->surface.height - height) / 2;
+    *y = *y < TOOLBAR ? TOOLBAR : *y;
+}
+
 static void panel(int width, int height, int *x, int *y) {
     struct vx_surface *s = &window->surface;
-    *x = (s->width - width) / 2;
-    *y = (s->height - height) / 2;
-    *y = *y < TOOLBAR ? TOOLBAR : *y;
+    panel_rect(width, height, x, y);
     vx_fill(s, *x + 4, *y + 4, width, height, 0x06030c);
     vx_fill(s, *x, *y, width, height, VX_COLOR_WINDOW);
     vx_draw_outline(s, *x, *y, width, height, VX_COLOR_ACCENT);
 }
 
-/* Where a dialog's buttons are: right-aligned at the bottom. */
+/* A dialog's buttons, right-aligned at its bottom (0 the rightmost). */
 static void dialog_button(int px, int py, int pw, int ph, int i, int *x, int *y) {
     *x = px + pw - 16 - (i + 1) * 96 + 8;
     *y = py + ph - 38;
 }
 
-static void draw_confirm(void) {
-    struct vx_surface *s = &window->surface;
-    int x, y, bx, by, w = 380, h = 120;
-    panel(w, h, &x, &y);
+#define CONFIRM_W 400
+#define CONFIRM_H 120
+#define INFO_W 460
+
+static int info_h(void) {
+    return 96 + info_count * (FONT_HEIGHT + 4);
+}
+
+static void draw_confirm(struct vx_surface *s) {
+    int x, y, bx, by;
+    panel(CONFIRM_W, CONFIRM_H, &x, &y);
     char text[300];
+    int count = selected_count();
     if (question == ASK_EMPTY_TRASH) {
-        snprintf(text, sizeof(text), "Empty the Trash? Its %d item%s go for good.", item_count,
-                 item_count == 1 ? "" : "s");
+        snprintf(text, sizeof(text), "Empty the Trash? Its %d item%s go for good.", shown_count,
+                 shown_count == 1 ? "" : "s");
+    } else if (count == 1 && at(cursor)) {
+        snprintf(text, sizeof(text), "Delete \"%s\" for good?", at(cursor)->name);
     } else {
-        snprintf(text, sizeof(text), "Delete \"%s\" for good?", items[selected].name);
+        snprintf(text, sizeof(text), "Delete these %d items for good?", count);
     }
-    vx_draw_text_fit(s, x + 16, y + 20, w - 32, text, VX_COLOR_TEXT, VX_TRANSPARENT);
+    vx_draw_text_fit(s, x + 16, y + 20, CONFIRM_W - 32, text, VX_COLOR_TEXT, VX_TRANSPARENT);
     vx_draw_text(s, x + 16, y + 44, "This can't be undone.", VX_COLOR_DIM, VX_TRANSPARENT);
-    dialog_button(x, y, w, h, 0, &bx, &by);
+    dialog_button(x, y, CONFIRM_W, CONFIRM_H, 0, &bx, &by);
     vx_draw_button(s, bx, by, 88, 26, question == ASK_EMPTY_TRASH ? "Empty" : "Delete", false);
-    dialog_button(x, y, w, h, 1, &bx, &by);
+    dialog_button(x, y, CONFIRM_W, CONFIRM_H, 1, &bx, &by);
     vx_draw_button(s, bx, by, 88, 26, "Cancel", false);
 }
 
-static void draw_info(void) {
-    struct vx_surface *s = &window->surface;
-    char (*labels)[16] = info_labels, (*values)[200] = info_values;
-    struct vx_image *icon = info_icon;
-    int n = info_count;
-    int x, y, bx, by, w = 440, h = 96 + n * (FONT_HEIGHT + 4);
-    panel(w, h, &x, &y);
-    if (icon) {
-        vx_blit_alpha(s, x + 16, y + 16, 48, 48, &icon->surface);
-    } else {
-        vx_fill(s, x + 16, y + 16, 48, 48, VX_COLOR_BUTTON);
-        draw_icon(s, x + 33, y + 31, info_item >= 0 ? items[info_item].type : VX_TYPE_DIRECTORY);
+static void draw_info(struct vx_surface *s) {
+    int x, y, bx, by, h = info_h();
+    panel(INFO_W, h, &x, &y);
+    if (info_icon) {
+        vx_blit_alpha(s, x + 16, y + 16, 48, 48, &info_icon->surface);
     }
-    for (int i = 0; i < n; i++) {
+    for (int i = 0; i < info_count; i++) {
         int ly = y + 16 + i * (FONT_HEIGHT + 4);
-        vx_draw_text(s, x + 80, ly, labels[i], VX_COLOR_DIM, VX_TRANSPARENT);
-        vx_draw_text_fit(s, x + 80 + 12 * FONT_WIDTH, ly, w - 96 - 12 * FONT_WIDTH, values[i],
-                         i == 0 ? VX_COLOR_ACCENT : VX_COLOR_TEXT, VX_TRANSPARENT);
+        vx_draw_text(s, x + 80, ly, info_labels[i], VX_COLOR_DIM, VX_TRANSPARENT);
+        vx_draw_text_fit(s, x + 80 + 12 * FONT_WIDTH, ly, INFO_W - 96 - 12 * FONT_WIDTH,
+                         info_values[i], i == 0 ? VX_COLOR_ACCENT : VX_COLOR_TEXT, VX_TRANSPARENT);
     }
-    dialog_button(x, y, w, h, 0, &bx, &by);
+    dialog_button(x, y, INFO_W, h, 0, &bx, &by);
     vx_draw_button(s, bx, by, 88, 26, "OK", false);
+}
+
+static void draw_preview(struct vx_surface *s) {
+    int w = s->width * 3 / 4, h = s->height * 3 / 4, x, y;
+    panel(w, h, &x, &y);
+    vx_fill(s, x + 1, y + 1, w - 2, 24, VX_COLOR_BUTTON);
+    vx_draw_text_fit(s, x + 10, y + 5, w - 20, preview_name, VX_COLOR_TEXT, VX_TRANSPARENT);
+    int ax = x + 10, ay = y + 32, aw = w - 20, ah = h - 42;
+    if (preview_image) {
+        int iw = preview_image->surface.width, ih = preview_image->surface.height;
+        int dw = iw, dh = ih; /* Fit, never bigger than it is. */
+        if (dw > aw) {
+            dh = dh * aw / dw, dw = aw;
+        }
+        if (dh > ah) {
+            dw = dw * ah / dh, dh = ah;
+        }
+        vx_blit_scaled(s, ax + (aw - dw) / 2, ay + (ah - dh) / 2, dw, dh, &preview_image->surface);
+    } else if (preview_text) {
+        vx_fill(s, ax, ay, aw, ah, VX_COLOR_VIEW);
+        int line_y = ay + 4, col = 0;
+        char line[256];
+        for (const char *p = preview_text;; p++) {
+            if (*p == '\n' || !*p || col >= (aw - 8) / FONT_WIDTH || col >= 255) {
+                line[col] = '\0';
+                vx_draw_text(s, ax + 4, line_y, line, VX_COLOR_TEXT, VX_TRANSPARENT);
+                line_y += FONT_HEIGHT;
+                col = 0;
+                if (!*p || line_y + FONT_HEIGHT > ay + ah) {
+                    break;
+                }
+                if (*p != '\n') {
+                    while (*p && *p != '\n') {
+                        p++; /* The rest of a long line. */
+                    }
+                    if (!*p) {
+                        break;
+                    }
+                }
+                continue;
+            }
+            if (*p == '\t') {
+                do {
+                    line[col++] = ' ';
+                } while (col % 4 && col < 255);
+            } else if ((unsigned char)*p >= ' ' && *p != 127) {
+                line[col++] = *p;
+            }
+        }
+    } else {
+        struct item *item = at(cursor);
+        struct vx_image *icon = item ? icon_for(item) : NULL;
+        if (icon) {
+            vx_blit_alpha(s, x + (w - 96) / 2, y + (h - 96) / 2 - 10, 96, 96, &icon->surface);
+        }
+        const char *note = "No preview for this kind of file.";
+        vx_draw_text(s, x + (w - (int)strlen(note) * FONT_WIDTH) / 2, y + h / 2 + 50, note,
+                     VX_COLOR_DIM, VX_TRANSPARENT);
+    }
+}
+
+/* ---- The context menu ---- */
+
+enum action {
+    ACT_OPEN, ACT_SHOW_CONTENTS, ACT_OPEN_IN_EDITOR, ACT_QUICK_LOOK, ACT_INFO, ACT_RENAME,
+    ACT_DUPLICATE, ACT_ALIAS, ACT_COPY, ACT_CUT, ACT_PASTE, ACT_TRASH, ACT_DELETE,
+    ACT_NEW_FOLDER, ACT_NEW_FILE, ACT_TERMINAL, ACT_EMPTY_TRASH, ACT_SHOW_HIDDEN, ACT_NONE
+};
+
+#define MAX_MENU 20
+static struct vx_menu_item menu[MAX_MENU];
+static enum action menu_actions[MAX_MENU];
+static int menu_count, menu_x, menu_y, menu_hot = -1;
+
+static void add(const char *label, const char *keys, enum action action, bool disabled) {
+    if (menu_count < MAX_MENU) {
+        menu[menu_count] = (struct vx_menu_item){label, keys, disabled};
+        menu_actions[menu_count++] = action;
+    }
+}
+
+static void open_menu(int x, int y) {
+    bool paste_ok = can_paste();
+    int count = selected_count();
+    menu_count = 0;
+    if (count) {
+        struct item *item = at(cursor);
+        add("Open", "Enter", ACT_OPEN, false);
+        if (count == 1 && item && item->app) {
+            add("Show Package Contents", NULL, ACT_SHOW_CONTENTS, false);
+        } else if (count == 1 && item && item->kind != K_FOLDER) {
+            add("Open in Text Editor", NULL, ACT_OPEN_IN_EDITOR, false);
+        }
+        add("Quick Look", "Space", ACT_QUICK_LOOK, count != 1);
+        add(NULL, NULL, ACT_NONE, false);
+        add("Get Info", "Ctrl+I", ACT_INFO, false);
+        add("Rename", "F2", ACT_RENAME, count != 1);
+        add("Duplicate", "Ctrl+D", ACT_DUPLICATE, false);
+        add("Make Alias", NULL, ACT_ALIAS, false);
+        add(NULL, NULL, ACT_NONE, false);
+        add("Copy", "Ctrl+C", ACT_COPY, false);
+        add("Cut", "Ctrl+X", ACT_CUT, false);
+        add("Paste", "Ctrl+V", ACT_PASTE, !paste_ok);
+        add(NULL, NULL, ACT_NONE, false);
+        if (in_trash()) {
+            add("Delete Immediately", "Delete", ACT_DELETE, false);
+        } else {
+            add("Move to Trash", "Delete", ACT_TRASH, false);
+        }
+    } else {
+        add("New Folder", "Ctrl+Shift+N", ACT_NEW_FOLDER, false);
+        add("New Text Document", NULL, ACT_NEW_FILE, false);
+        add("Paste", "Ctrl+V", ACT_PASTE, !paste_ok);
+        add(NULL, NULL, ACT_NONE, false);
+        add("Get Info", "Ctrl+I", ACT_INFO, false);
+        add("Open in Terminal", NULL, ACT_TERMINAL, false);
+        add(show_hidden ? "Hide Hidden Files" : "Show Hidden Files", "Ctrl+H", ACT_SHOW_HIDDEN, false);
+        if (in_trash()) {
+            add(NULL, NULL, ACT_NONE, false);
+            add("Empty Trash", NULL, ACT_EMPTY_TRASH, shown_count == 0);
+        }
+    }
+    int w, h;
+    vx_menu_size(menu, menu_count, &w, &h);
+    menu_x = x + w > window->surface.width - 4 ? window->surface.width - w - 4 : x;
+    menu_y = y + h > window->surface.height - 4 ? window->surface.height - h - 4 : y;
+    menu_x = menu_x < 0 ? 0 : menu_x;
+    menu_y = menu_y < 0 ? 0 : menu_y;
+    menu_hot = -1;
+    mode = MENU;
+    printf("files: menu for %s\n", count == 1 && at(cursor) ? at(cursor)->name
+                                   : count ? "the selection" : cwd);
+    fflush(stdout);
+}
+
+static void toggle_hidden(void) {
+    show_hidden = !show_hidden;
+    load();
+}
+
+static void act(enum action action) {
+    mode = NORMAL;
+    struct item *item = at(cursor);
+    switch (action) {
+    case ACT_OPEN: open_selection(); break;
+    case ACT_SHOW_CONTENTS:
+        if (item) {
+            char path[800];
+            item_path(path, sizeof(path), item);
+            go(path);
+        }
+        break;
+    case ACT_OPEN_IN_EDITOR:
+        if (item) {
+            open_with(item, "Editor");
+        }
+        break;
+    case ACT_QUICK_LOOK: quick_look(); break;
+    case ACT_INFO: show_info(); break;
+    case ACT_RENAME: start_rename(); break;
+    case ACT_DUPLICATE: duplicate(); break;
+    case ACT_ALIAS: make_alias(); break;
+    case ACT_COPY: copy_selection(false); break;
+    case ACT_CUT: copy_selection(true); break;
+    case ACT_PASTE: paste(); break;
+    case ACT_TRASH: trash_selection(); break;
+    case ACT_DELETE: ask(ASK_DELETE); break;
+    case ACT_NEW_FOLDER: new_thing(true); break;
+    case ACT_NEW_FILE: new_thing(false); break;
+    case ACT_TERMINAL: run("/bin/term", NULL); break; /* It starts here: our folder. */
+    case ACT_EMPTY_TRASH: ask(ASK_EMPTY_TRASH); break;
+    case ACT_SHOW_HIDDEN: toggle_hidden(); break;
+    case ACT_NONE: break;
+    }
+}
+
+/* ---- Dragging ---- */
+
+static enum { DRAG_NONE, DRAG_MAYBE, DRAG_ON } drag;
+static int drag_x, drag_y, pointer_x, pointer_y;
+
+static void drop(void) {
+    static char paths[MAX_CLIP][512];
+    char into[512];
+    if (drop_place >= 0) {
+        snprintf(into, sizeof(into), "%s", places[drop_place].path);
+    } else if (drop_position >= 0) {
+        item_path(into, sizeof(into), at(drop_position));
+    } else {
+        return;
+    }
+    int n = selected_paths(paths, MAX_CLIP);
+    if (!strcmp(into, TRASH) && !ctrl) {
+        trash_selection();
+        return;
+    }
+    vx_mkdir(into); /* (The Trash, the first time.) */
+    transfer(paths, n, into, !ctrl, NULL);
+    load();
+}
+
+/* What the pointer is over while dragging: a folder or app's folder? No:
+ * a folder that isn't selected, or a place. */
+static void find_drop_target(int px, int py) {
+    drop_place = place_at(px, py);
+    drop_position = -1;
+    if (drop_place < 0) {
+        int position = position_at(px, py);
+        struct item *item = at(position);
+        if (item && item->kind == K_FOLDER && !item->selected) {
+            drop_position = position;
+        }
+    }
 }
 
 static void draw(void) {
     struct vx_surface *s = &window->surface;
-    int w = s->width, h = s->height;
-    vx_fill(s, 0, 0, w, h, VX_COLOR_WINDOW);
-    for (int i = 0; i < BUTTONS; i++) {
-        vx_draw_button(s, buttons[i].x, 6, buttons[i].width, 24, buttons[i].label, hot_button == i);
+    vx_fill(s, 0, 0, s->width, s->height, VX_COLOR_VIEW);
+    if (icon_view) {
+        draw_icons(s);
+    } else {
+        draw_list(s);
     }
-    vx_draw_field(s, PATH_X, 6, w - PATH_X - 8, typing ? typed : cwd, typing);
-    /* The list. */
-    int list_y = TOOLBAR + 2, rows = list_rows();
-    vx_fill(s, 8, list_y, w - 16, rows * ROW + 4, VX_COLOR_VIEW);
-    for (int i = 0; i < rows && top + i < item_count; i++) {
-        struct item *item = &items[top + i];
-        int y = list_y + 2 + i * ROW;
-        if (top + i == selected) {
-            vx_fill(s, 10, y, w - 20, ROW, VX_COLOR_SELECTED);
-        }
-        if (item->icon) {
-            vx_blit_alpha(s, 15, y + 1, 18, 18, &item->icon->surface);
-        } else {
-            draw_icon(s, 16, y + 2, item->type);
-        }
-        char size[32], name[256];
-        format_size(size, sizeof(size), item);
-        /* Apps without ".vxapp", as Finder shows them. */
-        snprintf(name, sizeof(name), "%s", item->name);
-        if (item->app) {
-            name[strlen(name) - strlen(VX_APP_EXTENSION)] = '\0';
-        }
-        int size_x = w - 24 - (int)strlen(size) * FONT_WIDTH;
-        if (mode == RENAMING && top + i == renaming) {
-            vx_draw_field(s, 36, y - 2, size_x - 44, new_name, true);
-        } else {
-            vx_draw_text_fit(s, 38, y + 2, size_x - 48, name, VX_COLOR_TEXT, VX_TRANSPARENT);
-        }
-        vx_draw_text(s, size_x, y + 2, size, VX_COLOR_DIM, VX_TRANSPARENT);
+    if (total_rows() > visible_rows()) { /* Where we are in a long folder. */
+        int area = list_h(), bar = area * visible_rows() / total_rows();
+        int y = (area - bar) * top / (total_rows() - visible_rows());
+        vx_fill(s, s->width - 12, list_y() + y, 4, bar < 8 ? 8 : bar, VX_COLOR_LINE);
     }
-    if (item_count > rows) { /* Where we are in a long list. */
-        int bar = (rows * ROW) * rows / item_count;
-        int at = (rows * ROW - bar) * top / (item_count - rows);
-        vx_fill(s, w - 13, list_y + 2 + at, 3, bar, VX_COLOR_LINE);
+    draw_sidebar(s);
+    draw_toolbar(s, -1);
+    draw_status(s);
+    if (drag == DRAG_ON) { /* What's being dragged, by the pointer. */
+        char text[64];
+        int count = selected_count();
+        snprintf(text, sizeof(text), "%s%d item%s", ctrl ? "+ " : "", count, count == 1 ? "" : "s");
+        int tw = (int)strlen(text) * FONT_WIDTH + 12;
+        vx_fill(s, pointer_x + 14, pointer_y + 10, tw, FONT_HEIGHT + 6, VX_COLOR_SELECTED);
+        vx_draw_text(s, pointer_x + 20, pointer_y + 13, text, VX_COLOR_TEXT, VX_TRANSPARENT);
     }
-    vx_draw_text_fit(s, 10, h - STATUS + 3, w - 20, status, VX_COLOR_DIM, VX_TRANSPARENT);
     if (mode == MENU) {
         vx_draw_menu(s, menu_x, menu_y, menu, menu_count, menu_hot);
     } else if (mode == CONFIRM) {
-        draw_confirm();
+        draw_confirm(s);
     } else if (mode == INFO) {
-        draw_info();
+        draw_info(s);
+    } else if (mode == PREVIEW) {
+        draw_preview(s);
     }
-    vx_window_present(window, 0, 0, w, h);
+    vx_window_present(window, 0, 0, s->width, s->height);
 }
 
-static void select_item(int index) {
-    if (item_count == 0) {
-        selected = -1;
-        return;
+/* ---- Keys ---- */
+
+static char typeahead[32];
+static long typeahead_ms;
+
+/* Letters typed on the list go to the first name that starts with them. */
+static void type_ahead(char c) {
+    long now = vx_uptime();
+    size_t n = now - typeahead_ms > 1000 ? 0 : strlen(typeahead);
+    typeahead_ms = now;
+    if (n + 1 < sizeof(typeahead)) {
+        typeahead[n] = c;
+        typeahead[n + 1] = '\0';
     }
-    selected = index < 0 ? 0 : index >= item_count ? item_count - 1 : index;
-    if (selected < top) {
-        top = selected;
-    } else if (selected >= top + list_rows()) {
-        top = selected - list_rows() + 1;
+    size_t length = strlen(typeahead);
+    for (int i = 0; i < shown_count; i++) {
+        const char *name = items[shown[i]].name;
+        size_t k = 0;
+        while (k < length && name[k] && same_letters(name[k], typeahead[k])) {
+            k++;
+        }
+        if (k == length) {
+            select_only(i);
+            return;
+        }
     }
 }
 
-static void scroll(int by) {
-    int max = item_count - list_rows();
-    top += by;
-    top = top > max ? max : top;
-    top = top < 0 ? 0 : top;
-}
-
-/* ---- Events ---- */
-
-static void answer(bool yes) {
-    mode = NORMAL;
-    if (!yes) {
-        return;
-    }
-    if (question == ASK_EMPTY_TRASH) {
-        empty_trash();
-    } else if (selected >= 0) {
-        delete_item(selected);
+static void field_key(const struct vx_gui_event *e) {
+    char *text = field == FIELD_PATH ? typed : search;
+    size_t size = field == FIELD_PATH ? sizeof(typed) : sizeof(search);
+    if (e->key == VX_KEY_ENTER) {
+        if (field == FIELD_PATH) {
+            field = FIELD_NONE;
+            go(typed);
+        } else {
+            field = FIELD_NONE; /* The search stays; Esc clears it. */
+        }
+    } else if (e->key == VX_KEY_ESC) {
+        if (field == FIELD_SEARCH) {
+            search[0] = '\0';
+            arrange();
+        }
+        field = FIELD_NONE;
+    } else if (vx_field_key(text, size, e) && field == FIELD_SEARCH) {
+        arrange(); /* The search is as you type. */
+        select_only(0);
     }
 }
 
 static void key(const struct vx_gui_event *e) {
-    if (e->key == VX_KEY_LEFTCTRL || e->key == VX_KEY_RIGHTCTRL) {
-        ctrl = e->value != 0;
-    } else if (e->key == VX_KEY_LEFTSHIFT || e->key == VX_KEY_RIGHTSHIFT) {
-        shift = e->value != 0;
+    bool down = e->value != 0;
+    switch (e->key) {
+    case VX_KEY_LEFTCTRL:
+    case VX_KEY_RIGHTCTRL: ctrl = down; return;
+    case VX_KEY_LEFTSHIFT:
+    case VX_KEY_RIGHTSHIFT: shift = down; return;
+    case VX_KEY_LEFTALT:
+    case VX_KEY_RIGHTALT: alt = down; return;
     }
-    if (e->value == 0) {
+    if (!down) {
         return;
     }
     switch (mode) {
@@ -842,6 +1794,11 @@ static void key(const struct vx_gui_event *e) {
             mode = NORMAL;
         }
         return;
+    case PREVIEW:
+        if (e->key == VX_KEY_SPACE || e->key == VX_KEY_ESC || e->key == VX_KEY_ENTER) {
+            close_preview();
+        }
+        return;
     case RENAMING:
         if (e->key == VX_KEY_ENTER) {
             finish_rename();
@@ -854,70 +1811,141 @@ static void key(const struct vx_gui_event *e) {
     case NORMAL:
         break;
     }
-    if (typing) {
-        if (e->key == VX_KEY_ENTER) {
-            typing = false;
-            go(typed);
-        } else if (e->key == VX_KEY_ESC) {
-            typing = false;
-        } else {
-            vx_field_key(typed, sizeof(typed), e);
-        }
+    if (field != FIELD_NONE) {
+        field_key(e);
         return;
     }
     if (ctrl) {
         switch (e->key) {
-        case 46: copy_item(selected, false); break; /* C */
-        case 45: copy_item(selected, true); break;  /* X */
-        case 47: paste(); break;                    /* V */
-        case 23: show_info(selected); break;        /* I */
-        case 38:                                    /* L: type a path */
-            typing = true;
+        case 46: copy_selection(false); break; /* C */
+        case 45: copy_selection(true); break;  /* X */
+        case 47: paste(); break;               /* V */
+        case 32: duplicate(); break;           /* D */
+        case 23: show_info(); break;           /* I */
+        case 35: toggle_hidden(); break;       /* H */
+        case 30:                               /* A: everything */
+            for (int i = 0; i < shown_count; i++) {
+                items[shown[i]].selected = true;
+            }
+            break;
+        case 33: field = FIELD_SEARCH; break; /* F */
+        case 38:                              /* L: type a location */
+            field = FIELD_PATH;
             typed[0] = '\0';
             break;
-        case 35:                                    /* H: hidden files */
-            show_hidden = !show_hidden;
-            load(NULL);
-            break;
-        case 49:                                    /* N */
+        case 2: icon_view = false, top = 0; break; /* 1 */
+        case 3: icon_view = true, top = 0; break;  /* 2 */
+        case 49:                                   /* N */
             if (shift) {
-                new_folder();
+                new_thing(true);
             }
             break;
         }
         return;
     }
-    switch (e->key) {
-    case VX_KEY_UP: select_item(selected - 1); break;
-    case VX_KEY_DOWN: select_item(selected + 1); break;
-    case VX_KEY_PAGEUP: select_item(selected - list_rows()); break;
-    case VX_KEY_PAGEDOWN: select_item(selected + list_rows()); break;
-    case VX_KEY_HOME: select_item(0); break;
-    case VX_KEY_END: select_item(item_count - 1); break;
-    case VX_KEY_ENTER: open_item(selected); break;
-    case VX_KEY_BACKSPACE: up(); break;
-    case VX_KEY_F1 + 1: start_rename(selected); break; /* F2 */
-    case VX_KEY_DELETE:
-        if (selected >= 0) {
-            in_trash() ? ask(ASK_DELETE) : trash_item(selected);
+    if (alt) {
+        if (e->key == VX_KEY_LEFT) {
+            go_back();
+        } else if (e->key == VX_KEY_RIGHT) {
+            go_forward();
+        } else if (e->key == VX_KEY_UP) {
+            up();
         }
-        break;
+        return;
+    }
+    int per_row = icon_view ? columns() : 1;
+    switch (e->key) {
+    case VX_KEY_UP: move_cursor(cursor < 0 ? 0 : cursor - per_row); return;
+    case VX_KEY_DOWN: move_cursor(cursor < 0 ? 0 : cursor + per_row); return;
+    case VX_KEY_LEFT:
+        if (icon_view) {
+            move_cursor(cursor < 0 ? 0 : cursor - 1);
+        }
+        return;
+    case VX_KEY_RIGHT:
+        if (icon_view) {
+            move_cursor(cursor < 0 ? 0 : cursor + 1);
+        }
+        return;
+    case VX_KEY_PAGEUP: move_cursor(cursor - visible_rows() * per_row); return;
+    case VX_KEY_PAGEDOWN: move_cursor(cursor + visible_rows() * per_row); return;
+    case VX_KEY_HOME: move_cursor(0); return;
+    case VX_KEY_END: move_cursor(shown_count - 1); return;
+    case VX_KEY_ENTER: open_selection(); return;
+    case VX_KEY_BACKSPACE: up(); return;
+    case VX_KEY_SPACE:
+        if (cursor >= 0) {
+            quick_look();
+        }
+        return;
+    case VX_KEY_F1 + 1: start_rename(); return; /* F2 */
+    case VX_KEY_DELETE:
+        if (selected_count()) {
+            in_trash() ? ask(ASK_DELETE) : trash_selection();
+        }
+        return;
+    case VX_KEY_ESC:
+        clear_selection();
+        cursor = anchor = -1;
+        return;
+    }
+    if (e->character > ' ' && e->character < 127) {
+        type_ahead((char)e->character);
     }
 }
 
-/* The list row at a point, or -1. */
-static int row_at(int y) {
-    int row = (y - TOOLBAR - 4) / ROW;
-    if (y < TOOLBAR + 4 || row >= list_rows() || top + row >= item_count) {
-        return -1;
+/* ---- The pointer ---- */
+
+static long last_click_ms;
+static int last_click = -1;
+
+static bool dialog_click(int px, int py) {
+    int w = mode == INFO ? INFO_W : CONFIRM_W, h = mode == INFO ? info_h() : CONFIRM_H;
+    int x, y, bx, by;
+    panel_rect(w, h, &x, &y);
+    for (int i = 0; i < (mode == INFO ? 1 : 2); i++) {
+        dialog_button(x, y, w, h, i, &bx, &by);
+        if (vx_inside(px, py, bx, by, 88, 26)) {
+            if (mode == INFO) {
+                mode = NORMAL;
+            } else {
+                answer(i == 0);
+            }
+            return true;
+        }
     }
-    return top + row;
+    return false;
+}
+
+static void toolbar_click(int px, int py) {
+    for (int b = 0; b < BUTTON_COUNT; b++) {
+        int x, w;
+        button_rect(b, &x, &w);
+        if (vx_inside(px, py, x, 8, w, 24)) {
+            switch (b) {
+            case B_BACK: go_back(); break;
+            case B_FORWARD: go_forward(); break;
+            case B_UP: up(); break;
+            case B_LIST: icon_view = false, top = 0; break;
+            case B_ICONS: icon_view = true, top = 0; break;
+            }
+            return;
+        }
+    }
+    if (vx_inside(px, py, path_x(), 8, path_w(), FONT_HEIGHT + 8)) {
+        field = FIELD_PATH;
+        snprintf(typed, sizeof(typed), "%s", cwd);
+    } else if (vx_inside(px, py, search_x(), 8, 160, FONT_HEIGHT + 8)) {
+        field = FIELD_SEARCH;
+    }
 }
 
 static void pointer(const struct vx_gui_event *e, int *held) {
     bool click = (e->buttons & 1) && !(*held & 1);
+    bool release = !(e->buttons & 1) && (*held & 1);
     bool right_click = (e->buttons & 2) && !(*held & 2);
     *held = e->buttons;
+    pointer_x = e->x, pointer_y = e->y;
     if (mode == MENU) {
         menu_hot = vx_menu_item_at(menu, menu_count, menu_x, menu_y, e->x, e->y);
         if (click || right_click) {
@@ -930,79 +1958,114 @@ static void pointer(const struct vx_gui_event *e, int *held) {
         return;
     }
     if (mode == CONFIRM || mode == INFO) {
-        if (!click) {
-            return;
+        if (click) {
+            dialog_click(e->x, e->y);
         }
-        int x, y, bx, by, w = mode == INFO ? 440 : 380;
-        int h = 120;
-        if (mode == INFO) {
-            h = 96 + info_count * (FONT_HEIGHT + 4);
-        }
-        x = (window->surface.width - w) / 2;
-        y = (window->surface.height - h) / 2;
-        y = y < TOOLBAR ? TOOLBAR : y;
-        for (int i = 0; i < (mode == INFO ? 1 : 2); i++) {
-            dialog_button(x, y, w, h, i, &bx, &by);
-            if (vx_inside(e->x, e->y, bx, by, 88, 26)) {
-                if (mode == INFO) {
-                    mode = NORMAL;
-                } else {
-                    answer(i == 0);
-                }
-            }
+        return;
+    }
+    if (mode == PREVIEW) {
+        if (click || right_click) {
+            close_preview();
         }
         return;
     }
     if (mode == RENAMING && (click || right_click)) {
         finish_rename(); /* Clicking elsewhere keeps the new name, as in Finder. */
     }
-    hot_button = -1;
-    for (int i = 0; i < BUTTONS; i++) {
-        if (vx_inside(e->x, e->y, buttons[i].x, 6, buttons[i].width, 24)) {
-            hot_button = i;
-        }
-    }
     if (e->wheel) {
-        scroll(-e->wheel * 3);
+        scroll(-e->wheel * (icon_view ? 1 : 3));
+    }
+    /* Dragging the selection. */
+    if (drag == DRAG_MAYBE && (e->buttons & 1) &&
+        (abs(e->x - drag_x) > 4 || abs(e->y - drag_y) > 4)) {
+        drag = DRAG_ON;
+    }
+    if (drag == DRAG_ON) {
+        find_drop_target(e->x, e->y);
+        if (release) {
+            drop();
+            drag = DRAG_NONE;
+            drop_place = drop_position = -1;
+        }
+        return;
+    }
+    if (release) {
+        drag = DRAG_NONE;
     }
     if (right_click) {
-        int index = row_at(e->y);
-        selected = index;
-        open_menu(e->x, e->y);
+        field = FIELD_NONE;
+        int position = position_at(e->x, e->y);
+        if (position >= 0 && !items[shown[position]].selected) {
+            select_only(position); /* A right click on something else selects it. */
+        } else if (position < 0 && e->x >= main_x() && e->y > TOOLBAR) {
+            clear_selection();
+            cursor = anchor = -1;
+        }
+        if (e->x >= main_x() && e->y > TOOLBAR) {
+            open_menu(e->x, e->y);
+        }
         return;
     }
     if (!click) {
         return;
     }
-    switch (hot_button) {
-    case 0: up(); return;
-    case 1: go("/"); return;
-    case 2: go(VX_APPS_DIR); return;
-    case 3:
-        vx_mkdir(TRASH);
-        go(TRASH);
+    if (e->y < TOOLBAR) {
+        field = FIELD_NONE;
+        toolbar_click(e->x, e->y);
         return;
     }
-    int w = window->surface.width;
-    if (vx_inside(e->x, e->y, PATH_X, 6, w - PATH_X - 8, FONT_HEIGHT + 8)) {
-        typing = true;
-        snprintf(typed, sizeof(typed), "%s", cwd);
-        return;
-    }
-    typing = false;
-    int index = row_at(e->y);
-    if (index >= 0) {
-        long now = vx_uptime();
-        if (index == last_click && now - last_click_ms < DOUBLE_CLICK_MS) {
-            open_item(index);
-            last_click = -1;
-            return;
+    field = FIELD_NONE;
+    if (e->x < SIDEBAR) {
+        int p = place_at(e->x, e->y);
+        if (p >= 0) {
+            if (!strcmp(places[p].path, TRASH)) {
+                vx_mkdir(TRASH); /* (It's made the first time something goes there.) */
+            }
+            go(places[p].path);
         }
-        selected = index;
-        last_click = index;
-        last_click_ms = now;
-    } else if (e->y > TOOLBAR) {
-        selected = -1; /* A click on nothing. */
+        return;
+    }
+    if (!icon_view && e->y >= TOOLBAR + 2 && e->y < list_y()) { /* A heading: sort. */
+        int c = 3;
+        while (c > 0 && e->x < column_x(c)) {
+            c--;
+        }
+        if ((int)sort_by == c) {
+            sort_down = !sort_down;
+        } else {
+            sort_by = c;
+            sort_down = false;
+        }
+        arrange();
+        return;
+    }
+    int position = position_at(e->x, e->y);
+    if (position < 0) {
+        clear_selection(); /* A click on nothing. */
+        cursor = anchor = -1;
+        return;
+    }
+    long now = vx_uptime();
+    if (position == last_click && now - last_click_ms < DOUBLE_CLICK_MS && !ctrl && !shift) {
+        last_click = -1;
+        select_only(position);
+        open_item(at(position));
+        return;
+    }
+    last_click = position;
+    last_click_ms = now;
+    if (ctrl) { /* Add or take away. */
+        items[shown[position]].selected = !items[shown[position]].selected;
+        cursor = anchor = position;
+    } else if (shift) {
+        select_to(position);
+    } else {
+        if (!items[shown[position]].selected) {
+            select_only(position);
+        }
+        cursor = position;
+        drag = DRAG_MAYBE; /* It may become a drag of the selection. */
+        drag_x = e->x, drag_y = e->y;
     }
 }
 
@@ -1012,13 +2075,28 @@ int main(int argc, char **argv) {
         fprintf(stderr, "files: no desktop to open a window on\n");
         return 1;
     }
-    go(argc > 1 ? argv[1] : "/");
+    load_resources();
+    go_to(argc > 1 ? argv[1] : "/", false);
     int held = 0;
     for (;;) {
         draw();
         struct vx_gui_event e;
-        if (vx_gui_wait(&e, -1) <= 0) {
+        /* Thumbnails are made when there's nothing else to do; and an old
+         * message goes from the status bar after a while. */
+        struct item *wanting = next_thumbnail();
+        int got = vx_gui_wait(&e, wanting ? 0 : message[0] ? 1000 : -1);
+        if (got < 0) {
             return 0;
+        }
+        if (got == 0 && wanting) {
+            make_thumbnail(wanting);
+            continue;
+        }
+        if (got == 0) {
+            if (vx_uptime() - message_ms >= 5000) {
+                message[0] = '\0';
+            }
+            continue;
         }
         switch (e.type) {
         case VX_GUI_CLOSE:
@@ -1032,11 +2110,11 @@ int main(int argc, char **argv) {
             break;
         case VX_GUI_FOCUS:
             if (!e.value) {
-                ctrl = shift = false; /* Their key ups go to another window. */
+                ctrl = shift = alt = false; /* Their key ups go to another window. */
             }
             break;
         case VX_GUI_RESIZE:
-            if (e.width >= 300 && e.height >= 200) {
+            if (e.width >= 420 && e.height >= 240) {
                 vx_window_resize(window, e.width, e.height);
                 scroll(0);
             }

@@ -168,9 +168,9 @@ TYPED_COMMANDS = [
     ("@mouse_move -454 23", None, 5),
     ("@double-click", "desktop: starting Files", 10),
     ("@mouse_move 0 0", 'desktop: window 5 is now called "/ - Files"', 30),
-    # Files (at 208,194, with the keyboard): to /apps (Ctrl+L, a path), copy an app and paste
-    # it (the desktop notices a new app), rename it, Get Info, Move to Trash
-    # (the app is gone again), back up.
+    # Files (at 208,194, with the keyboard): to /apps (Ctrl+L, a path), copy an
+    # app and paste it (the desktop notices a new app), rename it, Get Info,
+    # Quick Look, Duplicate, Move to Trash (both: the app is gone again), up.
     ("@sendkey ctrl-l", None, 2),
     ("@type /apps", 'desktop: window 5 is now called "/apps - Files"', 10),
     ("@sendkey down", None, 2),
@@ -182,16 +182,20 @@ TYPED_COMMANDS = [
     ("@type Hello.vxapp", "files: renamed /apps/About 2.vxapp to /apps/Hello.vxapp", 10),
     ("@sendkey ctrl-i", "files: info for Hello.vxapp: App", 10),
     ("@sendkey esc", None, 2),
+    ("@sendkey spc", "files: quick look at Hello.vxapp", 10),
+    ("@sendkey esc", None, 2),
+    ("@sendkey ctrl-d", "files: pasted /apps/Hello.vxapp to /apps/Hello 2.vxapp", 10),
+    ("@sendkey delete", "files: moved /apps/Hello 2.vxapp to the Trash", 10),
     ("@sendkey delete", "files: moved /apps/Hello.vxapp to the Trash", 10),
     ("@sendkey backspace", 'desktop: window 5 is now called "/ - Files"', 10),
     # Right clicks: in Files' list (its menu), then on the desktop, whose
     # menu starts "About Vexa"; then the pointer goes back to the Files icon.
     ("@mouse_move 300 221", None, 5),
-    ("@mouse_move 368 221", None, 5),
+    ("@mouse_move 368 263", None, 5),
     ("@mouse_button 2", "files: menu for /", 10),
     ("@mouse_button 0", None, 2),
     ("@sendkey esc", None, 2),
-    ("@mouse_move 292 58", None, 5),
+    ("@mouse_move 292 16", None, 5),
     ("@mouse_button 2", "desktop: menu at 1000,650", 10),
     ("@mouse_button 0", None, 2),
     ("@mouse_move 20 90", None, 5),

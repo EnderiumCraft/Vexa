@@ -219,6 +219,10 @@ Native track:
       Package Contents, right-click menus (a libvexa widget) there and on the
       desktop; the desktop notices apps copied into or removed from `/apps`;
       `cp -r`, and libvexa's `<vexa/files.h>` for whole folders (0.17.0)
+- [x] Files like Finder: a sidebar with places and disks, Back and Forward, list
+      view with sortable columns and icon view with thumbnails, several selected
+      things at once, drag and drop, Quick Look, search, type-ahead, Duplicate,
+      Make Alias, New Text Document; its pictures in its bundle (0.18.0)
 
 Linux track:
 - [x] The X Window System built from source with musl: the X libraries, X.Org's

@@ -46,10 +46,14 @@ runs X programs such as `xterm` in windows of their own on it. The kernel:
   with the program, its icon and an `Info.conf` saying what it is and which files it
   opens; the menu, the desktop icons, Files and `open` all work from them, and
   copying a `.vxapp` into `/apps` installs it (the desktop notices)
-- manages files like Finder: copy, cut and paste (Ctrl+C, X, V), rename (F2), New
-  Folder, Move to Trash (`/Trash`, Delete) and Empty Trash, Get Info (Ctrl+I, with
-  folder sizes and an app's details), Show Package Contents, Ctrl+L to type a
-  location, Ctrl+H for hidden files; right-click menus in Files and on the desktop
+- manages files like Finder: a sidebar (places and disks), Back and Forward, a list
+  with columns you sort by or icons with picture thumbnails, selecting several
+  things (Ctrl-click, Shift-click, Ctrl+A) and dragging them onto a folder (Ctrl
+  copies), Quick Look (Space), search (Ctrl+F) and typing a name to go to it; copy,
+  cut and paste (Ctrl+C, X, V), Duplicate (Ctrl+D), Make Alias, rename (F2), New
+  Folder and New Text Document, Move to Trash (`/Trash`, Delete) and Empty Trash,
+  Get Info (Ctrl+I), Show Package Contents; right-click menus in Files and on the
+  desktop
 - runs the X Window System through the Linux subsystem: Xvexa, an X server (X.Org's,
   built with musl) that shows each X window as a desktop window of its own, with
   TrueType fonts (FreeType, fontconfig, Xft and DejaVu), `xterm`, and GTK 3 programs
