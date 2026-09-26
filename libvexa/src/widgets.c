@@ -103,7 +103,7 @@ void vx_draw_menu(struct vx_surface *s, int x, int y, const struct vx_menu_item 
                   int hot) {
     int width, height;
     vx_menu_size(items, count, &width, &height);
-    vx_fill(s, x + 3, y + 3, width, height, 0x06030c); /* A shadow. */
+    vx_fill(s, x + 3, y + 3, width, height, vx_theme.shadow); /* A shadow. */
     vx_fill(s, x, y, width, height, VX_COLOR_VIEW);
     vx_draw_outline(s, x, y, width, height, VX_COLOR_LINE);
     int top = y + 4;

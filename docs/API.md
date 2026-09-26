@@ -15,6 +15,8 @@ success and a **negative `VX_E*` error** on failure; `vx_strerror(error)` descri
 - [`<vexa/gui.h>`: drawing and windows](#vexaguih-drawing-and-windows)
 - [`<vexa/app.h>`: app bundles](#vexaapph-app-bundles)
 - [`<vexa/files.h>`: whole files and folders](#vexafilesh-whole-files-and-folders)
+- [`<vexa/settings.h>`: settings files](#vexasettingsh-settings-files)
+- [`<vexa/time.h>`: dates and time zones](#vexatimeh-dates-and-time-zones)
 - [`<vexa/font.h>`: the bitmap font](#vexafonth-the-bitmap-font)
 - [`<vexa/desktop.h>`: the desktop protocol](#vexadesktoph-the-desktop-protocol)
 - [Constants and structures](#constants-and-structures)
@@ -47,6 +49,9 @@ the program with that exit code.
 | `long vx_log(const char *text, size_t length)` | writes to the kernel log |
 | `long vx_system_info(struct vx_system_info *info)` | version, CPUs, memory, uptime |
 | `long vx_kernel_command(const char *command)` | runs a kernel monitor command (`"disks"`, `"threads"`...), printing to the console |
+| `long vx_power(int action)` | `VX_POWER_OFF` (ACPI) or `VX_POWER_RESTART`; doesn't return |
+| `long vx_mounts(struct vx_mount_info *mounts, size_t count)` | the mounted file systems (path, source, type, total and free bytes, read-only); returns how many there are |
+| `long vx_get_hostname(char *buffer, size_t size)`, `long vx_set_hostname(const char *name)` | the computer's name (letters, digits, `-`, `.`) |
 | `const char *vx_strerror(long error)` | describes a negative `VX_E*` |
 
 ### Files
@@ -219,11 +224,17 @@ Colors are `0xRRGGBB`. `VX_TRANSPARENT` as a background leaves what's there.
 | `VX_GUI_CLOSE` | the user asked to close the window |
 | `VX_GUI_FOCUS` | `value`: 1 gained the keyboard, 0 lost it |
 | `VX_GUI_RESIZE` | `width`, `height`: the size the user asked for |
+| `VX_GUI_THEME` | the theme (or another setting) changed: `vx_theme` has the new one; draw again |
 
 ### Widgets
 
 The look of Vexa's own apps: `VX_COLOR_WINDOW`, `VIEW`, `TEXT`, `DIM`, `ACCENT`,
-`SELECTED`, `BUTTON`, `BUTTON_HOT`, `LINE`.
+`SELECTED`, `BUTTON`, `BUTTON_HOT`, `LINE`. They come from the theme, `vx_theme` (a
+`struct vx_theme`: `dark`, and those colors plus `sidebar`, `stripe`, `shadow` and the
+desktop's), which libvexa reads from `/etc/desktop.conf` when a window opens and again
+when it changes. `vx_theme_make(&theme, "light", "blue")` makes one (for a preview);
+`vx_accents[]` (`vx_accent_count`) are the accent colors; `vx_mix(a, b, amount)` mixes
+two colors.
 
 | Function | What it does |
 | --- | --- |
@@ -277,6 +288,40 @@ What a file manager needs; each stops at the first error.
 | `unsigned long long vx_tree_size(const char *path, long *files)` | a file's size, or the total of a folder's files (counting them) |
 | `void vx_unique_name(const char *dir, const char *name, char *out, size_t size)` | a name not taken in `dir`: `name`, else "stem 2.ext", "stem 3.ext"... |
 | `void vx_join_path(char *out, size_t size, const char *dir, const char *name)` | "dir/name" with one slash |
+
+## `<vexa/settings.h>`: settings files
+
+`key=value` files in `/etc`, kept on disk too when there is one (see the architecture).
+
+```c
+struct vx_settings s;
+vx_settings_load(&s, "desktop.conf");
+int hours = vx_settings_int(&s, "clock", 24);
+vx_settings_set(&s, "clock", "12");
+vx_settings_save(&s);
+vx_desktop_reload(); /* The desktop, and every program, read them again. */
+```
+
+| Function | What it does |
+| --- | --- |
+| `int vx_settings_load(struct vx_settings *s, const char *name)` | reads `/etc/<name>` (none yet: empty) |
+| `const char *vx_settings_get(s, key, fallback)`, `int vx_settings_int(...)`, `bool vx_settings_bool(...)` | a value, or the fallback (booleans: yes/no, 1/0, true/false, on/off) |
+| `vx_settings_set`, `vx_settings_set_int`, `vx_settings_set_bool`, `vx_settings_unset` | change one |
+| `int vx_settings_save(const struct vx_settings *s)` | writes `/etc/<name>`, and the copy on disk |
+| `int vx_settings_write_file(const char *name, const char *text, size_t length)` | a whole file in `/etc` (and on disk) |
+| `bool vx_settings_disk(char *out, size_t size)` | the disk that keeps settings, if any |
+| `int vx_settings_restore(void)` | copies them back to `/etc` (vinit does it at boot) |
+
+## `<vexa/time.h>`: dates and time zones
+
+| Function | What it does |
+| --- | --- |
+| `void vx_date_of(long seconds, struct vx_date *d)`, `long vx_seconds_of(const struct vx_date *d)` | seconds since 1970 to a date (year, month, day, hour, minute, second, weekday), and back |
+| `const struct vx_zone *vx_find_zone(const char *city)` | a zone from `vx_zones[]` (`vx_zone_count`): a city, its region, its standard offset and its summer time rule |
+| `int vx_zone_offset(const struct vx_zone *zone, long utc_seconds)` | its offset from UTC at that moment, in minutes |
+| `void vx_local_now(struct vx_date *d)` | the local time now, in the zone Settings chose |
+
+`vx_month_names[12]` and `vx_weekday_names[7]` are the names.
 
 ## `<vexa/font.h>`: the bitmap font
 

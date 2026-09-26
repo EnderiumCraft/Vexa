@@ -4,11 +4,13 @@
 #include <vexa/cpu.h>
 #include <vexa/fs.h>
 #include <vexa/futex.h>
+#include <vexa/hostname.h>
 #include <vexa/kprintf.h>
 #include <vexa/mm.h>
 #include <vexa/monitor.h>
 #include <vexa/object.h>
 #include <vexa/pipe.h>
+#include <vexa/power.h>
 #include <vexa/process.h>
 #include <vexa/net.h>
 #include <vexa/sched.h>
@@ -1201,6 +1203,87 @@ static int64_t sys_kernel_command(uint64_t text, uint64_t length, uint64_t a2, u
     return 0;
 }
 
+static int64_t sys_power(uint64_t action, uint64_t a1, uint64_t a2, uint64_t a3) {
+    (void)a1, (void)a2, (void)a3;
+    if (action == VX_POWER_RESTART) {
+        power_restart();
+    }
+    if (action == VX_POWER_OFF) {
+        power_off();
+    }
+    return -VX_EINVAL;
+}
+
+static void copy_name(char *out, size_t size, const char *in) {
+    size_t n = strlen(in);
+    n = n < size - 1 ? n : size - 1;
+    memcpy(out, in, n);
+    out[n] = '\0';
+}
+
+static int64_t sys_mounts(uint64_t out, uint64_t count, uint64_t a2, uint64_t a3) {
+    (void)a2, (void)a3;
+    /* Gathered under the lock, copied out after it (a page fault in the
+     * copy may need the file system). */
+    count = count > 64 ? 64 : count;
+    struct vx_mount_info *list = count ? kmalloc(count * sizeof(*list)) : NULL;
+    if (count && !list) {
+        return -VX_ENOMEM;
+    }
+    uint64_t n = 0;
+    vfs_lock();
+    for (struct mount *m = vfs_mounts(); m; m = m->next, n++) {
+        if (n >= count) {
+            continue; /* Still counted. */
+        }
+        struct vx_mount_info *info = &list[n];
+        memset(info, 0, sizeof(*info));
+        copy_name(info->path, sizeof(info->path), m->path);
+        copy_name(info->source, sizeof(info->source), m->source);
+        copy_name(info->type, sizeof(info->type), m->fs_name ? m->fs_name : "");
+        info->read_only = m->read_only;
+        if (m->root && m->root->ops->statfs) {
+            uint64_t total = 0, free = 0;
+            m->root->ops->statfs(m, &total, &free);
+            info->total = total;
+            info->free = free;
+        }
+    }
+    vfs_unlock();
+    uint64_t copied = n < count ? n : count;
+    bool ok = !copied || copy_to_user(out, list, copied * sizeof(*list));
+    kfree(list);
+    return ok ? (int64_t)n : -VX_EFAULT;
+}
+
+static int64_t sys_hostname(uint64_t out, uint64_t size, uint64_t new_name, uint64_t length) {
+    if (new_name) {
+        char name[HOSTNAME_MAX + 1];
+        if (length > HOSTNAME_MAX) {
+            return -VX_EINVAL;
+        }
+        if (!copy_from_user(name, new_name, length)) {
+            return -VX_EFAULT;
+        }
+        int error = hostname_set(name, length);
+        if (error) {
+            return error;
+        }
+    }
+    if (out) {
+        char name[HOSTNAME_MAX + 1];
+        hostname_get(name);
+        size_t n = strlen(name) + 1;
+        if (size < n) {
+            return -VX_EINVAL;
+        }
+        if (!copy_to_user(out, name, n)) {
+            return -VX_EFAULT;
+        }
+    }
+    return 0;
+}
+
 static const syscall_fn syscalls[] = {
     [VX_SYS_EXIT] = sys_exit,
     [VX_SYS_LOG] = sys_log,
@@ -1258,6 +1341,9 @@ static const syscall_fn syscalls[] = {
     [VX_SYS_MAP_FILE] = sys_map_file,
     [VX_SYS_RESIZE] = sys_resize,
     [VX_SYS_TIME] = sys_time,
+    [VX_SYS_POWER] = sys_power,
+    [VX_SYS_MOUNTS] = sys_mounts,
+    [VX_SYS_HOSTNAME] = sys_hostname,
 };
 
 static void vexa_syscall(struct interrupt_frame *frame) {

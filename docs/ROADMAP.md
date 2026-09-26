@@ -223,6 +223,12 @@ Native track:
       view with sortable columns and icon view with thumbnails, several selected
       things at once, drag and drop, Quick Look, search, type-ahead, Duplicate,
       Make Alias, New Text Document; its pictures in its bundle (0.18.0)
+- [x] System Settings: a sidebar with search and eleven sections (Appearance, Wallpaper,
+      Desktop & Panel, Date & Time, Mouse & Keyboard, Display, Default Apps, Startup,
+      Network, Storage, About); a dark and a light theme with accent colors for every
+      window; time zones with summer time; keyboard layouts; display modes (Bochs DISPI)
+      and 2x scaling; settings kept on disk; ACPI power off, restart, the computer's
+      name, `df` (0.19.0)
 
 Linux track:
 - [x] The X Window System built from source with musl: the X libraries, X.Org's

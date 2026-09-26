@@ -127,6 +127,7 @@ static int connect_desktop(void) {
         return (int)error;
     }
     connection = handle;
+    vx_theme_load(); /* The look the user chose, for the windows to come. */
     return handle;
 }
 
@@ -306,6 +307,10 @@ static void to_event(const struct desktop_message *m, struct vx_gui_event *e) {
         e->type = VX_GUI_RESIZE;
         e->width = m->a;
         e->height = m->b;
+        break;
+    case DESKTOP_THEME:
+        vx_theme_load();
+        e->type = VX_GUI_THEME;
         break;
     }
 }

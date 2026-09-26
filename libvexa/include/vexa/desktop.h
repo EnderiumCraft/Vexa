@@ -45,6 +45,7 @@ enum desktop_message_type {
     DESKTOP_MOVED = 23,     /* window; a, b = where its content is on the screen now */
     DESKTOP_INFO_REPLY = 24, /* a, b = the screen's width and height */
     DESKTOP_STATE = 25,     /* window; a = 1 if maximized, b = 1 if minimized */
+    DESKTOP_THEME = 26,     /* the theme (or other settings) changed: read them again */
 };
 
 /* DESKTOP_WM requests. MOVE and RESIZE start dragging the window with the

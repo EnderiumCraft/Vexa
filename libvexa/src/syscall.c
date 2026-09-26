@@ -247,6 +247,22 @@ long vx_time(void) {
     return syscall0(VX_SYS_TIME);
 }
 
+long vx_power(int action) {
+    return syscall1(VX_SYS_POWER, (long)action);
+}
+
+long vx_mounts(struct vx_mount_info *mounts, size_t count) {
+    return syscall2(VX_SYS_MOUNTS, (long)mounts, (long)count);
+}
+
+long vx_get_hostname(char *buffer, size_t size) {
+    return syscall4(VX_SYS_HOSTNAME, (long)buffer, (long)size, 0, 0);
+}
+
+long vx_set_hostname(const char *name) {
+    return syscall4(VX_SYS_HOSTNAME, 0, 0, (long)name, (long)strlen(name));
+}
+
 const char *vx_strerror(long error) {
     switch (-error) {
     case VX_ENOSYS: return "not supported";

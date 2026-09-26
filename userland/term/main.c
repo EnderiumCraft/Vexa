@@ -22,7 +22,7 @@
 
 #define COLOR_TEXT 0xe4dcf2
 #define COLOR_BACKGROUND 0x160d26
-#define COLOR_CURSOR 0xb07cff
+#define COLOR_CURSOR VX_COLOR_ACCENT /* The terminal stays dark; its cursor is the accent. */
 
 /* The console's 16 colours. */
 static const uint32_t palette[16] = {

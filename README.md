@@ -59,6 +59,13 @@ runs X programs such as `xterm` in windows of their own on it. The kernel:
   Folder and New Text Document, Move to Trash (`/Trash`, Delete) and Empty Trash,
   Get Info (Ctrl+I), Show Package Contents; right-click menus in Files and on the
   desktop
+- has System Settings like macOS's: dark and light themes with an accent color that
+  every window follows at once, wallpapers (fill, fit, center, tile), the panel and
+  clock, time zones by city with summer time, mouse speed, double click, natural
+  scrolling and left-handed buttons, keyboard layouts and key repeat, the display's
+  resolution (on QEMU's standard VGA) and a 2x scale, default apps, startup apps, the
+  computer's name, network and storage details; settings are kept on a disk when there
+  is one, and restored at boot; Restart and Shut Down (ACPI)
 - runs the X Window System through the Linux subsystem: Xvexa, an X server (X.Org's,
   built with musl) that shows each X window as a desktop window of its own, with
   TrueType fonts (FreeType, fontconfig, Xft and DejaVu), `xterm`, and GTK 3 programs
@@ -113,6 +120,7 @@ the `vexa:/>` prompt:
 | `files`, `edit <file>`, `view <image>`, `settings` | the desktop's apps, from its terminal: `view /share/pictures/aurora.png`; in Files, a right click shows what you can do (copy, rename, Get Info, Move to Trash...) |
 | `open <file>`, `open -a <app>` | opens a file with its app, a folder in Files, or starts an app, like macOS's `open`: `open /share/pictures/aurora.png`, `open -a Editor notes.txt` |
 | `notify <text>` | a notification on the desktop |
+| `hostname`, `df`, `shutdown [-r]` | the computer's name, how full the disks are, turning off or restarting |
 | `input` | the keyboard and mouse; `input watch 1` shows what the mouse reports |
 | `net` | network interfaces and addresses (Linux: `ifconfig`, `route -n`) |
 | `fetch http://example.com/` | downloads a web page (a Vexa program); `wget` is BusyBox's |

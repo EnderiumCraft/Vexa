@@ -52,8 +52,10 @@ int vx_app_list(struct vx_app *apps, int max);
 /* An app in /apps by its name ("Text Editor") or its bundle's ("Edit",
  * "Edit.vxapp"): 0, or a negative error. */
 int vx_app_find(const char *name, struct vx_app *app);
-/* The app that opens a file: the first that lists its extension, else the
+/* The app that opens a file: the one chosen for its extension in
+ * /etc/VX_APP_DEFAULTS ("png=Viewer"), else the first that lists it, else the
  * first that opens anything. 0, or a negative error. */
+#define VX_APP_DEFAULTS "apps.conf"
 int vx_app_for_file(const char *path, struct vx_app *app);
 /* Starts an app, with a file to open (or NULL): a process handle, or a
  * negative error. */

@@ -5,10 +5,12 @@
 #include <vexa/fpu.h>
 #include <vexa/fs.h>
 #include <vexa/futex.h>
+#include <vexa/hostname.h>
 #include <vexa/kprintf.h>
 #include <vexa/mm.h>
 #include <vexa/object.h>
 #include <vexa/pipe.h>
+#include <vexa/power.h>
 #include <vexa/process.h>
 #include <vexa/pty.h>
 #include <vexa/random.h>
@@ -3092,12 +3094,40 @@ static int64_t sys_uname(struct interrupt_frame *f, uint64_t out, uint64_t a1, u
     /* The release is the Linux version whose interface this subsystem
      * follows; the version string says what's really running. */
     strcpy(names[0], "Vexa");
-    strcpy(names[1], "vexa");
+    hostname_get(names[1]);
     strcpy(names[2], "6.1.0-vexa");
     strcpy(names[3], "Vexa " VEXA_VERSION " (Linux subsystem)");
     strcpy(names[4], "x86_64");
     strcpy(names[5], "(none)");
     return copy_to_user(out, names, sizeof(names)) ? 0 : -LE_EFAULT;
+}
+
+static int64_t sys_sethostname(struct interrupt_frame *f, uint64_t name, uint64_t length,
+                               uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5) {
+    char text[HOSTNAME_MAX + 1];
+    if (length > HOSTNAME_MAX) {
+        return -LE_EINVAL;
+    }
+    if (!copy_from_user(text, name, length)) {
+        return -LE_EFAULT;
+    }
+    return hostname_set(text, length) ? -LE_EINVAL : 0;
+}
+
+/* reboot(magic, magic2, command): restart or turn off (BusyBox's reboot
+ * and poweroff). Anything else isn't something Vexa does. */
+static int64_t sys_reboot(struct interrupt_frame *f, uint64_t magic, uint64_t magic2,
+                          uint64_t command, uint64_t a3, uint64_t a4, uint64_t a5) {
+    if (magic != 0xfee1dead) {
+        return -LE_EINVAL;
+    }
+    (void)magic2;
+    switch ((uint32_t)command) {
+    case 0x01234567: power_restart();       /* RESTART */
+    case 0x4321fedc:                        /* POWER_OFF */
+    case 0xcdef0123: power_off();           /* HALT */
+    }
+    return -LE_EINVAL;
 }
 
 static int64_t sys_sysinfo(struct interrupt_frame *f, uint64_t out, uint64_t a1, uint64_t a2,
@@ -3531,8 +3561,8 @@ static const linux_fn syscalls[] = {
     CALL(sync, sys_accept_quietly),
     CALL(mount, sys_not_permitted),
     CALL(umount2, sys_not_permitted),
-    CALL(reboot, sys_not_permitted),
-    CALL(sethostname, sys_not_permitted),
+    CALL(reboot, sys_reboot),
+    CALL(sethostname, sys_sethostname),
     CALL(gettid, sys_gettid),
     CALL(tkill, sys_tkill),
     CALL(time, sys_time),

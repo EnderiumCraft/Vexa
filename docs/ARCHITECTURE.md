@@ -220,6 +220,24 @@ PACKET command), as `cd0`... with 2048-byte sectors.
   an absolute path: `XTerm.vxapp` runs `/linux/usr/bin/xsession`, and is left out
   when the Linux files aren't there. The desktop looks at `/apps` every two seconds,
   so copying a bundle there installs an app and removing it uninstalls it.
+- **Settings** are `key=value` files in `/etc` (`desktop.conf`, `apps.conf`, `hostname`),
+  read and written through `<vexa/settings.h>`, which also copies them to
+  `.vexa/etc` on the first writable ext2 disk; `vinit` copies them back at boot. The
+  Settings app saves a change and sends `DESKTOP_RELOAD`; the desktop reads the file
+  again, changes what changed (the wallpaper, the display's mode, key repeat, the
+  menu), and sends every program `DESKTOP_THEME`, on which libvexa reads the theme
+  again (`vx_theme`, dark or light with an accent color) and `vx_gui_wait` returns
+  `VX_GUI_THEME` so the program draws itself again. Time zones (`<vexa/time.h>`) are a
+  table of cities with their offsets and summer time rules.
+- **The display** (`/dev/display0`) is the boot frame buffer; on QEMU's and Bochs's
+  standard VGA (PCI 1234:1111) the holder can also set its mode (`VX_DISPLAY_MODES`,
+  `VX_DISPLAY_SET_MODE`, through the card's DISPI registers), and the first mode comes
+  back when it lets go. The desktop can also draw everything twice as big: it composes
+  at half the size and doubles the pixels as it copies them out.
+- **Power** (`kernel/src/core/power.c`): turning off enters ACPI's S5 state (the PM1
+  control registers from the FADT, the sleep type from the DSDT's `\_S5_` package,
+  found by its name), with the ports virtual machines use as a fallback; restarting
+  pulses the reset line. Native programs call `vx_power`; Linux programs `reboot()`.
 - **Files** keeps its pictures (kinds of files, places) in its own bundle
   (`Files.vxapp/Contents/Resources`), makes thumbnails of pictures one at a time when
   it has nothing else to do, and works on whole folders with `<vexa/files.h>` (`vx_copy_tree`,

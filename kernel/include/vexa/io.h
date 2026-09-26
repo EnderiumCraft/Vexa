@@ -13,6 +13,16 @@ static inline uint8_t inb(uint16_t port) {
     return value;
 }
 
+static inline void outw(uint16_t port, uint16_t value) {
+    __asm__ volatile("outw %0, %1" : : "a"(value), "Nd"(port) : "memory");
+}
+
+static inline uint16_t inw(uint16_t port) {
+    uint16_t value;
+    __asm__ volatile("inw %1, %0" : "=a"(value) : "Nd"(port) : "memory");
+    return value;
+}
+
 __attribute__((noreturn)) static inline void cpu_halt_forever(void) {
     for (;;) {
         __asm__ volatile("cli; hlt");

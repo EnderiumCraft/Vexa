@@ -100,6 +100,9 @@ Vexa's own programs are in `/bin` (`ls /bin` lists them).
 | `sleep seconds` | waits (fractions allowed: `sleep 0.5`) |
 | `uptime` | time since boot, CPUs and memory |
 | `hello` | says hi, with Vexa's version |
+| `hostname [name]` | the computer's name; sets it with a name |
+| `df` | the mounted file systems, and how full they are |
+| `shutdown`, `shutdown -r` | turns the machine off (ACPI), or restarts it |
 | `clear` | clears the screen |
 | `sys [command]` | the kernel monitor's commands: `sys disks`, `sys mount`, `sys pci`, `sys cpu`, `sys mem`, `sys memmap`, `sys memtest`, `sys threads`; `sys` alone lists them |
 
@@ -168,6 +171,8 @@ Ctrl+Alt+Q goes back to the text console.
   console"; each shows its keyboard shortcut
 - a **button for each window**: a click shows it (or minimizes it, if it's in front)
 - the **clock** (Settings changes its format and time zone)
+
+The Vexa menu also has **Restart...**, **Shut Down...** and **Back to the console**.
 
 **Desktop icons** on the left start apps with a double click: Terminal, Files, Editor,
 Settings and XTerm. A **right click** on the desktop opens a menu (New Terminal, Open
@@ -304,23 +309,53 @@ Trash.
 
 ## Settings
 
-Settings (in the menu, or a right click on the desktop, "Change Wallpaper...") has:
+Settings (in the Vexa menu, or a right click on the desktop, "Change Wallpaper...")
+works like System Settings on macOS: the sections are in the sidebar, the search field
+above them finds a setting by name ("clock", "double click"; typing anywhere starts a
+search), and every change applies as it's made: the desktop and every open app follow
+at once. `settings Display` opens a section directly.
 
-- **Wallpaper**: a picture (the default is `/share/pictures/meadow.png`; type the path
-  of any PNG, BMP or PPM file) or one of five gradients (Dusk, Ocean, Forest, Sunset,
-  Graphite)
-- **Clock**: 24-hour or 12-hour
-- **Time zone**: an offset from UTC, in half hours
+| Section | What's there |
+| --- | --- |
+| **Appearance** | Dark or Light, and the accent color (Purple, Blue, Teal, Green, Orange, Pink, Red, Graphite): the panel, menus, title bars and Vexa's apps follow; the terminal stays dark |
+| **Wallpaper** | the pictures in `/share/pictures` (as thumbnails), five gradients, how a picture fits (Fill, Fit, Center, Tile, Stretch), and any other PNG, BMP or PPM file by its path |
+| **Desktop & Panel** | desktop icons on or off, and which apps have one; the clock (24 or 12 hours, the weekday, the date, seconds); snapping windows to the edges; what a double click on a title bar does (maximize, minimize, nothing); how long notifications stay |
+| **Date & Time** | the time now, and the time zone: a city (54 of them) from a list, with summer time handled by itself (the European, North American, Australian and New Zealand rules) |
+| **Mouse & Keyboard** | pointer speed, double click speed (with a place to try it), natural scrolling, left-handed buttons; the keyboard layout (US, UK, German, French, Spanish, Dvorak), how soon and how fast a held key repeats; the keyboard shortcuts |
+| **Display** | the resolution (a list of sizes, on QEMU's and Bochs's standard VGA; elsewhere the firmware's size) and the scale (everything twice as big); after a change, "Keep" it, or it goes back by itself in 15 seconds |
+| **Default Apps** | which app opens each kind of file (`.png`, `.txt`, `.c`...) |
+| **Startup** | whether a terminal opens when the desktop starts, and which apps open with it |
+| **Network** | the computer's name (Linux programs see it too), and each interface's address, router, DNS server, hardware address and traffic |
+| **Storage** | each disk and file system with how full it is, and where settings are kept |
+| **About** | the version, the computer's name, CPUs, memory, time since boot, the display, and Restart and Shut Down |
 
-Apply saves them in `/etc/desktop.conf` and the desktop changes at once. The file is
-plain text:
+**Where settings live.** In plain text files in `/etc`: `desktop.conf` (most of them),
+`apps.conf` (default apps) and `hostname`:
 
 ```
+theme=light
+accent=blue
 wallpaper=image
 wallpaper_image=/share/pictures/meadow.png
+wallpaper_mode=fill
+time_zone=Berlin
 clock=24
-utc_offset=120
+pointer_speed=5
+keyboard_layout=de
+display_width=1920
+display_height=1080
 ```
+
+`/etc` is in memory, so when Vexa has a disk it can write to (the first writable ext2
+disk), Settings also keeps a copy there, in `.vexa/etc`, and Vexa puts them back when
+it starts. Without a disk, settings last until Vexa restarts. Storage says which.
+
+**Keyboard layouts.** Vexa's own apps type the ASCII characters of the layout (the
+screen font has no others: a German keyboard's ü types nothing yet); X programs get the
+whole layout, through XKB. The text console (outside the desktop) stays US.
+
+**Restarting and turning off.** The Vexa menu has **Restart...** and **Shut Down...**
+(each asks first), and so does About; from the shell, `shutdown` and `shutdown -r`.
 
 ## Linux programs
 

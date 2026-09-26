@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <vexa/app.h>
+#include <vexa/settings.h>
 #include <vexa/syscall.h>
 
 /* Apps: .vxapp bundles (see <vexa/app.h>). */
@@ -190,6 +191,15 @@ int vx_app_for_file(const char *path, struct vx_app *app) {
     if (dot && dot != base && strlen(dot + 1) < sizeof(extension)) {
         for (int i = 0; dot[1 + i]; i++) {
             extension[i] = (char)tolower((unsigned char)dot[1 + i]);
+        }
+    }
+    /* The one chosen for this kind of file (Settings, Default Apps). */
+    if (extension[0]) {
+        struct vx_settings chosen;
+        vx_settings_load(&chosen, VX_APP_DEFAULTS);
+        const char *name = vx_settings_get(&chosen, extension, NULL);
+        if (name && vx_app_find(name, app) == 0) {
+            return 0;
         }
     }
     struct vx_app *apps = malloc(MAX_APPS * sizeof(*apps));

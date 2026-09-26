@@ -240,6 +240,10 @@ int main(void) {
 - Pictures: `vx_image_load` (PNG, BMP, PPM), `vx_blit_scaled`, and with `VX_IMAGE_ALPHA`,
   `vx_blit_alpha` for icons with transparency.
 - `vx_notify("App: something happened")` shows a desktop notification.
+- Use the `VX_COLOR_*` colors (or `vx_theme`) rather than your own, and draw again on
+  `VX_GUI_THEME`: then the app follows Settings' dark and light themes and accent.
+- Settings of your own go in a file in `/etc` through `<vexa/settings.h>`: they're
+  kept on disk like the system's.
 
 The desktop's own apps in `userland/` (`about` is the smallest, `files` the largest)
 are complete examples.

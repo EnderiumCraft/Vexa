@@ -31,6 +31,7 @@
 #include <vexa/files.h>
 #include <vexa/font.h>
 #include <vexa/gui.h>
+#include <vexa/settings.h>
 #include <vexa/syscall.h>
 
 #define WIDTH 780
@@ -43,7 +44,7 @@
 #define CELL_W 104
 #define CELL_H 90
 #define MAX_ENTRIES 1024
-#define DOUBLE_CLICK_MS 500
+#define DOUBLE_CLICK_MS double_click_ms /* Settings, Mouse & Keyboard. */
 #define TRASH "/Trash"
 #define CLIPBOARD "/tmp/.files-clipboard"
 #define RESOURCES "/apps/Files.vxapp/Contents/Resources"
@@ -83,6 +84,13 @@ static bool show_hidden;
 static enum { SORT_NAME, SORT_KIND, SORT_SIZE, SORT_MODIFIED } sort_by;
 static bool sort_down; /* Reversed. */
 static bool ctrl, shift, alt;
+static int double_click_ms = 500;
+
+static void read_settings(void) {
+    struct vx_settings s;
+    vx_settings_load(&s, "desktop.conf");
+    double_click_ms = vx_settings_int(&s, "double_click_ms", 500);
+}
 
 static char message[200];
 static long message_ms;
@@ -1256,7 +1264,7 @@ static void draw_list(struct vx_surface *s) {
         int x, y, cw, ch;
         cell(i, &x, &y, &cw, &ch);
         if (i % 2) {
-            vx_fill(s, x, y, cw, ch, 0x160e29); /* Stripes. */
+            vx_fill(s, x, y, cw, ch, vx_theme.stripe); /* Stripes. */
         }
         if (item->selected || i == drop_position) {
             vx_fill(s, x + 2, y, cw - 4, ch, i == drop_position ? VX_COLOR_ACCENT : VX_COLOR_SELECTED);
@@ -1294,7 +1302,7 @@ static void draw_icons(struct vx_surface *s) {
         }
         bool hot = item->selected || i == drop_position;
         if (hot) {
-            vx_fill(s, x + 22, y + 4, 60, 58, i == drop_position ? VX_COLOR_ACCENT : 0x2c1d4a);
+            vx_fill(s, x + 22, y + 4, 60, 58, i == drop_position ? VX_COLOR_ACCENT : VX_COLOR_BUTTON);
         }
         struct vx_image *thumb = item->thumb;
         if (thumb) {
@@ -1343,7 +1351,7 @@ static void draw_icons(struct vx_surface *s) {
 
 static void draw_sidebar(struct vx_surface *s) {
     int h = s->height;
-    vx_fill(s, 0, TOOLBAR, SIDEBAR, h - TOOLBAR - STATUS, 0x140c26);
+    vx_fill(s, 0, TOOLBAR, SIDEBAR, h - TOOLBAR - STATUS, vx_theme.sidebar);
     vx_fill(s, SIDEBAR - 1, TOOLBAR, 1, h - TOOLBAR - STATUS, VX_COLOR_LINE);
     vx_draw_text(s, 12, TOOLBAR + 8, "Places", VX_COLOR_DIM, VX_TRANSPARENT);
     if (place_count > disks_start) {
@@ -1410,7 +1418,7 @@ static void panel_rect(int width, int height, int *x, int *y) {
 static void panel(int width, int height, int *x, int *y) {
     struct vx_surface *s = &window->surface;
     panel_rect(width, height, x, y);
-    vx_fill(s, *x + 4, *y + 4, width, height, 0x06030c);
+    vx_fill(s, *x + 4, *y + 4, width, height, vx_theme.shadow);
     vx_fill(s, *x, *y, width, height, VX_COLOR_WINDOW);
     vx_draw_outline(s, *x, *y, width, height, VX_COLOR_ACCENT);
 }
@@ -2076,6 +2084,7 @@ int main(int argc, char **argv) {
         return 1;
     }
     load_resources();
+    read_settings();
     go_to(argc > 1 ? argv[1] : "/", false);
     int held = 0;
     for (;;) {
@@ -2107,6 +2116,9 @@ int main(int argc, char **argv) {
             break;
         case VX_GUI_POINTER:
             pointer(&e, &held);
+            break;
+        case VX_GUI_THEME:
+            read_settings();
             break;
         case VX_GUI_FOCUS:
             if (!e.value) {

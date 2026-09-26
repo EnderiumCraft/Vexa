@@ -81,6 +81,24 @@
                               shared: writes reach the file (or device) and other mappings */
 #define VX_SYS_RESIZE 55   /* vx_resize(handle, size): a file's new length (zero-filled) */
 #define VX_SYS_TIME 56     /* vx_time(): seconds since 1970-01-01 UTC (0 if the clock is unknown) */
+#define VX_SYS_POWER 57    /* vx_power(VX_POWER_*): restart or turn off the machine */
+#define VX_SYS_MOUNTS 58   /* vx_mounts(struct vx_mount_info *, count) -> how many are mounted */
+#define VX_SYS_HOSTNAME 59 /* vx_hostname(char *buffer, size, const char *new or NULL,
+                              length): the computer's name (sets it first if `new`) */
+
+/* vx_power actions. */
+#define VX_POWER_RESTART 1
+#define VX_POWER_OFF 2
+
+/* A mounted file system: where, from what, and how full. */
+struct vx_mount_info {
+    char path[64];
+    char source[32];     /* The disk ("vda1", "cd0"), or "tmpfs", "proc"... */
+    char type[16];       /* "ext2", "iso9660", "tmpfs"... */
+    unsigned long long total, free; /* Bytes (0 if it doesn't say). */
+    unsigned int read_only;
+    unsigned int reserved;
+};
 
 #define VX_MAP_WRITE 0x1
 #define VX_MAP_EXEC 0x2
@@ -285,8 +303,14 @@ struct vx_input_event {
 
 /* vx_control requests for input devices. */
 #define VX_INPUT_INFO 0x4901 /* struct vx_input_info (out) */
+#define VX_INPUT_SET_REPEAT 0x4903 /* struct vx_key_repeat (in): a keyboard's repeat */
 #define VX_INPUT_GRAB 0x4902 /* int (in): 1 = only this handle gets the events (for a
                                 keyboard, the terminal stops getting keys); 0 = release */
+
+struct vx_key_repeat {
+    unsigned int delay_ms; /* Before a held key repeats: 250 to 1000. */
+    unsigned int rate;     /* Then repeats a second: 2 to 30. */
+};
 
 struct vx_input_info {
     char name[64];
@@ -301,6 +325,23 @@ struct vx_input_info {
  * pixels. */
 #define VX_DISPLAY_INFO 0x4401    /* struct vx_display_info (out) */
 #define VX_DISPLAY_ACQUIRE 0x4402 /* no argument: -VX_EBUSY if someone else has it */
+#define VX_DISPLAY_MODES 0x4403   /* struct vx_display_modes (out): the sizes it can be */
+#define VX_DISPLAY_SET_MODE 0x4404 /* struct vx_display_mode (in): only the holder; then
+                                     VX_DISPLAY_INFO again, and map the frame buffer again.
+                                     The first mode comes back when the display is let go. */
+
+struct vx_display_mode {
+    unsigned int width, height;
+};
+
+/* Mode setting needs a display the kernel drives (QEMU's and Bochs's
+ * standard VGA); otherwise only the size the firmware set is listed. */
+#define VX_DISPLAY_MAX_MODES 24
+struct vx_display_modes {
+    unsigned int count;
+    unsigned int current; /* Which of them is in use. */
+    struct vx_display_mode modes[VX_DISPLAY_MAX_MODES];
+};
 
 struct vx_display_info {
     unsigned int width, height; /* Pixels. */

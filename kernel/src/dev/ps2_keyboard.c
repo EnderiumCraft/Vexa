@@ -62,9 +62,12 @@ static struct wait_queue key_waiters = WAIT_QUEUE_INIT;
 /* Keys also go out as input events (/dev/input/event0), with Linux's key
  * codes: for the keys of scancode set 1, the code is the scancode itself;
  * extended (E0) keys have their own. */
+static int set_repeat(const struct vx_key_repeat *repeat);
+
 static struct input_device keyboard_device = {
     .name = "PS/2 keyboard",
     .capabilities = VX_INPUT_KEYS,
+    .set_repeat = set_repeat,
 };
 static uint8_t keys_down[256 / 8];
 
@@ -138,6 +141,34 @@ bool ps2_write(uint8_t value) {
     }
     outb(PS2_DATA, value);
     return true;
+}
+
+/* The keyboard's typematic rate and delay (command 0xF3): the rate, in
+ * tenths of a key a second, for each of the 32 settings. */
+static const uint16_t typematic_rates[32] = {
+    300, 267, 240, 218, 207, 185, 171, 160, 150, 133, 120, 109, 100, 92, 86, 80,
+    75, 67, 60, 55, 50, 46, 43, 40, 37, 33, 30, 27, 25, 23, 21, 20,
+};
+
+static int set_repeat(const struct vx_key_repeat *repeat) {
+    if (repeat->delay_ms < 250 || repeat->delay_ms > 1000 || repeat->rate < 2 ||
+        repeat->rate > 30) {
+        return -VX_EINVAL;
+    }
+    uint8_t delay = (uint8_t)((repeat->delay_ms - 125) / 250); /* 250, 500, 750, 1000 */
+    uint8_t rate = 31;
+    for (uint8_t i = 0; i < 32; i++) {
+        if (typematic_rates[i] <= repeat->rate * 10) {
+            rate = i; /* The fastest that isn't faster than asked. */
+            break;
+        }
+    }
+    /* The keyboard acknowledges each byte; the interrupt handler drops the
+     * acknowledgements. */
+    if (!ps2_write(0xf3) || !ps2_write((uint8_t)(delay << 5 | rate))) {
+        return -VX_EIO;
+    }
+    return 0;
 }
 
 static void (*consumer)(int key);

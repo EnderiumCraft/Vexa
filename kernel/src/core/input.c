@@ -171,6 +171,11 @@ static int event_control(struct file *file, uint32_t request, void *arg, size_t 
         spin_unlock_irqrestore(&device->lock, flags);
         return error;
     }
+    case VX_INPUT_SET_REPEAT:
+        if (size < sizeof(struct vx_key_repeat)) {
+            return -VX_EINVAL;
+        }
+        return device->set_repeat ? device->set_repeat(arg) : -VX_ENOTTY;
     default:
         return -VX_ENOTTY;
     }

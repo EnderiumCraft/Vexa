@@ -9,6 +9,7 @@
 #include <vexa/io.h>
 #include <vexa/keyboard.h>
 #include <vexa/kprintf.h>
+#include <vexa/power.h>
 #include <vexa/memtest.h>
 #include <vexa/mm.h>
 #include <vexa/pci.h>
@@ -53,6 +54,7 @@ static void cmd_mount(const char *args);
 static void cmd_disks(const char *args);
 static void cmd_pci(const char *args);
 static void cmd_reboot(const char *args);
+static void cmd_poweroff(const char *args);
 static void run_line(char *line);
 
 static const struct command commands[] = {
@@ -78,6 +80,7 @@ static const struct command commands[] = {
     {"threads", "", "list threads", cmd_threads},
     {"ps", "", "list processes", cmd_ps},
     {"reboot", "", "restart the machine", cmd_reboot},
+    {"poweroff", "", "turn the machine off", cmd_poweroff},
 };
 
 #define COMMAND_COUNT (sizeof(commands) / sizeof(commands[0]))
@@ -467,16 +470,12 @@ static void cmd_ps(const char *args) {
 
 static void cmd_reboot(const char *args) {
     (void)args;
-    kprintf("Rebooting...\n");
-    interrupts_disable();
-    outb(0x64, 0xfe); /* Pulse the reset line through the PS/2 controller. */
-    /* If that did nothing, load an empty IDT and fault: the CPU resets. */
-    struct __attribute__((packed)) {
-        uint16_t limit;
-        uint64_t base;
-    } empty_idt = {0, 0};
-    __asm__ volatile("lidt %0; int3" : : "m"(empty_idt));
-    cpu_halt_forever();
+    power_restart();
+}
+
+static void cmd_poweroff(const char *args) {
+    (void)args;
+    power_off();
 }
 
 void monitor_command(const char *text) {

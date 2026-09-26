@@ -10,7 +10,7 @@
 #include <vexa/syscall.h>
 
 #define STATUS 22
-#define BACKGROUND 0x0e0818
+#define BACKGROUND (vx_theme.dark ? 0x0e0818u : 0xe8e6eeu)
 
 static struct vx_window *window;
 static struct vx_image *image;

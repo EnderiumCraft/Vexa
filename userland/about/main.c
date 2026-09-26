@@ -13,12 +13,12 @@
 #define LEFT 20
 #define VALUE_LEFT 130
 
-#define COLOR_BACKGROUND 0x160d26
-#define COLOR_TITLE 0xcca6ff
-#define COLOR_LABEL 0x8a80a3
-#define COLOR_TEXT 0xe4dcf2
-#define COLOR_BAR 0x2c1d4a
-#define COLOR_BAR_USED 0xb07cff
+#define COLOR_BACKGROUND VX_COLOR_WINDOW
+#define COLOR_TITLE VX_COLOR_ACCENT
+#define COLOR_LABEL VX_COLOR_DIM
+#define COLOR_TEXT VX_COLOR_TEXT
+#define COLOR_BAR VX_COLOR_BUTTON
+#define COLOR_BAR_USED VX_COLOR_ACCENT
 
 static void draw_big(struct vx_surface *s, int x, int y, const char *text, int scale,
                      uint32_t color) {

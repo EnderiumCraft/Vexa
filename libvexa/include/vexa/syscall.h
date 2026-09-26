@@ -90,6 +90,13 @@ long vx_resize(int handle, unsigned long size);
 
 /* The system. */
 long vx_system_info(struct vx_system_info *info);
+/* Restarts or turns off the machine (VX_POWER_RESTART, VX_POWER_OFF). */
+long vx_power(int action);
+/* The mounted file systems (fills at most `count`); returns how many there are. */
+long vx_mounts(struct vx_mount_info *mounts, size_t count);
+/* The computer's name, and changing it (letters, digits, '-' and '.'). */
+long vx_get_hostname(char *buffer, size_t size);
+long vx_set_hostname(const char *name);
 long vx_kernel_command(const char *command);
 
 /* A short description of a (negative) VX_E* error. */

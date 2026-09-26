@@ -60,11 +60,29 @@ EXPECTED_BOOT_LEGACY = [
 # goes to the QEMU monitor instead (to move the mouse, say), and "@type ..."
 # is typed without waiting for vsh's prompt first. ("#name",) starts a
 # section, which --only picks.
-TYPED_COMMANDS = [
+def move(x0, y0, x1, y1):
+    """Mouse moves from (x0, y0) to (x1, y1), in steps QEMU takes whole."""
+    dx, dy, steps = x1 - x0, y1 - y0, []
+    while dx or dy:
+        sx, sy = max(-250, min(250, dx)), max(-250, min(250, dy))
+        steps.append((f"@mouse_move {sx} {sy}", None, 3))
+        dx, dy = dx - sx, dy - sy
+    return steps
+
+
+def click(x0, y0, x1, y1, expected=None, timeout=15):
+    """Moves there and clicks the left button."""
+    return move(x0, y0, x1, y1) + [("@mouse_button 1", expected, timeout),
+                                   ("@mouse_button 0", None, 3)]
+
+
+TYPED_COMMANDS = ([
     ("#shell",),
     ("help", "run in the background", 10),
     ("hello", "hi :)", 10),
     ("uptime", "MiB memory free", 10),
+    ("hostname vexa-test", "vexa-test", 10, 2),
+    ("df", "iso9660", 10),
     ("ls /", "README.txt", 10),
     ("ls /bin", "vsh", 10, 2),
     ("cat /etc/motd", "Welcome to Vexa", 10, 2),
@@ -205,6 +223,23 @@ TYPED_COMMANDS = [
     ("@mouse_move -245 -148", None, 5),
     ("@mouse_move -245 -147", None, 5),
     ("@mouse_move -245 -147", None, 5),
+    # Settings (from the Vexa menu; window 7, at 272,49): the light theme
+    # (every window changes), dark again, a time zone, and 1024x768 (which
+    # goes back by itself after 15 seconds), then closed.
+    ] + click(40, 150, 31, 13, "desktop: left button at 31,13") + [
+    ("@mouse_move 0 100", None, 3),
+    ("@mouse_button 1", None, 3),
+    ("@mouse_button 0", 'desktop: window 7 "Settings"', 20),
+    ] + click(31, 113, 756, 190, "desktop: settings reloaded (light, purple)", 20)
+      + click(756, 190, 576, 190, "desktop: settings reloaded (dark, purple)", 20)
+      + click(576, 190, 372, 218, "settings: showing Date & Time")
+      + click(372, 218, 706, 392, "settings: time_zone=Denver")
+      + click(706, 392, 372, 286, "settings: showing Display")
+      + click(372, 286, 769, 154, "desktop: display now 1024x768", 30) + [
+    ("@mouse_move 0 0", "settings: display=back as it was", 40),
+    ("@mouse_move 0 0", "desktop: display now 1280x800", 30),
+    ] + click(769, 154, 1122, 38, "desktop: asked window 7 to close")
+      + move(1122, 38, 40, 150) + [
     # Dragging the terminal by its title bar to the left edge: half the screen.
     ("@mouse_move 280 -15", None, 5),
     ("@mouse_move 280 -15", None, 5),
@@ -216,7 +251,7 @@ TYPED_COMMANDS = [
     ("@sendkey ctrl-alt-q", "desktop: back to the console", 20),
     ("#shell",),
     ("Hello Vexa", "Hello: command not found", 10),
-]
+])
 
 # The Linux subsystem: BusyBox (built from source with musl) from vsh, then
 # its shell, with fork, exec, pipes, Ctrl-C and signal handlers. Typed before
@@ -227,6 +262,7 @@ LINUX_COMMANDS = [
     ("#linux",),
     ("busybox echo hello from linux", "hello from linux", 20, 2),
     ("busybox uname -sr", "Vexa 6.1.0-vexa", 20),
+    ("busybox uname -n", "vexa-test", 20, 3),  # The name `hostname` gave it.
     ("busybox sh -c 'echo answer $((6*7))'", "answer 42", 20),
     ("export PS1='\\166exa:bb# '", None, 10),  # "vexa:bb# ", so prompts are counted
     ("busybox sh", "vexa:bb# ", 20),

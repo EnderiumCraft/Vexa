@@ -63,6 +63,7 @@ enum vx_gui_event_type {
     VX_GUI_CLOSE = 3,   /* The user asked to close the window. */
     VX_GUI_FOCUS = 4,   /* value: 1 gained, 0 lost */
     VX_GUI_RESIZE = 5,  /* width, height: what the user asked for (see vx_window_resize) */
+    VX_GUI_THEME = 6,   /* The theme changed (vx_theme has the new one): draw again. */
 };
 
 struct vx_gui_event {
@@ -81,17 +82,55 @@ int vx_gui_wait(struct vx_gui_event *event, long timeout_ms);
 int vx_gui_handle(void);
 
 
-/* ---- A few widgets' worth of drawing (the look of Vexa's own apps) ---- */
+/* ---- The theme: Vexa's look, dark or light, with an accent color ----
+ *
+ * Settings (Appearance) chooses them ("theme" and "accent" in
+ * /etc/desktop.conf); every window follows at once: the desktop tells the
+ * programs, libvexa reads the theme again, and vx_gui_wait returns a
+ * VX_GUI_THEME event so the program draws itself again. */
 
-#define VX_COLOR_WINDOW 0x1a1030     /* Backgrounds. */
-#define VX_COLOR_VIEW 0x120b22       /* Lists and text areas. */
-#define VX_COLOR_TEXT 0xe4dcf2
-#define VX_COLOR_DIM 0x8a80a3
-#define VX_COLOR_ACCENT 0xb07cff
-#define VX_COLOR_SELECTED 0x5b3a96
-#define VX_COLOR_BUTTON 0x2c1d4a
-#define VX_COLOR_BUTTON_HOT 0x3f2a66
-#define VX_COLOR_LINE 0x3a2a5c
+struct vx_theme {
+    bool dark;
+    uint32_t window;     /* Backgrounds. */
+    uint32_t view;       /* Lists and text areas. */
+    uint32_t text, dim;  /* Text, and less important text. */
+    uint32_t accent;     /* Highlights: the chosen color. */
+    uint32_t selected;   /* Behind what's selected. */
+    uint32_t button, button_hot;
+    uint32_t line;       /* Outlines and separators. */
+    uint32_t sidebar, stripe, shadow;
+    uint32_t panel, menu, title, title_focused, title_text; /* The desktop's. */
+};
+extern struct vx_theme vx_theme;
+
+/* The accent colors to choose from. */
+struct vx_accent {
+    const char *name, *label;
+    uint32_t color;
+};
+extern const struct vx_accent vx_accents[];
+extern const int vx_accent_count;
+
+/* Makes the theme from a theme name ("dark", "light") and an accent name. */
+void vx_theme_make(struct vx_theme *theme, const char *name, const char *accent);
+/* Reads the theme from /etc/desktop.conf into vx_theme (windows do this
+ * themselves when they open, and when it changes). */
+void vx_theme_load(void);
+
+#define VX_COLOR_WINDOW (vx_theme.window)
+#define VX_COLOR_VIEW (vx_theme.view)
+#define VX_COLOR_TEXT (vx_theme.text)
+#define VX_COLOR_DIM (vx_theme.dim)
+#define VX_COLOR_ACCENT (vx_theme.accent)
+#define VX_COLOR_SELECTED (vx_theme.selected)
+#define VX_COLOR_BUTTON (vx_theme.button)
+#define VX_COLOR_BUTTON_HOT (vx_theme.button_hot)
+#define VX_COLOR_LINE (vx_theme.line)
+
+/* Mixes two colors: `amount` of `b` (0 to 255) into `a`. */
+uint32_t vx_mix(uint32_t a, uint32_t b, int amount);
+
+/* ---- A few widgets' worth of drawing (the look of Vexa's own apps) ---- */
 
 /* A rectangle's outline, one pixel wide, inside it. */
 void vx_draw_outline(struct vx_surface *s, int x, int y, int width, int height, uint32_t color);

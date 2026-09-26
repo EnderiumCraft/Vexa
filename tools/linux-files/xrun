@@ -6,7 +6,14 @@
 display=${DISPLAY:-:0}
 socket=/tmp/.X11-unix/X${display#:}
 if [ ! -S "$socket" ]; then
-    Xvexa "$display" -rootless -noreset &
+    # The keyboard layout Settings chose (X programs get all of it, through XKB).
+    layout=$(sed -n 's/^keyboard_layout=//p' /etc/desktop.conf 2>/dev/null)
+    case "$layout" in
+        "" | us) xkb= ;;
+        dvorak) xkb="-xkb-layout us -xkb-variant dvorak" ;;
+        *) xkb="-xkb-layout $layout" ;;
+    esac
+    Xvexa "$display" -rootless -noreset $xkb &
     # Wait for the server's socket.
     for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
         [ -S "$socket" ] && break

@@ -22,6 +22,8 @@ struct input_device {
     struct spinlock lock;
     struct input_client *clients;
     struct input_client *grab; /* Only this client gets events, if set. */
+    /* Optional: how a held key repeats (VX_INPUT_SET_REPEAT). */
+    int (*set_repeat)(const struct vx_key_repeat *repeat);
 };
 
 /* Adds the device and its /dev/input/eventN. */

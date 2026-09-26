@@ -22,7 +22,9 @@
 #include <vexa/font.h>
 #include <vexa/gui.h>
 #include <vexa/net.h>
+#include <vexa/settings.h>
 #include <vexa/syscall.h>
+#include <vexa/time.h>
 
 #define MAX_WINDOWS 32
 #define MAX_CLIENTS 32
@@ -34,23 +36,45 @@
 #define BUTTON_WIDTH 20 /* The title bar's buttons. */
 #define MIN_WIDTH 120
 #define MIN_HEIGHT 60
-#define DOUBLE_CLICK_MS 500
+#define DOUBLE_CLICK_MS setting_double_click
 
-#define COLOR_PANEL 0x140c24
-#define COLOR_PANEL_LINE 0x3a2a5c
-#define COLOR_PANEL_TEXT 0xe4dcf2
-#define COLOR_PANEL_DIM 0x8a80a3
-#define COLOR_BUTTON 0x2c1d4a
-#define COLOR_BUTTON_HOT 0x5b3a96
-#define COLOR_BUTTON_OFF 0x1c1230
-#define COLOR_TITLE 0x2c1d4a
-#define COLOR_TITLE_FOCUSED 0x5b3a96
-#define COLOR_TITLE_TEXT 0xe4dcf2
-#define COLOR_BORDER 0x3a2a5c
+/* The theme (Settings, Appearance: <vexa/gui.h>). */
+#define COLOR_PANEL (vx_theme.panel)
+#define COLOR_PANEL_LINE (vx_theme.line)
+#define COLOR_PANEL_TEXT (vx_theme.text)
+#define COLOR_PANEL_DIM (vx_theme.dim)
+#define COLOR_BUTTON (vx_theme.button)
+#define COLOR_BUTTON_HOT (vx_theme.selected)
+#define COLOR_BUTTON_OFF (vx_theme.menu)
+#define COLOR_TITLE (vx_theme.title)
+#define COLOR_TITLE_FOCUSED (vx_theme.title_focused)
+#define COLOR_TITLE_TEXT (vx_theme.title_text)
+#define COLOR_BORDER (vx_theme.line)
 #define COLOR_CLOSE 0xff6b81
-#define COLOR_OUTLINE 0xb07cff
-#define COLOR_MENU 0x1c1230
-#define COLOR_MENU_HOT 0x5b3a96
+#define COLOR_OUTLINE (vx_theme.accent)
+#define COLOR_MENU (vx_theme.menu)
+#define COLOR_MENU_HOT (vx_theme.selected)
+
+/* ---- Settings (DESKTOP_CONFIG: Settings writes it, <vexa/settings.h>) ---- */
+
+static struct vx_settings config;
+static char setting_wallpaper[32] = "image";
+static char setting_image[256] = DESKTOP_DEFAULT_WALLPAPER;
+static char setting_wallpaper_mode[16] = "fill"; /* fill, fit, center, tile, stretch */
+static int setting_clock = 24;                   /* Hours. */
+static bool setting_clock_seconds, setting_clock_date = true, setting_clock_weekday = true;
+static bool setting_icons = true;       /* Icons on the desktop. */
+static char setting_icon_apps[256];     /* Which ("Terminal,Files"; empty: as the apps say). */
+static int setting_note_ms = 4000;      /* How long notifications stay. */
+static bool setting_snapping = true;
+static char setting_title_click[16] = "maximize"; /* A double click on a title bar. */
+static int setting_pointer_speed = 5;   /* 1 to 10; 5 moves as the mouse says. */
+static int setting_double_click = 500;  /* Milliseconds between the clicks. */
+static bool setting_natural_scroll, setting_left_handed;
+static char setting_layout[16] = "us";  /* The keyboard layout. */
+static int setting_key_delay = 500, setting_key_rate = 20;
+static int setting_width, setting_height; /* The display's mode (0: as it started). */
+static int setting_scale = 1;           /* 2: everything twice as big. */
 
 struct rect {
     int x, y, width, height;
@@ -102,7 +126,6 @@ static bool menu_open;
 
 /* Notifications: up to three at a time, each for a few seconds. */
 #define MAX_NOTES 3
-#define NOTE_MS 4000
 #define NOTE_WIDTH 320
 #define NOTE_HEIGHT 44
 static struct note {
@@ -177,7 +200,7 @@ static struct rect work_area(void) {
 enum menu_action {
     RUN_APP,       /* An app from /apps (see <vexa/app.h>). */
     RUN_LINUX_APP, /* An X program from /linux/usr/share/applications, through xrun. */
-    SEPARATOR, LEAVE
+    SEPARATOR, LEAVE, RESTART, POWER_OFF
 };
 
 /* The apps in /apps, and their icons. */
@@ -362,6 +385,8 @@ static void build_menu(void) {
     qsort(menu_items + first, (size_t)(menu_item_count - first), sizeof(menu_items[0]),
           compare_labels);
     add_menu_item("", "", SEPARATOR);
+    add_menu_item("Restart...", "", RESTART);
+    add_menu_item("Shut Down...", "", POWER_OFF);
     add_menu_item("Back to the console", "Ctrl+Alt+Q", LEAVE);
 }
 
@@ -385,11 +410,42 @@ static int windows_by_id(struct window **out) {
     return n;
 }
 
-#define CLOCK_WIDTH (21 * FONT_WIDTH)
+/* The clock's text, in the time zone and format from the settings: false
+ * if the time isn't known. */
+static bool clock_text(char *out, size_t size) {
+    long now = vx_time();
+    if (now <= 0) {
+        return false;
+    }
+    const struct vx_zone *zone = vx_find_zone(vx_settings_get(&config, "time_zone", NULL));
+    int offset = zone ? vx_zone_offset(zone, now) : vx_settings_int(&config, "utc_offset", 0);
+    struct vx_date d;
+    vx_date_of(now + offset * 60L, &d);
+    char date[24] = "", time[24];
+    if (setting_clock_weekday && setting_clock_date) {
+        snprintf(date, sizeof(date), "%.3s %d %.3s  ", vx_weekday_names[d.weekday], d.day,
+                 vx_month_names[d.month - 1]);
+    } else if (setting_clock_weekday) {
+        snprintf(date, sizeof(date), "%.3s  ", vx_weekday_names[d.weekday]);
+    } else if (setting_clock_date) {
+        snprintf(date, sizeof(date), "%d %.3s  ", d.day, vx_month_names[d.month - 1]);
+    }
+    int hour = setting_clock == 12 ? (d.hour % 12 ? d.hour % 12 : 12) : d.hour;
+    if (setting_clock_seconds) {
+        snprintf(time, sizeof(time), setting_clock == 12 ? "%d:%02d:%02d" : "%02d:%02d:%02d", hour,
+                 d.minute, d.second);
+    } else {
+        snprintf(time, sizeof(time), setting_clock == 12 ? "%d:%02d" : "%02d:%02d", hour, d.minute);
+    }
+    snprintf(out, size, "%s%s%s", date, time, setting_clock == 12 ? (d.hour < 12 ? " am" : " pm") : "");
+    return true;
+}
 
 static struct rect task_button(int index, int count) {
     int left = MENU_BUTTON_WIDTH + 12;
-    int room = screen.width - left - CLOCK_WIDTH - 24;
+    char clock[48] = "";
+    clock_text(clock, sizeof(clock));
+    int room = screen.width - left - (int)strlen(clock) * FONT_WIDTH - 36;
     int width = count ? room / count - 4 : 0;
     if (width > 180) {
         width = 180;
@@ -468,62 +524,82 @@ static uint32_t mix(uint32_t a, uint32_t b, int num, int den) {
     return out;
 }
 
-/* ---- Settings (DESKTOP_CONFIG) ---- */
-
-static char setting_wallpaper[32] = "image";
-static char setting_image[256] = DESKTOP_DEFAULT_WALLPAPER;
-static int setting_clock = 24;     /* Hours. */
-static int setting_utc_offset;     /* Minutes east of UTC. */
-
+/* Reads the settings (at start, and when Settings says they changed). */
 static void read_config(void) {
-    strcpy(setting_wallpaper, "image");
-    strcpy(setting_image, DESKTOP_DEFAULT_WALLPAPER);
-    setting_clock = 24;
-    setting_utc_offset = 0;
-    int handle = vx_open(DESKTOP_CONFIG, VX_OPEN_READ);
-    if (handle < 0) {
-        return;
-    }
-    char text[2048];
-    long n = vx_read(handle, text, sizeof(text) - 1);
-    vx_close(handle);
-    text[n > 0 ? n : 0] = '\0';
-    for (char *line = text, *next; line && *line; line = next) {
-        next = strchr(line, '\n');
-        if (next) {
-            *next++ = '\0';
-        }
-        char *value = strchr(line, '=');
-        if (!value) {
-            continue;
-        }
-        *value++ = '\0';
-        if (!strcmp(line, "wallpaper")) {
-            strncpy(setting_wallpaper, value, sizeof(setting_wallpaper) - 1);
-        } else if (!strcmp(line, "wallpaper_image")) {
-            strncpy(setting_image, value, sizeof(setting_image) - 1);
-        } else if (!strcmp(line, "clock")) {
-            setting_clock = atoi(value) == 12 ? 12 : 24;
-        } else if (!strcmp(line, "utc_offset")) {
-            setting_utc_offset = atoi(value);
+    vx_settings_load(&config, "desktop.conf");
+    vx_theme_load();
+#define TEXT_SETTING(var, key, fallback) \
+    snprintf(var, sizeof(var), "%s", vx_settings_get(&config, key, fallback))
+    TEXT_SETTING(setting_wallpaper, "wallpaper", "image");
+    TEXT_SETTING(setting_image, "wallpaper_image", DESKTOP_DEFAULT_WALLPAPER);
+    TEXT_SETTING(setting_wallpaper_mode, "wallpaper_mode", "fill");
+    TEXT_SETTING(setting_icon_apps, "desktop_apps", "");
+    TEXT_SETTING(setting_title_click, "title_double_click", "maximize");
+    TEXT_SETTING(setting_layout, "keyboard_layout", "us");
+#undef TEXT_SETTING
+    setting_clock = vx_settings_int(&config, "clock", 24) == 12 ? 12 : 24;
+    setting_clock_seconds = vx_settings_bool(&config, "clock_seconds", false);
+    setting_clock_date = vx_settings_bool(&config, "clock_date", true);
+    setting_clock_weekday = vx_settings_bool(&config, "clock_weekday", true);
+    setting_icons = vx_settings_bool(&config, "desktop_icons", true);
+    setting_note_ms = vx_settings_int(&config, "notification_seconds", 4) * 1000;
+    setting_note_ms = setting_note_ms < 1000 ? 1000 : setting_note_ms;
+    setting_snapping = vx_settings_bool(&config, "snapping", true);
+    setting_pointer_speed = vx_settings_int(&config, "pointer_speed", 5);
+    setting_pointer_speed = setting_pointer_speed < 1 ? 1 : setting_pointer_speed > 10 ? 10
+                                                                              : setting_pointer_speed;
+    setting_double_click = vx_settings_int(&config, "double_click_ms", 500);
+    setting_natural_scroll = vx_settings_bool(&config, "natural_scroll", false);
+    setting_left_handed = vx_settings_bool(&config, "left_handed", false);
+    setting_key_delay = vx_settings_int(&config, "key_delay", 500);
+    setting_key_rate = vx_settings_int(&config, "key_rate", 20);
+    setting_width = vx_settings_int(&config, "display_width", 0);
+    setting_height = vx_settings_int(&config, "display_height", 0);
+    setting_scale = vx_settings_int(&config, "display_scale", 1) == 2 ? 2 : 1;
+}
+
+/* Fills a surface with a vertical gradient. */
+static void gradient(struct vx_surface *s, uint32_t top, uint32_t bottom) {
+    for (int y = 0; y < s->height; y++) {
+        uint32_t color = vx_mix(top, bottom, y * 255 / (s->height > 1 ? s->height - 1 : 1));
+        uint32_t *row = s->pixels + (long)y * s->stride;
+        for (int x = 0; x < s->width; x++) {
+            row[x] = color;
         }
     }
 }
 
 static void make_wallpaper(void) {
-    /* An image, scaled to cover the screen... */
+    /* A picture, as the wallpaper mode says: covering the screen (fill),
+     * all of it on the screen (fit), as it is (center), repeated (tile), or
+     * stretched to the screen's shape... */
     struct vx_image *image = !strcmp(setting_wallpaper, "image") && setting_image[0]
                                  ? vx_image_load(setting_image, 0)
                                  : NULL;
     if (image) {
+        const char *mode = setting_wallpaper_mode;
         int iw = image->surface.width, ih = image->surface.height;
-        int w = wallpaper.width, h = iw ? ih * wallpaper.width / iw : wallpaper.height;
-        if (h < wallpaper.height) {
-            h = wallpaper.height;
-            w = iw * wallpaper.height / ih;
+        int sw = wallpaper.width, sh = wallpaper.height;
+        gradient(&wallpaper, 0x202028, 0x08080c); /* Behind a picture that doesn't cover it. */
+        if (!strcmp(mode, "tile")) {
+            for (int y = 0; y < sh; y += ih) {
+                for (int x = 0; x < sw; x += iw) {
+                    vx_blit(&wallpaper, x, y, &image->surface, 0, 0, iw, ih);
+                }
+            }
+        } else if (!strcmp(mode, "center")) {
+            vx_blit(&wallpaper, (sw - iw) / 2, (sh - ih) / 2, &image->surface, 0, 0, iw, ih);
+        } else if (!strcmp(mode, "stretch")) {
+            vx_blit_scaled(&wallpaper, 0, 0, sw, sh, &image->surface);
+        } else {
+            bool fit = !strcmp(mode, "fit");
+            int w = sw, h = iw ? ih * sw / iw : sh;
+            if (fit ? h > sh : h < sh) {
+                h = sh;
+                w = iw * sh / ih;
+            }
+            vx_blit_scaled(&wallpaper, (sw - w) / 2, (sh - h) / 2, w, h, &image->surface);
         }
-        vx_blit_scaled(&wallpaper, (wallpaper.width - w) / 2, (wallpaper.height - h) / 2, w, h,
-                       &image->surface);
         vx_image_free(image);
         return;
     }
@@ -534,13 +610,7 @@ static void make_wallpaper(void) {
             choice = &desktop_wallpapers[i];
         }
     }
-    for (int y = 0; y < wallpaper.height; y++) {
-        uint32_t color = mix(choice->top, choice->bottom, y, wallpaper.height);
-        uint32_t *row = wallpaper.pixels + (long)y * wallpaper.stride;
-        for (int x = 0; x < wallpaper.width; x++) {
-            row[x] = color;
-        }
-    }
+    gradient(&wallpaper, choice->top, choice->bottom);
     /* The name, large, in the bottom right corner (a little lighter than the
      * gradient's top). */
     uint32_t text_color = mix(choice->top, 0xffffff, 1, 8);
@@ -610,29 +680,9 @@ static void draw_panel(struct vx_surface *view, int ox, int oy) {
                       w->minimized ? COLOR_PANEL_DIM : COLOR_PANEL_TEXT);
     }
 
-    /* The clock, in the time zone from the settings. */
-    long now = vx_time();
-    if (now > 0) {
-        now += setting_utc_offset * 60L;
-        static const char *const days[] = {"Thu", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed"};
-        static const char *const months[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun",
-                                             "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
-        long day_number = now / 86400, seconds = now % 86400;
-        /* Civil date from days since 1970 (Howard Hinnant's algorithm). */
-        long z = day_number + 719468, era = z / 146097, doe = z - era * 146097;
-        long yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
-        long doy = doe - (365 * yoe + yoe / 4 - yoe / 100), mp = (5 * doy + 2) / 153;
-        long mday = doy - (153 * mp + 2) / 5 + 1, month = mp < 10 ? mp + 3 : mp - 9;
-        char text[32];
-        long hour = seconds / 3600;
-        if (setting_clock == 12) {
-            snprintf(text, sizeof(text), "%s %ld %s  %ld:%02ld %s", days[day_number % 7], mday,
-                     months[month - 1], hour % 12 ? hour % 12 : 12, seconds / 60 % 60,
-                     hour < 12 ? "am" : "pm");
-        } else {
-            snprintf(text, sizeof(text), "%s %ld %s  %02ld:%02ld", days[day_number % 7], mday,
-                     months[month - 1], hour, seconds / 60 % 60);
-        }
+    /* The clock. */
+    char text[48];
+    if (clock_text(text, sizeof(text))) {
         int width = (int)strlen(text) * FONT_WIDTH;
         vx_draw_text(view, ox + screen.width - width - 12, oy + 5, text, COLOR_PANEL_TEXT,
                      VX_TRANSPARENT);
@@ -682,15 +732,31 @@ static void draw_outline(struct vx_surface *view, struct rect r, int thickness, 
 /* The apps with desktop=yes, in the menu's order. */
 static int launcher_apps[MAX_APPS];
 static int launcher_count;
-#define LAUNCHERS launcher_count
+#define LAUNCHERS (setting_icons ? launcher_count : 0)
 #define LAUNCHER_WIDTH 72
 #define LAUNCHER_HEIGHT 72
 static int selected_launcher = -1;
 
+/* True if `list` ("Terminal,Files") has the app's bundle name. */
+static bool listed(const char *list, const struct vx_app *app) {
+    const char *file = strrchr(app->bundle, '/');
+    file = file ? file + 1 : app->bundle;
+    size_t n = strlen(file) - strlen(VX_APP_EXTENSION);
+    for (const char *p = list; *p;) {
+        size_t m = strcspn(p, ",");
+        if (m == n && !strncmp(p, file, n)) {
+            return true;
+        }
+        p += m + (p[m] == ',');
+    }
+    return false;
+}
+
+/* The apps with desktop icons: those Settings chose, or those that ask. */
 static void find_launchers(void) {
     launcher_count = 0;
     for (int i = 0; i < app_count; i++) {
-        if (apps[i].desktop) {
+        if (setting_icon_apps[0] ? listed(setting_icon_apps, &apps[i]) : apps[i].desktop) {
             launcher_apps[launcher_count++] = i;
         }
     }
@@ -737,14 +803,17 @@ static void draw_launchers(struct vx_surface *view, int ox, int oy) {
         /* A shadow keeps the label readable on a picture. */
         vx_draw_text(view, ox + r.x + (r.width - text) / 2 + 1, oy + r.y + 54, label, 0x000000,
                      VX_TRANSPARENT);
-        vx_draw_text(view, ox + r.x + (r.width - text) / 2, oy + r.y + 53, label,
-                     COLOR_PANEL_TEXT, VX_TRANSPARENT);
+        vx_draw_text(view, ox + r.x + (r.width - text) / 2, oy + r.y + 53, label, 0xffffff,
+                     VX_TRANSPARENT); /* White on the picture, in either theme. */
     }
 }
 
 /* ---- The desktop's right-click menu ---- */
 
-enum popup_action { POP_TERMINAL, POP_FILES, POP_SETTINGS, POP_ABOUT, POP_OPEN, POP_SHOW, POP_NONE };
+enum popup_action {
+    POP_TERMINAL, POP_FILES, POP_SETTINGS, POP_ABOUT, POP_OPEN, POP_SHOW, POP_RESTART,
+    POP_POWER_OFF, POP_NONE
+};
 
 #define MAX_POPUP 8
 static struct vx_menu_item popup_items[MAX_POPUP];
@@ -787,6 +856,23 @@ static void open_popup(int launcher) {
     printf("desktop: menu at %d,%d\n", pointer_x, pointer_y);
 }
 
+static void close_popup(void);
+
+/* Restart and Shut Down ask first, with a menu where the click was. */
+static void ask_power(bool restart) {
+    close_popup();
+    popup_count = 0;
+    popup_launcher = -1;
+    popup_add(restart ? "Restart Now" : "Shut Down Now", NULL, restart ? POP_RESTART : POP_POWER_OFF);
+    popup_add(NULL, NULL, POP_NONE);
+    popup_add("Cancel", NULL, POP_NONE);
+    popup_x = pointer_x;
+    popup_y = pointer_y;
+    popup_hot = -1;
+    popup_open = true;
+    add_damage(popup_rect());
+}
+
 static void close_popup(void) {
     if (popup_open) {
         popup_open = false;
@@ -814,7 +900,7 @@ static void add_note(const char *text) {
     struct note *note = &notes[note_count++];
     strncpy(note->text, text, sizeof(note->text) - 1);
     note->text[sizeof(note->text) - 1] = '\0';
-    note->until = vx_uptime() + NOTE_MS;
+    note->until = vx_uptime() + setting_note_ms;
     add_damage(notes_area());
     printf("desktop: notification \"%s\"\n", note->text);
 }
@@ -872,7 +958,7 @@ static void draw_notes(struct vx_surface *view, int ox, int oy) {
 
 /* Where a window dragged to here would go. */
 static enum snap snap_target(void) {
-    if (!dragged || !dragged->resizable) {
+    if (!dragged || !dragged->resizable || !setting_snapping) {
         return SNAP_NONE;
     }
     return pointer_y <= PANEL_HEIGHT + 1 ? SNAP_TOP
@@ -982,6 +1068,22 @@ static void show(struct rect area) {
         area.height = screen.height - area.y;
     }
     bool native = display.red_shift == 16 && display.green_shift == 8 && display.blue_shift == 0;
+    if (setting_scale == 2) { /* Each pixel as four. */
+        for (int row = area.y; row < area.y + area.height; row++) {
+            uint32_t *from = screen.pixels + (long)row * screen.stride + area.x;
+            uint32_t *to = (uint32_t *)((char *)frame + (long)row * 2 * display.pitch) + area.x * 2;
+            for (int i = 0; i < area.width; i++) {
+                uint32_t p = from[i];
+                if (!native) {
+                    p = ((p >> 16) & 0xff) << display.red_shift |
+                        ((p >> 8) & 0xff) << display.green_shift | (p & 0xff) << display.blue_shift;
+                }
+                to[2 * i] = to[2 * i + 1] = p;
+            }
+            memcpy((char *)to + display.pitch, to, (size_t)area.width * 8);
+        }
+        return;
+    }
     for (int row = area.y; row < area.y + area.height; row++) {
         uint32_t *from = screen.pixels + (long)row * screen.stride + area.x;
         uint32_t *to = (uint32_t *)((char *)frame + (long)row * display.pitch) + area.x;
@@ -1348,6 +1450,10 @@ static void drop_client(int client) {
     clients[client].handle = -1;
 }
 
+static bool apply_display(void);
+static void fit_windows(void);
+static void apply_key_repeat(void);
+
 static void client_message(int client) {
     struct desktop_message m;
     long n = vx_read(clients[client].handle, &m, sizeof(m));
@@ -1406,14 +1512,44 @@ static void client_message(int client) {
         m.text[sizeof(m.text) - 1] = '\0';
         add_note(m.text);
         break;
-    case DESKTOP_RELOAD:
+    case DESKTOP_RELOAD: {
+        /* The wallpaper is made again only if it changed (a big picture
+         * takes a while to read). */
+        char before[600];
+        snprintf(before, sizeof(before), "%s|%s|%s", setting_wallpaper, setting_image,
+                 setting_wallpaper_mode);
         read_config();
-        make_wallpaper();
+        char after[600];
+        snprintf(after, sizeof(after), "%s|%s|%s", setting_wallpaper, setting_image,
+                 setting_wallpaper_mode);
+        bool resized = apply_display();
+        if (resized) {
+            /* Something on the screen at once: reading a big picture takes a while. */
+            gradient(&wallpaper, 0x202028, 0x08080c);
+            fit_windows();
+            add_damage((struct rect){0, 0, screen.width, screen.height});
+            redraw_damage();
+        }
+        if (resized || strcmp(before, after)) {
+            make_wallpaper();
+        }
+        apply_key_repeat();
+        set_menu(false);
+        close_popup();
         build_menu();
         find_launchers();
+        /* Every program reads the theme again, and draws itself. */
+        for (int i = 0; i < MAX_CLIENTS; i++) {
+            if (clients[i].handle >= 0) {
+                struct desktop_message theme = {.type = DESKTOP_THEME};
+                send_to(i, &theme);
+            }
+        }
         add_damage((struct rect){0, 0, screen.width, screen.height});
-        printf("desktop: settings reloaded\n");
+        printf("desktop: settings reloaded (%s, %s)\n", vx_theme.dark ? "dark" : "light",
+               vx_settings_get(&config, "accent", "purple"));
         break;
+    }
     case DESKTOP_INFO: {
         struct desktop_message reply = {.type = DESKTOP_INFO_REPLY, .a = screen.width,
                                         .b = screen.height};
@@ -1516,6 +1652,12 @@ static void run_popup_item(int index) {
         }
         break;
     case POP_SHOW: run_named("Files", VX_APPS_DIR); break;
+    case POP_RESTART:
+    case POP_POWER_OFF:
+        printf("desktop: %s\n", popup_actions[index] == POP_RESTART ? "restarting" : "turning off");
+        fflush(stdout);
+        vx_power(popup_actions[index] == POP_RESTART ? VX_POWER_RESTART : VX_POWER_OFF);
+        break;
     case POP_NONE: break;
     }
 }
@@ -1577,6 +1719,10 @@ static void run_menu_item(int index) {
         quit = true;
         return;
     }
+    if (item->action == RESTART || item->action == POWER_OFF) {
+        ask_power(item->action == RESTART);
+        return;
+    }
     if (item->action == RUN_APP) {
         run_app(item->app);
         return;
@@ -1593,16 +1739,94 @@ static void run_menu_item(int index) {
 
 /* ---- Input ---- */
 
-/* What a key types on a US keyboard, by key code (Linux's, 0 to 57). */
-static const char keymap[58] = "\0\x1b" "1234567890-=\b\tqwertyuiop[]\n\0asdfghjkl;'`\0\\zxcvbnm,./\0*\0 ";
-static const char keymap_shift[58] =
-    "\0\x1b" "!@#$%^&*()_+\b\tQWERTYUIOP{}\n\0ASDFGHJKL:\"~\0|ZXCVBNM<>?\0*\0 ";
+/* What a key types, by key code (Linux's, 0 to 86): a US keyboard, and
+ * the other layouts' differences from it. Only ASCII can be typed here (the
+ * font has nothing else); X programs get the whole layout from XKB. */
+#define KEYS 87
+static const char keymap[KEYS] = "\0\x1b" "1234567890-=\b\tqwertyuiop[]\n\0asdfghjkl;'`\0\\zxcvbnm,./\0*\0 "
+                                 "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\\";
+static const char keymap_shift[KEYS] =
+    "\0\x1b" "!@#$%^&*()_+\b\tQWERTYUIOP{}\n\0ASDFGHJKL:\"~\0|ZXCVBNM<>?\0*\0 "
+    "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0|";
 
-static int character_of(int key) {
-    if (key < 0 || key >= (int)sizeof(keymap)) {
+struct key_change {
+    unsigned char key;
+    char normal, shifted, altgr; /* 0: nothing (a letter the font doesn't have). */
+};
+
+static const struct key_change layout_gb[] = {
+    {3, '2', '"', 0}, {4, '3', 0, 0}, {40, '\'', '@', 0}, {41, '`', 0, '|'}, {43, '#', '~', 0},
+    {86, '\\', '|', 0}, {0, 0, 0, 0},
+};
+static const struct key_change layout_de[] = {
+    {3, '2', '"', 0},   {4, '3', 0, 0},     {7, '6', '&', 0},    {8, '7', '/', '{'},
+    {9, '8', '(', '['}, {10, '9', ')', ']'}, {11, '0', '=', '}'}, {12, 0, '?', '\\'},
+    {13, 0, '`', 0},    {16, 'q', 'Q', '@'}, {21, 'z', 'Z', 0},   {26, 0, 0, 0},
+    {27, '+', '*', '~'}, {39, 0, 0, 0},     {40, 0, 0, 0},       {41, '^', 0, 0},
+    {43, '#', '\'', 0}, {44, 'y', 'Y', 0},  {51, ',', ';', 0},   {52, '.', ':', 0},
+    {53, '-', '_', 0},  {86, '<', '>', '|'}, {0, 0, 0, 0},
+};
+static const struct key_change layout_fr[] = {
+    {2, '&', '1', 0},   {3, 0, '2', '~'},   {4, '"', '3', '#'},  {5, '\'', '4', '{'},
+    {6, '(', '5', '['}, {7, '-', '6', '|'}, {8, 0, '7', '`'},    {9, '_', '8', '\\'},
+    {10, 0, '9', '^'},  {11, 0, '0', '@'},  {12, ')', 0, ']'},   {13, '=', '+', '}'},
+    {16, 'a', 'A', 0},  {17, 'z', 'Z', 0},  {26, '^', 0, 0},     {27, '$', 0, 0},
+    {30, 'q', 'Q', 0},  {39, 'm', 'M', 0},  {40, 0, '%', 0},     {41, 0, 0, 0},
+    {43, '*', 0, 0},    {44, 'w', 'W', 0},  {50, ',', '?', 0},   {51, ';', '.', 0},
+    {52, ':', '/', 0},  {53, '!', 0, 0},    {86, '<', '>', 0},   {0, 0, 0, 0},
+};
+static const struct key_change layout_es[] = {
+    {3, '2', '"', '@'}, {4, '3', 0, '#'},   {7, '6', '&', 0},    {8, '7', '/', 0},
+    {9, '8', '(', 0},   {10, '9', ')', 0},  {11, '0', '=', 0},   {12, '\'', '?', 0},
+    {13, 0, 0, 0},      {26, '`', '^', '['}, {27, '+', '*', ']'}, {39, 0, 0, 0},
+    {40, 0, 0, '{'},    {41, 0, 0, '\\'},   {43, 0, 0, '}'},     {51, ',', ';', 0},
+    {52, '.', ':', 0},  {53, '-', '_', 0},  {86, '<', '>', 0},   {0, 0, 0, 0},
+};
+static const struct key_change layout_dvorak[] = {
+    {12, '[', '{', 0}, {13, ']', '}', 0}, {16, '\'', '"', 0}, {17, ',', '<', 0},
+    {18, '.', '>', 0}, {19, 'p', 'P', 0}, {20, 'y', 'Y', 0},  {21, 'f', 'F', 0},
+    {22, 'g', 'G', 0}, {23, 'c', 'C', 0}, {24, 'r', 'R', 0},  {25, 'l', 'L', 0},
+    {26, '/', '?', 0}, {27, '=', '+', 0}, {31, 'o', 'O', 0},  {32, 'e', 'E', 0},
+    {33, 'u', 'U', 0}, {34, 'i', 'I', 0}, {35, 'd', 'D', 0},  {36, 'h', 'H', 0},
+    {37, 't', 'T', 0}, {38, 'n', 'N', 0}, {39, 's', 'S', 0},  {40, '-', '_', 0},
+    {44, ';', ':', 0}, {45, 'q', 'Q', 0}, {46, 'j', 'J', 0},  {47, 'k', 'K', 0},
+    {48, 'x', 'X', 0}, {49, 'b', 'B', 0}, {50, 'm', 'M', 0},  {51, 'w', 'W', 0},
+    {52, 'v', 'V', 0}, {53, 'z', 'Z', 0}, {0, 0, 0, 0},
+};
+
+static const struct {
+    const char *name;
+    const struct key_change *changes;
+} layouts[] = {
+    {"us", NULL}, {"gb", layout_gb}, {"de", layout_de}, {"fr", layout_fr},
+    {"es", layout_es}, {"dvorak", layout_dvorak},
+};
+
+static bool altgr;
+
+/* What a key types in the chosen layout (without Ctrl and Caps Lock). */
+static char layout_char(int key, bool shifted, bool with_altgr) {
+    if (key < 0 || key >= KEYS) {
         return 0;
     }
-    char c = shift ? keymap_shift[key] : keymap[key];
+    for (size_t i = 0; i < sizeof(layouts) / sizeof(layouts[0]); i++) {
+        if (strcmp(layouts[i].name, setting_layout) || !layouts[i].changes) {
+            continue;
+        }
+        for (const struct key_change *c = layouts[i].changes; c->key; c++) {
+            if (c->key == key) {
+                return with_altgr ? c->altgr : shifted ? c->shifted : c->normal;
+            }
+        }
+    }
+    if (with_altgr) {
+        return 0;
+    }
+    return shifted ? keymap_shift[key] : keymap[key];
+}
+
+static int character_of(int key) {
+    char c = layout_char(key, shift, altgr);
     if (caps_lock && ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'))) {
         c ^= 0x20;
     }
@@ -1635,8 +1859,8 @@ static void key_event(int key, int value) {
     case VX_KEY_RIGHTSHIFT: shift = down; break;
     case VX_KEY_LEFTCTRL:
     case VX_KEY_RIGHTCTRL: ctrl = down; break;
-    case VX_KEY_LEFTALT:
-    case VX_KEY_RIGHTALT: alt = down; break;
+    case VX_KEY_LEFTALT: alt = down; break;
+    case VX_KEY_RIGHTALT: alt = altgr = down; break;
     case VX_KEY_CAPSLOCK:
         if (value == 1) {
             caps_lock = !caps_lock;
@@ -1647,13 +1871,13 @@ static void key_event(int key, int value) {
         /* Apps' shortcuts ("Ctrl+Alt+T"). */
         for (int i = 0; i < app_count; i++) {
             const char *s = apps[i].shortcut;
-            if (!strncmp(s, "Ctrl+Alt+", 9) && s[9] && !s[10] && key < (int)sizeof(keymap) &&
-                keymap[key] == (s[9] | 0x20)) {
+            if (!strncmp(s, "Ctrl+Alt+", 9) && s[9] && !s[10] &&
+                layout_char(key, false, false) == (s[9] | 0x20)) {
                 run_app(i);
                 return;
             }
         }
-        if (key == 16) { /* Q */
+        if (layout_char(key, false, false) == 'q') {
             quit = true;
             return;
         }
@@ -1746,9 +1970,14 @@ static void title_click(struct window *w) {
         return;
     }
     long now = vx_uptime();
-    if (last_click_window == w && now - last_click_ms < DOUBLE_CLICK_MS) {
+    if (last_click_window == w && now - last_click_ms < DOUBLE_CLICK_MS &&
+        strcmp(setting_title_click, "none")) {
         last_click_window = NULL;
-        toggle_maximized(w);
+        if (!strcmp(setting_title_click, "minimize")) {
+            minimize(w);
+        } else {
+            toggle_maximized(w);
+        }
         return;
     }
     last_click_window = w;
@@ -1961,6 +2190,21 @@ static void pointer_moved(int dx, int dy, int wheel) {
     }
 }
 
+/* The mouse's motion at the chosen speed (5 is as it comes), keeping the
+ * fractions for the next time; the wheel the chosen way round. */
+static void pointer_input(int dx, int dy, int wheel) {
+    static int rest_x, rest_y;
+    if (setting_pointer_speed != 5) {
+        rest_x += dx * setting_pointer_speed;
+        rest_y += dy * setting_pointer_speed;
+        dx = rest_x / 5;
+        dy = rest_y / 5;
+        rest_x -= dx * 5;
+        rest_y -= dy * 5;
+    }
+    pointer_moved(dx, dy, setting_natural_scroll ? -wheel : wheel);
+}
+
 static void read_input(int handle) {
     struct vx_input_event events[64];
     long n = vx_read(handle, events, sizeof(events));
@@ -1968,9 +2212,12 @@ static void read_input(int handle) {
     for (long i = 0; i < n / (long)sizeof(events[0]); i++) {
         struct vx_input_event *e = &events[i];
         if (e->type == VX_EV_KEY && e->code >= VX_BTN_LEFT && e->code <= VX_BTN_MIDDLE) {
-            pointer_moved(dx, dy, wheel);
+            pointer_input(dx, dy, wheel);
             dx = dy = wheel = 0;
             int bit = e->code == VX_BTN_LEFT ? 1 : e->code == VX_BTN_RIGHT ? 2 : 4;
+            if (setting_left_handed && bit != 4) {
+                bit ^= 3; /* The buttons swapped. */
+            }
             button_event(bit, e->value != 0);
         } else if (e->type == VX_EV_KEY) {
             key_event(e->code, e->value);
@@ -1983,9 +2230,96 @@ static void read_input(int handle) {
                 wheel += e->value;
             }
         } else if (e->type == VX_EV_SYN && (dx || dy || wheel)) {
-            pointer_moved(dx, dy, wheel);
+            pointer_input(dx, dy, wheel);
             dx = dy = wheel = 0;
         }
+    }
+}
+
+/* ---- The display: its mode, and scaling ---- */
+
+static int display_handle = -1;
+static unsigned boot_width, boot_height; /* The mode the desktop started in. */
+static size_t frame_size;
+
+/* The screen buffers, for the size the desktop works in (the display's,
+ * or half of it when everything is twice as big). */
+static bool size_buffers(void) {
+    int w = (int)display.width / setting_scale, h = (int)display.height / setting_scale;
+    if (screen.pixels && w == screen.width && h == screen.height) {
+        return true;
+    }
+    if (screen.pixels) {
+        size_t old = (size_t)screen.width * screen.height * 4;
+        vx_unmap(screen.pixels, old);
+        vx_unmap(wallpaper.pixels, old);
+    }
+    screen.width = wallpaper.width = w;
+    screen.height = wallpaper.height = h;
+    screen.stride = wallpaper.stride = w;
+    size_t size = (size_t)w * h * 4;
+    screen.pixels = vx_map(size, VX_MAP_WRITE);
+    wallpaper.pixels = vx_map(size, VX_MAP_WRITE);
+    return screen.pixels && wallpaper.pixels;
+}
+
+/* Puts the display in the mode the settings ask for (the one it started
+ * in if none): true if the size the desktop works in changed. */
+static bool apply_display(void) {
+    unsigned want_w = setting_width > 0 ? (unsigned)setting_width : boot_width;
+    unsigned want_h = setting_height > 0 ? (unsigned)setting_height : boot_height;
+    if (want_w != display.width || want_h != display.height) {
+        struct vx_display_mode mode = {want_w, want_h};
+        long error = vx_control(display_handle, VX_DISPLAY_SET_MODE, &mode, sizeof(mode));
+        if (error) {
+            printf("desktop: can't show %ux%u: %s\n", want_w, want_h, vx_strerror(error));
+        } else {
+            if (frame) {
+                vx_unmap(frame, frame_size);
+            }
+            vx_control(display_handle, VX_DISPLAY_INFO, &display, sizeof(display));
+            frame = vx_map_file(display_handle, 0, display.size, VX_MAP_WRITE);
+            frame_size = display.size;
+            printf("desktop: display now %ux%u\n", display.width, display.height);
+        }
+    }
+    int old_w = screen.width, old_h = screen.height;
+    if (!size_buffers()) {
+        fprintf(stderr, "desktop: out of memory for a %ux%u screen\n", display.width, display.height);
+        quit = true;
+    }
+    return old_w != screen.width || old_h != screen.height;
+}
+
+/* After the screen's size changed: windows back on it, maximized ones as
+ * big as it now is. */
+static void fit_windows(void) {
+    struct rect area = work_area();
+    for (int i = 0; i < window_count; i++) {
+        struct window *w = stack[i];
+        if (w->maximized) {
+            w->x = area.x;
+            w->y = area.y;
+            configure(w, area.width, area.height);
+            send_moved(w);
+            continue;
+        }
+        int max_x = screen.width - 60, max_y = screen.height - 30;
+        if (w->x > max_x || w->y > max_y) {
+            w->x = w->x > max_x ? max_x : w->x;
+            w->y = w->y > max_y ? max_y : w->y;
+            send_moved(w);
+        }
+    }
+    pointer_x = pointer_x >= screen.width ? screen.width - 1 : pointer_x;
+    pointer_y = pointer_y >= screen.height ? screen.height - 1 : pointer_y;
+}
+
+/* How a held key repeats. */
+static void apply_key_repeat(void) {
+    struct vx_key_repeat repeat = {(unsigned)setting_key_delay, (unsigned)setting_key_rate};
+    if (keyboard >= 0) {
+        vx_control(keyboard, VX_INPUT_SET_REPEAT, &repeat, sizeof(repeat));
     }
 }
 
@@ -2029,23 +2363,23 @@ static bool setup(void) {
         fprintf(stderr, "desktop: can't have the display: %s\n", vx_strerror(error));
         return false;
     }
+    display_handle = handle;
+    boot_width = display.width;
+    boot_height = display.height;
     frame = vx_map_file(handle, 0, display.size, VX_MAP_WRITE);
-    screen.width = wallpaper.width = (int)display.width;
-    screen.height = wallpaper.height = (int)display.height;
-    screen.stride = wallpaper.stride = screen.width;
-    size_t size = (size_t)screen.width * screen.height * 4;
-    screen.pixels = vx_map(size, VX_MAP_WRITE);
-    wallpaper.pixels = vx_map(size, VX_MAP_WRITE);
+    frame_size = display.size;
+    read_config();
+    apply_display();
     if (!frame || !screen.pixels || !wallpaper.pixels) {
         fprintf(stderr, "desktop: out of memory\n");
         return false;
     }
-    read_config();
     make_wallpaper();
     build_menu();
     find_launchers();
     keyboard = open_input(VX_INPUT_KEYS);
     mouse = open_input(VX_INPUT_POINTER);
+    apply_key_repeat();
 
     listener = vx_socket(VX_AF_UNIX, VX_SOCK_SEQPACKET | VX_SOCK_NONBLOCK, 0);
     struct vx_socket_address address;
@@ -2077,13 +2411,25 @@ int main(int argc, char **argv) {
     printf("desktop: started on a %dx%d screen%s%s\n", screen.width, screen.height,
            keyboard >= 0 ? ", keyboard" : "", mouse >= 0 ? ", mouse" : "");
     fflush(stdout);
-    /* The first program: a terminal, unless told otherwise. */
-    launch(argc > 1 ? argv[1] : "/bin/term");
+    /* The first program: a terminal, unless told otherwise (or Settings
+     * says not to); then the apps Settings chose to start with the desktop. */
+    if (argc > 1) {
+        launch(argv[1]);
+    } else if (vx_settings_bool(&config, "startup_terminal", true)) {
+        launch("/bin/term");
+    }
+    const char *startup = vx_settings_get(&config, "startup_apps", "");
+    for (int i = 0; i < app_count && startup[0]; i++) {
+        if (listed(startup, &apps[i])) {
+            printf("desktop: starting %s (at startup)\n", apps[i].name);
+            run_app(i);
+        }
+    }
 
     while (!quit) {
-        long minute = vx_time() / 60;
-        if (minute != shown_minute) { /* The clock. */
-            shown_minute = minute;
+        long tick = setting_clock_seconds ? vx_time() : vx_time() / 60;
+        if (tick != shown_minute) { /* The clock. */
+            shown_minute = tick;
             add_damage(panel_rect());
         }
         check_apps(); /* (At most every two seconds.) */
@@ -2109,7 +2455,8 @@ int main(int argc, char **argv) {
             }
         }
         long wait = expire_notes();
-        wait = wait < 0 || wait > 500 ? 500 : wait + 1;
+        long most = setting_clock_seconds ? 250 : 500;
+        wait = wait < 0 || wait > most ? most : wait + 1;
         if (vx_poll(polls, (size_t)count, wait) <= 0) {
             expire_notes();
             reap_children();
