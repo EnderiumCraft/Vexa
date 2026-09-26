@@ -18,8 +18,8 @@
 #define SWATCH_H 44
 
 static struct vx_window *window;
-static char wallpaper[32] = "dusk";
-static char image[256];
+static char wallpaper[32] = "image";
+static char image[256] = DESKTOP_DEFAULT_WALLPAPER;
 static int clock_hours = 24;
 static int utc_offset; /* Minutes. */
 static bool typing;    /* The image field has the keyboard. */

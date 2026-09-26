@@ -443,14 +443,14 @@ static uint32_t mix(uint32_t a, uint32_t b, int num, int den) {
 
 /* ---- Settings (DESKTOP_CONFIG) ---- */
 
-static char setting_wallpaper[32] = "dusk";
-static char setting_image[256];
+static char setting_wallpaper[32] = "image";
+static char setting_image[256] = DESKTOP_DEFAULT_WALLPAPER;
 static int setting_clock = 24;     /* Hours. */
 static int setting_utc_offset;     /* Minutes east of UTC. */
 
 static void read_config(void) {
-    strcpy(setting_wallpaper, "dusk");
-    setting_image[0] = '\0';
+    strcpy(setting_wallpaper, "image");
+    strcpy(setting_image, DESKTOP_DEFAULT_WALLPAPER);
     setting_clock = 24;
     setting_utc_offset = 0;
     int handle = vx_open(DESKTOP_CONFIG, VX_OPEN_READ);

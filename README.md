@@ -40,7 +40,8 @@ runs X programs such as `xterm` in windows of their own on it. The kernel:
   on the screen, with a panel (the Vexa menu, a button per window, a clock), desktop
   icons, notifications, windows you move, resize, maximize, minimize and snap to an
   edge, and its own apps: a terminal, Files, a text editor, an image viewer (PNG, BMP,
-  PPM) and Settings (wallpaper, clock, time zone)
+  PPM) and Settings (wallpaper, clock, time zone); the default wallpaper is
+  `/share/pictures/meadow.png`
 - runs the X Window System through the Linux subsystem: Xvexa, an X server (X.Org's,
   built with musl) that shows each X window as a desktop window of its own, with
   TrueType fonts (FreeType, fontconfig, Xft and DejaVu), `xterm`, and GTK 3 programs

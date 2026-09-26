@@ -73,7 +73,7 @@ struct desktop_message {
 
 /* ---- Settings (/etc/desktop.conf, "key=value" lines) ----
  *
- *     wallpaper=dusk          one of desktop_wallpapers[], or "image"
+ *     wallpaper=image         one of desktop_wallpapers[], or "image"
  *     wallpaper_image=/path   a PNG, BMP or PPM file (for wallpaper=image)
  *     clock=24                24 or 12 (hours)
  *     utc_offset=120          minutes east of UTC
@@ -81,6 +81,10 @@ struct desktop_message {
  * The settings app writes it and sends DESKTOP_RELOAD.
  */
 #define DESKTOP_CONFIG "/etc/desktop.conf"
+
+/* The wallpaper without a DESKTOP_CONFIG: this picture (or, if it can't be
+ * read, the first gradient). */
+#define DESKTOP_DEFAULT_WALLPAPER "/share/pictures/meadow.png"
 
 struct desktop_wallpaper {
     const char *name, *label;
