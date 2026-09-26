@@ -1,0 +1,310 @@
+# libvexa API reference
+
+libvexa is Vexa's own C library: the C basics, and Vexa's interfaces under `<vexa/...>`.
+Programs in `userland/` are built against it (see the
+[developer guide](DEVELOPER-GUIDE.md)). The headers are in `libvexa/include`; the
+system call numbers, structures and constants they use are in `abi/vexa/abi.h`.
+
+Unless it says otherwise, a function returns 0 (or a count, a handle, a size) on
+success and a **negative `VX_E*` error** on failure; `vx_strerror(error)` describes one.
+
+- [The C basics](#the-c-basics)
+- [`<vexa/syscall.h>`: system calls](#vexasyscallh-system-calls)
+- [`<vexa/thread.h>`: threads](#vexathreadh-threads)
+- [`<vexa/net.h>`: networking](#vexaneth-networking)
+- [`<vexa/gui.h>`: drawing and windows](#vexaguih-drawing-and-windows)
+- [`<vexa/app.h>`: app bundles](#vexaapph-app-bundles)
+- [`<vexa/files.h>`: whole files and folders](#vexafilesh-whole-files-and-folders)
+- [`<vexa/font.h>`: the bitmap font](#vexafonth-the-bitmap-font)
+- [`<vexa/desktop.h>`: the desktop protocol](#vexadesktoph-the-desktop-protocol)
+- [Constants and structures](#constants-and-structures)
+
+## The C basics
+
+| Header | What's there |
+| --- | --- |
+| `<stdio.h>` | `FILE`, `stdin`, `stdout`, `stderr`; `fopen` (`"r"`, `"w"`, `"a"`, and with `+`), `fdopen`, `fclose`, `fflush`, `fread`, `fwrite`, `fgetc`, `fgets`, `fputc`, `fputs`, `feof`, `ferror`, `fileno`, `getchar`, `putchar`, `puts`; `printf`, `fprintf`, `sprintf`, `snprintf` and their `v` forms |
+| `<stdlib.h>` | `malloc`, `calloc`, `realloc`, `free`; `getenv`, `setenv`, `unsetenv`, `environ`; `atoi`, `atol`, `strtol`, `strtoul`; `abs`, `labs`; `qsort`; `EXIT_SUCCESS`, `EXIT_FAILURE` |
+| `<string.h>` | `mem*` (`memcpy`, `memmove`, `memset`, `memcmp`, `memchr`), `strlen`, `strnlen`, `strcmp`, `strncmp`, `strcpy`, `strncpy`, `strcat`, `strncat`, `strchr`, `strrchr`, `strstr`, `strspn`, `strcspn`, `strdup`, `strndup` |
+| `<ctype.h>` | `isdigit`, `isalpha`, `isalnum`, `isxdigit`, `isspace`, `isprint`, `ispunct`, `islower`, `isupper`, `tolower`, `toupper` |
+
+The compiler's own headers work too: `<stdint.h>`, `<stddef.h>`, `<stdbool.h>`,
+`<stdarg.h>`. `main(int argc, char **argv)` is called as usual; returning from it ends
+the program with that exit code.
+
+## `<vexa/syscall.h>`: system calls
+
+### The program
+
+| Function | What it does |
+| --- | --- |
+| `void vx_exit(int code)` | ends the program |
+| `long vx_process_id(void)` | this process's id |
+| `long vx_yield(void)` | lets other threads run |
+| `long vx_sleep(uint64_t ms)` | sleeps |
+| `long vx_uptime(void)` | milliseconds since boot |
+| `long vx_time(void)` | seconds since 1970-01-01 UTC (0 if the clock is unknown) |
+| `long vx_log(const char *text, size_t length)` | writes to the kernel log |
+| `long vx_system_info(struct vx_system_info *info)` | version, CPUs, memory, uptime |
+| `long vx_kernel_command(const char *command)` | runs a kernel monitor command (`"disks"`, `"threads"`...), printing to the console |
+| `const char *vx_strerror(long error)` | describes a negative `VX_E*` |
+
+### Files
+
+Paths are C strings; relative ones start from the current folder.
+
+| Function | What it does |
+| --- | --- |
+| `int vx_open(const char *path, unsigned flags)` | opens a file, folder or device; returns a handle. Flags: `VX_OPEN_READ`, `WRITE`, `CREATE`, `TRUNCATE`, `APPEND`, `NO_FOLLOW` |
+| `long vx_close(int handle)` | |
+| `long vx_read(int handle, void *buffer, size_t size)` | returns how many bytes (0 at the end) |
+| `long vx_write(int handle, const void *buffer, size_t size)` | returns how many bytes |
+| `long vx_seek(int handle, long offset, int whence)` | `VX_SEEK_SET`, `CURRENT`, `END`; returns the new position |
+| `long vx_stat(const char *path, struct vx_stat *stat)` | size, type, links, modified time, mode (follows links) |
+| `long vx_lstat(const char *path, struct vx_stat *stat)` | the same, for a link itself |
+| `long vx_handle_stat(int handle, struct vx_stat *stat)` | the same, for an open handle |
+| `long vx_read_dir(int handle, struct vx_dir_entry *entries, size_t count)` | the next entries of an open folder (name, type, inode); 0 at the end |
+| `long vx_mkdir(const char *path)` | makes a folder |
+| `long vx_remove(const char *path)` | removes a file, link or empty folder |
+| `long vx_rename(const char *from, const char *to)` | renames or moves on one file system (`-VX_EXDEV` across them; `vx_move` copies) |
+| `long vx_symlink(const char *target, const char *path)` | makes a symbolic link |
+| `long vx_readlink(const char *path, char *buffer, size_t size)` | where a link points (not NUL-terminated; returns the length) |
+| `long vx_chdir(const char *path)`, `long vx_getcwd(char *buffer, size_t size)` | the current folder |
+| `long vx_pipe(int handles[2])` | a pipe: `[0]` reads, `[1]` writes |
+| `long vx_resize(int handle, unsigned long size)` | a file's new length (zero-filled) |
+
+### Processes
+
+| Function | What it does |
+| --- | --- |
+| `int vx_spawn(const char *path, const struct vx_spawn *spawn)` | starts a program; returns a **process handle**. `struct vx_spawn`: `argv`/`argc`, `envp`/`envc`, `handles[3]` (the child's 0, 1, 2; -1 for none), `flags` (`VX_SPAWN_NEW_GROUP`, `VX_SPAWN_JOIN_GROUP` with `group`) |
+| `long vx_wait(int process, unsigned flags)` | waits for it to end; returns its exit code (`VX_WAIT_NO_HANG`: `-VX_EAGAIN` if it hasn't) |
+| `long vx_handle_process_id(int process)` | the process id behind a handle |
+| `long vx_kill(long process_id, int signal)` | sends a signal to a process |
+| `long vx_signal(int signal, int action)` | `VX_SIGNAL_DEFAULT` or `VX_SIGNAL_IGNORE` (Vexa programs can't catch signals) |
+| `long vx_set_foreground(long group)` | which process group the terminal's Ctrl-C goes to |
+| `long vx_process_list(struct vx_process_info *entries, size_t count)` | the processes (id, parent, group, state, memory, name) |
+
+```c
+const char *argv[] = {"/bin/ls", "-l", "/tmp"};
+struct vx_spawn spawn = {.argv = argv, .argc = 3, .envp = (const char *const *)environ,
+                         .envc = 0 /* count them */, .handles = {0, 1, 2}};
+int child = vx_spawn(argv[0], &spawn);
+long code = child >= 0 ? vx_wait(child, 0) : child;
+```
+
+### Memory
+
+| Function | What it does |
+| --- | --- |
+| `void *vx_map(size_t size, unsigned flags)` | zeroed memory (`VX_MAP_WRITE`, `VX_MAP_EXEC`); NULL if out of memory |
+| `long vx_unmap(void *address, size_t size)` | gives it back |
+| `long vx_protect(void *address, size_t size, unsigned flags)` | changes access (page aligned) |
+| `void *vx_map_file(int handle, unsigned long offset, size_t size, unsigned flags)` | maps a file or device, **shared**: writes reach the file and every other mapping |
+
+### Threads and waiting (low level)
+
+| Function | What it does |
+| --- | --- |
+| `long vx_thread_start(const struct vx_thread_start *start)` | starts a thread (use `<vexa/thread.h>`) |
+| `void vx_thread_exit(int code)`, `long vx_thread_id(void)` | |
+| `long vx_wait_address(volatile unsigned *address, unsigned expected, long timeout_ms)` | sleeps while `*address == expected` until woken (0), timed out (`-VX_ETIMEDOUT`; -1 waits forever), or `-VX_EAGAIN` if it wasn't `expected` |
+| `long vx_wake_address(volatile unsigned *address, long count)` | wakes up to `count` waiters; returns how many |
+
+### Sockets
+
+`vx_read` and `vx_write` work on connected sockets too.
+
+| Function | What it does |
+| --- | --- |
+| `int vx_socket(int family, int type, int protocol)` | `VX_AF_INET` or `VX_AF_UNIX`; `VX_SOCK_STREAM` or `VX_SOCK_DGRAM` (or'd with `VX_SOCK_NONBLOCK`) |
+| `long vx_bind(int h, const struct vx_socket_address *a, size_t length)` | a port, or a path for a local socket |
+| `long vx_listen(int h, int backlog)`, `int vx_accept(int h, struct vx_socket_address *peer, unsigned flags)` | a server |
+| `long vx_connect(int h, const struct vx_socket_address *a, size_t length)` | a client |
+| `long vx_send(int h, struct vx_message *m)`, `long vx_receive(int h, struct vx_message *m)` | with addresses (UDP) and passed handles (local sockets) |
+| `long vx_shutdown(int h, int how)` | `VX_SHUT_READ`, `VX_SHUT_WRITE`, `VX_SHUT_BOTH` |
+| `long vx_socket_address(int h, int peer, struct vx_socket_address *a)` | its own address (peer 0) or its peer's |
+| `long vx_socket_pair(int family, int type, int handles[2])` | two connected local sockets |
+| `long vx_poll(struct vx_poll *handles, size_t count, long timeout_ms)` | waits until one is ready (`VX_POLL_READ`, `WRITE`; `ERROR`, `HANGUP` always reported); returns how many |
+| `long vx_net_info(struct vx_net_interface *interfaces, size_t count)` | the network interfaces |
+
+### Devices
+
+| Function | What it does |
+| --- | --- |
+| `long vx_control(int handle, unsigned request, void *arg, size_t size)` | a device request, such as `VX_INPUT_INFO`, `VX_INPUT_GRAB`, `VX_DISPLAY_INFO`, `VX_DISPLAY_ACQUIRE`, or a terminal's `VX_TTY_GET_SIZE`, `VX_TTY_SET_SIZE` and `VX_TTY_PTY_NUMBER` |
+
+Input devices (`/dev/input/eventN`) give `struct vx_input_event` records (type, code,
+value, time) when read; `/dev/display0` is the screen (mapped with `vx_map_file` after
+`VX_DISPLAY_ACQUIRE`).
+
+## `<vexa/thread.h>`: threads
+
+```c
+static struct vx_mutex lock = VX_MUTEX_INIT;
+
+static void *work(void *arg) {
+    vx_mutex_lock(&lock);
+    /* ... */
+    vx_mutex_unlock(&lock);
+    return arg;
+}
+
+struct vx_thread *t = vx_thread_create(work, NULL);
+void *result = vx_thread_join(t);
+```
+
+| Function | What it does |
+| --- | --- |
+| `struct vx_thread *vx_thread_create(void *(*fn)(void *), void *arg)` | runs `fn(arg)` in a new thread (256 KiB stack); NULL on failure |
+| `void *vx_thread_join(struct vx_thread *thread)` | waits for it, frees it, returns what `fn` returned |
+| `void vx_mutex_lock(struct vx_mutex *m)`, `void vx_mutex_unlock(struct vx_mutex *m)` | a lock (`VX_MUTEX_INIT`); waiting threads sleep |
+
+## `<vexa/net.h>`: networking
+
+| Function | What it does |
+| --- | --- |
+| `int vx_connect_to(const char *host, uint16_t port)` | resolves `host` and opens a TCP connection; returns the socket |
+| `long vx_resolve(const char *name, uint32_t *address)` | a numeric address, `localhost`, `/etc/hosts`, or DNS; `-VX_ENOENT` if there's no such name |
+| `struct vx_socket_address vx_inet_address(uint32_t address, uint16_t port)` | an IPv4 socket address (address in network order, port in host order) |
+| `int vx_parse_ipv4(const char *text, uint32_t *address)`, `char *vx_format_ipv4(uint32_t address, char text[16])` | "10.0.2.2" and back |
+| `uint16_t vx_net16(uint16_t value)` | swaps bytes (host and network order) |
+
+```c
+int s = vx_connect_to("example.com", 80);
+const char *request = "GET / HTTP/1.0\r\nHost: example.com\r\n\r\n";
+vx_write(s, request, strlen(request));
+char buffer[4096];
+long n;
+while ((n = vx_read(s, buffer, sizeof(buffer))) > 0) {
+    fwrite(buffer, 1, (size_t)n, stdout);
+}
+vx_close(s);
+```
+
+## `<vexa/gui.h>`: drawing and windows
+
+Colors are `0xRRGGBB`. `VX_TRANSPARENT` as a background leaves what's there.
+
+### Drawing
+
+| Function | What it does |
+| --- | --- |
+| `struct vx_surface { uint32_t *pixels; int width, height, stride; }` | pixels in memory |
+| `void vx_fill(s, x, y, width, height, color)` | a rectangle (clipped) |
+| `void vx_draw_char(s, x, y, c, fg, bg)` | one character of the 8x16 font |
+| `int vx_draw_text(s, x, y, text, fg, bg)` | a line of text; returns the x after it |
+| `void vx_blit(to, tx, ty, from, fx, fy, width, height)` | copies a rectangle between surfaces |
+
+### Windows
+
+| Function | What it does |
+| --- | --- |
+| `struct vx_window *vx_window_create(const char *title, int width, int height)` | a window (NULL if no desktop is running); draw into `window->surface` |
+| `struct vx_window *vx_window_create_flags(title, width, height, unsigned flags)` | `VX_WINDOW_RESIZABLE`: the user can resize it (you get `VX_GUI_RESIZE`) |
+| `int vx_window_resize(struct vx_window *w, int width, int height)` | a new, blank surface of that size |
+| `void vx_window_present(struct vx_window *w, int x, int y, int width, int height)` | shows what was drawn in the rectangle |
+| `void vx_window_set_title(w, const char *title)`, `void vx_window_destroy(w)` | |
+| `int vx_gui_wait(struct vx_gui_event *e, long timeout_ms)` | the next event: 1, 0 on timeout (-1 waits forever), `-VX_EPIPE` if the desktop is gone |
+| `int vx_gui_handle(void)` | the desktop connection's handle, for `vx_poll` |
+| `void vx_notify(const char *text)` | a notification on the desktop ("title: text") |
+| `void vx_desktop_reload(void)` | asks the desktop to read `/etc/desktop.conf` again |
+
+`struct vx_gui_event` fields, by type:
+
+| `type` | Fields |
+| --- | --- |
+| `VX_GUI_KEY` | `key` (`VX_KEY_*`, Linux key codes), `value` (1 down, 0 up, 2 repeat), `character` (what it types, or 0; Ctrl+letter gives 1-26) |
+| `VX_GUI_POINTER` | `x`, `y` (in the window), `buttons` (bit 0 left, 1 right, 2 middle), `wheel` |
+| `VX_GUI_CLOSE` | the user asked to close the window |
+| `VX_GUI_FOCUS` | `value`: 1 gained the keyboard, 0 lost it |
+| `VX_GUI_RESIZE` | `width`, `height`: the size the user asked for |
+
+### Widgets
+
+The look of Vexa's own apps: `VX_COLOR_WINDOW`, `VIEW`, `TEXT`, `DIM`, `ACCENT`,
+`SELECTED`, `BUTTON`, `BUTTON_HOT`, `LINE`.
+
+| Function | What it does |
+| --- | --- |
+| `void vx_draw_outline(s, x, y, width, height, color)` | a one-pixel outline |
+| `void vx_draw_text_fit(s, x, y, width, text, fg, bg)` | text cut to fit, ending in "..." |
+| `void vx_draw_button(s, x, y, width, height, label, bool hot)` | a push button |
+| `void vx_draw_field(s, x, y, width, text, bool focused)` | a one-line text field |
+| `bool vx_field_key(char *text, size_t size, const struct vx_gui_event *e)` | edits a field's text with a key event; true if it changed |
+| `bool vx_inside(px, py, x, y, width, height)` | a point in a rectangle |
+| `void vx_menu_size(items, count, int *width, int *height)` | a pop-up menu's size |
+| `void vx_draw_menu(s, x, y, items, count, int hot)` | draws it (`hot`: the item under the pointer, or -1) |
+| `int vx_menu_item_at(items, count, x, y, px, py)` | the item at a point, or -1 |
+
+A menu is an array of `struct vx_menu_item { const char *label; const char *keys;
+bool disabled; }`; an item with no label is a line between groups.
+
+### Images
+
+| Function | What it does |
+| --- | --- |
+| `struct vx_image *vx_image_load(const char *path, uint32_t background)` | reads a PNG (8 bits a channel, not interlaced), BMP (24, 32 bits) or PPM (P6); transparency is blended onto `background`, or kept with `VX_IMAGE_ALPHA` (pixels are then `0xAARRGGBB`); NULL on failure |
+| `struct vx_image *vx_image_decode(const void *data, size_t size, uint32_t background)` | the same, from memory |
+| `void vx_image_free(struct vx_image *image)` | |
+| `void vx_blit_scaled(to, x, y, width, height, from)` | draws a surface scaled (nearest pixel) |
+| `void vx_blit_alpha(to, x, y, width, height, from)` | draws a `VX_IMAGE_ALPHA` image scaled and blended (averaged when smaller: icons) |
+
+## `<vexa/app.h>`: app bundles
+
+An app is a folder `Name.vxapp` in `/apps` (see the developer guide for its
+`Contents/Info.conf`). `struct vx_app` has the bundle's path, `name`, `executable` and
+`icon` (full paths), `opens`, `shortcut`, `menu`, `desktop` and `is_linux`.
+
+| Function | What it does |
+| --- | --- |
+| `bool vx_app_is_bundle(const char *path)` | its name ends in `.vxapp` |
+| `int vx_app_load(const char *bundle, struct vx_app *app)` | reads a bundle's Info.conf |
+| `int vx_app_list(struct vx_app *apps, int max)` | the apps in `/apps` whose programs are there, by menu place, then name; returns how many |
+| `int vx_app_find(const char *name, struct vx_app *app)` | an app by name ("Text Editor") or bundle name ("Editor", "Editor.vxapp"), or a path |
+| `int vx_app_for_file(const char *path, struct vx_app *app)` | the app that opens a file: the first listing its extension, else the first with `opens=*` |
+| `int vx_app_open(const struct vx_app *app, const char *file)` | starts it (with a file to open, or NULL); returns a process handle |
+
+## `<vexa/files.h>`: whole files and folders
+
+What a file manager needs; each stops at the first error.
+
+| Function | What it does |
+| --- | --- |
+| `long vx_copy_tree(const char *from, const char *to)` | copies a file, link, or folder with everything in it (`to` must not exist) |
+| `long vx_remove_tree(const char *path)` | removes a file, link, or folder with everything in it |
+| `long vx_move(const char *from, const char *to)` | renames; across file systems, copies then removes |
+| `unsigned long long vx_tree_size(const char *path, long *files)` | a file's size, or the total of a folder's files (counting them) |
+| `void vx_unique_name(const char *dir, const char *name, char *out, size_t size)` | a name not taken in `dir`: `name`, else "stem 2.ext", "stem 3.ext"... |
+| `void vx_join_path(char *out, size_t size, const char *dir, const char *name)` | "dir/name" with one slash |
+
+## `<vexa/font.h>`: the bitmap font
+
+The console's font (Spleen 8x16): `FONT_WIDTH` 8, `FONT_HEIGHT` 16, printable ASCII
+from `FONT_FIRST_CHAR` (0x20), `FONT_GLYPH_COUNT` glyphs in `font_glyphs`, one byte a
+row, most significant bit on the left. `vx_draw_text` uses it.
+
+## `<vexa/desktop.h>`: the desktop protocol
+
+The messages between programs and the desktop over `/run/desktop` (`DESKTOP_SOCKET`);
+`<vexa/gui.h>` wraps them, and the developer guide describes them. It also has the
+settings file's name (`DESKTOP_CONFIG`, `/etc/desktop.conf`), the default wallpaper
+(`DESKTOP_DEFAULT_WALLPAPER`) and the gradients Settings offers
+(`desktop_wallpapers[]`).
+
+## Constants and structures
+
+From `abi/vexa/abi.h` (included by `<vexa/syscall.h>`):
+
+| Name | Values |
+| --- | --- |
+| Errors (`VX_E*`) | `NOSYS`, `FAULT`, `INVAL`, `NOENT`, `EXIST`, `NOTDIR`, `ISDIR`, `NOTEMPTY`, `BADF`, `ACCES`, `NOSPC`, `IO`, `NAMETOOLONG`, `MFILE`, `NOMEM`, `ROFS`, `BUSY`, `XDEV`, `INTR`, `PIPE`, `CHILD`, `SRCH`, `AGAIN`, `NOEXEC`, `2BIG`, `NOTTY`, `SPIPE`, `LOOP`, `TIMEDOUT`, and the socket errors (`CONNREFUSED`, `ADDRINUSE`, `NOTCONN`...) |
+| File types (`VX_TYPE_*`) | `FILE`, `DIRECTORY`, `CHAR_DEVICE`, `BLOCK_DEVICE`, `SYMLINK`, `SOCKET` |
+| Open flags (`VX_OPEN_*`) | `READ`, `WRITE`, `CREATE`, `TRUNCATE`, `APPEND`, `NO_FOLLOW` |
+| Signals (`VX_SIG*`) | the usual Unix numbers: `HUP` 1, `INT` 2, `QUIT` 3, `KILL` 9, `TERM` 15, ... |
+| Keys (`VX_KEY_*`) | Linux key codes: `ESC`, `BACKSPACE`, `TAB`, `ENTER`, `LEFTCTRL`, `LEFTSHIFT`, `LEFTALT`, `SPACE`, `F1`..., `HOME`, `UP`, `PAGEUP`, `LEFT`, `RIGHT`, `END`, `DOWN`, `PAGEDOWN`, `INSERT`, `DELETE`; letters and digits use their Linux codes (A is 30, C is 46, 1 is 2) |
+
+`struct vx_stat`: `size`, `inode`, `type`, `links`, `modified` (seconds since 1970, or
+0), `mode` (Unix permission bits). `struct vx_dir_entry`: `inode`, `type`, `name`.
+`struct vx_system_info`: `version`, `cpus`, `memory_total`, `memory_free`, `uptime_ms`.
+`struct vx_process_info`: `id`, `parent`, `group`, `state`, `memory`, `name`.

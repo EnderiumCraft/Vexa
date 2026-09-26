@@ -7,9 +7,14 @@ Vexa has its own kernel design, its own system call interface and its own C libr
 Linux programs such as Firefox run through a separate, optional compatibility subsystem
 that sits on top of the Vexa kernel. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
+**Documentation**: the [user guide](docs/USER-GUIDE.md) (using Vexa), the
+[developer guide](docs/DEVELOPER-GUIDE.md) (building it, and writing programs and apps
+for it), the [API reference](docs/API.md) (libvexa), the
+[architecture](docs/ARCHITECTURE.md) and the [roadmap](docs/ROADMAP.md).
+
 ![Vexa running in QEMU](docs/screenshot.png)
 
-![The Vexa desktop with two terminal windows](docs/desktop-screenshot.png)
+![The Vexa desktop: Files with Get Info, and the desktop's menu](docs/desktop-screenshot.png)
 
 ## Status
 
@@ -232,6 +237,7 @@ libvexa/             Vexa's C library: program startup, system calls, printf, st
                      threads, networking, drawing and windows; built as libvexa.so, with
                      the dynamic loader in libvexa/ld/
 userland/            Vexa programs, one directory each: vinit, vsh, ls, cat, ...
+apps/                the desktop apps' bundles (Name.vxapp: Info.conf and icons)
 tests/disk-content/  files put on the test disks
 tools/
   bdf2c.py           converts a BDF bitmap font into the console font table
@@ -242,13 +248,17 @@ tools/
   build-x11.sh       builds the X libraries, Xvexa, xkbcomp and xterm with musl
   linux-files/       files for the /linux tree (xsession: what Ctrl+Alt+X runs)
 docs/
+  USER-GUIDE.md      using Vexa
+  DEVELOPER-GUIDE.md building Vexa, and writing programs and apps for it
+  API.md             libvexa's functions
   ARCHITECTURE.md    how the kernel, native interface and Linux subsystem fit together
   ROADMAP.md         the plan, phase by phase
 ```
 
 To add a program, create `userland/<name>/main.c`: the Makefile builds every
 directory there with libvexa and puts it in `/bin`, and typing `<name>` in the shell
-starts it.
+starts it. To make it a desktop app, give it a bundle in `apps/` (see the
+[developer guide](docs/DEVELOPER-GUIDE.md#app-bundles)).
 
 The console font is [Spleen](https://github.com/fcambus/spleen) 8x16 by Frederic Cambus
 (BSD 2-Clause license, reproduced in `kernel/src/dev/font.c`).
