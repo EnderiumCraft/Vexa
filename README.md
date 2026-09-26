@@ -188,7 +188,10 @@ make run-nographic  # headless boot, serial only (Ctrl-A then X to quit)
 make test           # boots in QEMU (BIOS; UEFI with 4 CPUs and 6 GiB; safe mode), with
                     # virtio, SATA and NVMe test disks; types commands into the virtual
                     # keyboard, checks the replies, then checks the disks with e2fsck;
-                    # then boots a kernel built without the Linux subsystem
+                    # and a kernel built without the Linux subsystem: all four at
+                    # once, with KVM when /dev/kvm is there
+make test-quick ONLY=desktop  # one boot, some of the checks (shell, network, desktop,
+                    # linux, x, linux-net, disks; several with commas)
 make clean
 ```
 

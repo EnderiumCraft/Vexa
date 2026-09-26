@@ -58,8 +58,10 @@ EXPECTED_BOOT_LEGACY = [
 # echoed to the log too, which is why some counts are 2. "^C" presses Ctrl-C
 # a second after the rest of the line was typed. A command starting with "@"
 # goes to the QEMU monitor instead (to move the mouse, say), and "@type ..."
-# is typed without waiting for vsh's prompt first.
+# is typed without waiting for vsh's prompt first. ("#name",) starts a
+# section, which --only picks.
 TYPED_COMMANDS = [
+    ("#shell",),
     ("help", "run in the background", 10),
     ("hello", "hi :)", 10),
     ("uptime", "MiB memory free", 10),
@@ -110,11 +112,13 @@ TYPED_COMMANDS = [
     ("sys mem", "heap ", 10),
     ("sys threads", "idle", 10),
     ("sys memtest", "memtest: passed", 180),
+    ("#network",),
     # Networking: DHCP, sockets over loopback, and a download from this machine
     # (@URL@ is the test's HTTP server).
     ("net", "address 10.0.2.15", 10),
     ("socket-test", "socket-test: passed", 60),
     ("fetch @URL@/hello.txt", "Hello from the test's web server", 30),
+    ("#desktop",),
     # Graphics: the mouse, then the desktop with a terminal window. Typing
     # goes to the window's shell; dragging its title bar moves it (the pointer
     # starts in the middle of the 1280x800 screen; QEMU can drop part of a
@@ -206,6 +210,7 @@ TYPED_COMMANDS = [
     ("@mouse_button 0", "desktop: snapped window 1 to the left", 10),
     ("@mouse_move 1 0", "desktop: window 1 is now 632x744", 20),
     ("@sendkey ctrl-alt-q", "desktop: back to the console", 20),
+    ("#shell",),
     ("Hello Vexa", "Hello: command not found", 10),
 ]
 
@@ -215,6 +220,7 @@ TYPED_COMMANDS = [
 TYPE_ATTEMPTS = 3  # For "@type" lines (see main).
 
 LINUX_COMMANDS = [
+    ("#linux",),
     ("busybox echo hello from linux", "hello from linux", 20, 2),
     ("busybox uname -sr", "Vexa 6.1.0-vexa", 20),
     ("busybox sh -c 'echo answer $((6*7))'", "answer 42", 20),
@@ -247,6 +253,7 @@ LINUX_COMMANDS = [
     ("pthread-test exit", "exiting while threads spin", 30),
     # memfd_create (files in memory, mapped shared) and eventfd.
     ("memfd-test", "memfd-test: passed", 30),
+    ("#x",),
     # X: the desktop, then an xterm (Ctrl+Alt+X) through Xvexa, a rootless X
     # server: the xterm is a desktop window, which has the keyboard, and its
     # close button (736,88 to 756,110) closes it (WM_DELETE_WINDOW).
@@ -277,6 +284,7 @@ LINUX_COMMANDS = [
     ("@mouse_button 1", "desktop: left button at 887,164", 10),
     ("@mouse_button 0", "desktop: maximized window 3", 30),
     ("@sendkey ctrl-alt-q", "desktop: back to the console", 30),
+    ("#linux-net",),
     # Networking: BSD sockets (with SCM_RIGHTS), wget, ifconfig, ping and
     # Python's urllib, asyncio and multiprocessing pipes.
     ("bsd-socket-test", "bsd-socket-test: passed", 60),
@@ -285,10 +293,12 @@ LINUX_COMMANDS = [
     ("ifconfig eth0", "inet addr:10.0.2.15", 20),
     ("ping -c 2 127.0.0.1", "2 packets received", 30),
     ("python-net-test.py @URL@/data.bin @SHA1@", "python-net-test: passed", 300),
+    ("#shell",),
 ]
 
 # With --disks: one ext2 file system on each kind of disk.
 DISK_COMMANDS = [
+    ("#disks",),
     ("sys disks", "nvme0n1", 10),
     ("sys mount", "/mnt/nvme0n1", 10),
     ("cat /mnt/vda1/hello.txt", "Hello from an ext2 disk!", 10),
@@ -303,6 +313,7 @@ DISK_COMMANDS = [
     ("mv /mnt/nvme0n1/made-by-vexa/note.txt /mnt/nvme0n1/moved.txt", None, 10),
     ("cat /mnt/nvme0n1/moved.txt", "written on nvme", 10, 3),
     ("rm -r /mnt/nvme0n1/made-by-vexa", None, 10),
+    ("#shell",),
 ]
 
 # (file name in the disks directory, QEMU arguments, where the ext2 starts)
@@ -370,13 +381,14 @@ class Monitor:
         self._drain()
 
 
-def wait_for(log_path, text, timeout, count=1):
+def wait_for(log_path, text, timeout, count=1, start=0):
+    """Waits for `text` to be in the log `count` times (after `start`)."""
     deadline = time.time() + timeout
     while time.time() < deadline:
         log = read_log(log_path)
         if "VEXA KERNEL PANIC" in log:
             return False
-        if log.count(text) >= count:
+        if log[start:].count(text) >= count:
             return True
         time.sleep(0.2)
     return False
@@ -436,6 +448,10 @@ def main():
     parser.add_argument("--cpu", help="QEMU CPU model, e.g. max (adds AVX, SMEP, SMAP)")
     parser.add_argument("--disks", help="directory with the test disk images")
     parser.add_argument("--iso", default="build/vexa.iso", help="ISO image to boot")
+    parser.add_argument("--only", help="run only these sections (comma-separated: "
+                        "shell, network, desktop, linux, x, linux-net, disks)")
+    parser.add_argument("--accel", default="auto", choices=["auto", "kvm", "tcg"],
+                        help="QEMU's accelerator: KVM when /dev/kvm can be opened (auto)")
     parser.add_argument("--no-linux", action="store_true",
                         help="skip the Linux subsystem checks (a LINUX_COMPAT=0 kernel)")
     parser.add_argument("--safe-mode", action="store_true",
@@ -471,6 +487,16 @@ def main():
             command += [a.format(copy) for a in qemu_args]
             disks.append((copy, offset))
         commands[-1:-1] = DISK_COMMANDS
+    # Sections: ("#name",) markers; --only keeps some of them.
+    only = set(args.only.split(",")) if args.only else None
+    kept, section = [], "shell"
+    for c in commands:
+        if c[0].startswith("#"):
+            section = c[0][1:]
+        elif only is None or section in only:
+            kept.append(c)
+    commands = kept
+
     def fill(text):
         return text.replace("@URL@", url).replace("@SHA1@", sha1) if text else text
     commands = [(fill(c), fill(e), *rest) for c, e, *rest in commands]
@@ -478,6 +504,12 @@ def main():
         command += ["-bios", OVMF]
     if args.cpu:
         command += ["-cpu", args.cpu]
+    accel = args.accel
+    if accel == "auto":
+        accel = "kvm" if os.access("/dev/kvm", os.R_OK | os.W_OK) else "tcg"
+    command += ["-accel", accel]
+    print(f"qemu-smoke-test: {accel.upper()}" + (f", only {args.only}" if only else ""),
+          flush=True)
     qemu = subprocess.Popen(command)
     failures = []
     try:
@@ -489,7 +521,18 @@ def main():
 
         if not failures:
             typed = 0
+            previous_start = 0
             for command, expected, timeout, *count in commands:
+                # Normally, how many times the text is in the whole log;
+                # with --only (earlier checks skipped), whether it's in what
+                # came since the command before this one was sent (what a
+                # command causes can show up before the next one is sent);
+                # twice if typing it echoes it.
+                start = 0
+                if only is not None:
+                    start, previous_start = previous_start, len(read_log(log_path))
+                    echoed = expected and not command.startswith("@") and expected in command
+                    count = [2 if echoed else 1]
                 if command.startswith("@"):
                     # "@type text": typed without waiting for a prompt (into a
                     # window, say). Otherwise a QEMU monitor command, such as
@@ -501,7 +544,7 @@ def main():
                         for attempt in range(TYPE_ATTEMPTS):
                             for key in keys_for(command[6:] + "\n"):
                                 monitor.command("sendkey " + key)
-                            if expected is None or wait_for(log_path, expected, timeout, *count):
+                            if expected is None or wait_for(log_path, expected, timeout, *(count or [1]), start):
                                 break
                         else:
                             failures.append(f"{command!r}: missing {expected!r}")
@@ -512,7 +555,7 @@ def main():
                             monitor.command(f"mouse_button {state}")
                     else:
                         monitor.command(command[1:])
-                    if expected is not None and not wait_for(log_path, expected, timeout, *count):
+                    if expected is not None and not wait_for(log_path, expected, timeout, *(count or [1]), start):
                         failures.append(f"{command!r}: missing {expected!r}")
                     continue
                 # Type only once the previous command is finished and the
@@ -529,7 +572,7 @@ def main():
                 if interrupt:
                     time.sleep(1)
                     monitor.command("sendkey ctrl-c")
-                if expected is not None and not wait_for(log_path, expected, timeout, *count):
+                if expected is not None and not wait_for(log_path, expected, timeout, *(count or [1]), start):
                     failures.append(f"typed {command!r}: missing {expected!r}")
 
         if args.screenshot:

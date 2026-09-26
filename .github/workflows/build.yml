@@ -47,7 +47,17 @@ jobs:
       - name: Build ISO (with BusyBox, bash, coreutils, Python and X, built from source)
         run: make && make busybox-source
 
-      - name: Boot tests (BIOS, UEFI with 4 CPUs, safe mode; with test disks)
+      # GitHub's Linux runners have KVM; the tests use it when they can
+      # open /dev/kvm.
+      - name: Let QEMU use KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm || true
+
+      - name: Boot tests (BIOS, UEFI with 4 CPUs, safe mode, native; at once)
         run: |
           for f in /usr/share/qemu/OVMF.fd /usr/share/ovmf/OVMF.fd; do
             if [ -f "$f" ]; then export OVMF="$f"; break; fi

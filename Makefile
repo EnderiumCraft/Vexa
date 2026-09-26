@@ -146,7 +146,8 @@ USER_OBJS := $(LIBVEXA_OBJS) \
 	$(patsubst %,$(BUILD)/%.o,$(wildcard $(addsuffix /*.c,$(addprefix userland/,$(PROGRAMS)))))
 
 .PHONY: all kernel programs iso run run-disk run-nographic test test-disks clean distclean \
-	busybox busybox-source bash coreutils python x11 test-native
+	busybox busybox-source bash coreutils python x11 test-native test-quick native-iso \
+	test-bios test-uefi test-safe test-native-boot
 
 all: iso
 kernel: $(KERNEL)
@@ -461,16 +462,33 @@ run-disk: $(ISO) $(MY_DISK)
 run-nographic: $(ISO)
 	$(QEMU) -M q35 -m 512M -cdrom $(ISO) -nographic -no-reboot $(QEMU_NET)
 
-test: $(ISO) $(SAFE_ISO) $(TEST_DISKS)
+# `make test` boots Vexa four ways at once (each in its own QEMU, with KVM
+# when this machine has it); each one's output is shown when it's done.
+TEST_JOBS ?= 4
+test: $(ISO) $(SAFE_ISO) $(TEST_DISKS) native-iso
+	$(MAKE) --no-print-directory --output-sync=target -j$(TEST_JOBS) \
+		test-bios test-uefi test-safe test-native-boot
+
+test-bios:
 	tools/qemu-smoke-test.py --disks $(BUILD)/disks
+test-uefi:
 	tools/qemu-smoke-test.py --disks $(BUILD)/disks --uefi --smp 4 --memory 6G --cpu max
+test-safe:
 	tools/qemu-smoke-test.py --disks $(BUILD)/disks --safe-mode --iso $(SAFE_ISO)
-	$(MAKE) test-native
 
 # Vexa must work without the Linux subsystem: build and boot a kernel without it.
-test-native:
+native-iso:
 	$(MAKE) BUILD=$(BUILD)/native LINUX_COMPAT=0 iso
+test-native-boot:
 	tools/qemu-smoke-test.py --no-linux --iso $(BUILD)/native/vexa.iso
+test-native: native-iso
+	$(MAKE) --no-print-directory test-native-boot
+
+# One boot, some of the checks: `make test-quick ONLY=desktop` (sections:
+# shell, network, desktop, linux, x, linux-net, disks; several with commas).
+ONLY ?= desktop
+test-quick: $(ISO) $(TEST_DISKS)
+	tools/qemu-smoke-test.py --disks $(BUILD)/disks --only $(ONLY)
 
 clean:
 	rm -rf $(BUILD)
