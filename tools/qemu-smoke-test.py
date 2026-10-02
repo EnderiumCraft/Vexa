@@ -260,7 +260,9 @@ TYPED_COMMANDS = ([
     ("@sendkey ret", "desktop: unlocked", 10),
     ("@sendkey ctrl-alt-q", "desktop: asking before leaving", 20),
     ("@sendkey ret", "desktop: back to the console", 20),
-    ("ls /home/Pictures /home/Desktop", "note.txt", 10),
+    # (Keys typed while the desktop ran can be left at the console: Ctrl-U erases them.)
+    ("@sendkey ctrl-u", None, 2),
+    ("ls /home/Desktop", "note.txt", 10),
     ("ls /home/Pictures", "Screenshot 20", 10),
     ("#shell",),
     ("Hello Vexa", "Hello: command not found", 10),
