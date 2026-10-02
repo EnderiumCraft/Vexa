@@ -238,6 +238,70 @@ def pictures_folder():
     return im
 
 
+def activity():
+    im = gradient_tile((40, 44, 56), (16, 18, 24))
+    d = ImageDraw.Draw(im)
+    pts = [(8, 30), (14, 30), (17, 20), (21, 36), (25, 14), (29, 32), (33, 26), (40, 26)]
+    d.line([(x * S, y * S) for x, y in pts], fill=(90, 230, 140, 255), width=3 * S, joint="curve")
+    return im
+
+
+def calculator():
+    im = gradient_tile((90, 90, 104), (40, 40, 50))
+    d = ImageDraw.Draw(im)
+    box(d, 9, 8, 39, 17, 2, (190, 230, 200, 255))
+    colors = [(70, 70, 82), (70, 70, 82), (255, 149, 0)]
+    for row in range(3):
+        for col in range(3):
+            x, y = 9 + col * 11, 20 + row * 8
+            box(d, x, y, x + 8, y + 6, 2, colors[col] + (255,))
+    return im
+
+
+def calendar():
+    im = gradient_tile((250, 250, 252), (220, 220, 228))
+    d = ImageDraw.Draw(im)
+    box(d, 3, 3, 45, 16, 9, (230, 70, 70, 255))
+    d.rectangle([3 * S, 11 * S, 45 * S, 16 * S], fill=(230, 70, 70, 255))
+    for row in range(3):
+        for col in range(5):
+            x, y = 9 + col * 6.5, 21 + row * 7
+            d.rectangle([x * S, y * S, (x + 4) * S, (y + 4) * S], fill=(120, 120, 140, 255))
+    d.rectangle([(9 + 2 * 6.5) * S, 28 * S, (13 + 2 * 6.5) * S, 32 * S], fill=(230, 70, 70, 255))
+    return im
+
+
+def notes():
+    im = gradient_tile((255, 230, 120), (240, 200, 60))
+    d = ImageDraw.Draw(im)
+    for i in range(4):
+        d.line([(10 * S, (17 + i * 7) * S), (38 * S, (17 + i * 7) * S)], fill=(170, 130, 30, 255),
+               width=2 * S)
+    d.rectangle([3 * S, 3 * S, 45 * S, 10 * S], fill=(225, 175, 40, 255))
+    return im
+
+
+def paint():
+    im = gradient_tile((60, 120, 210), (30, 60, 140))
+    d = ImageDraw.Draw(im)
+    d.ellipse([7 * S, 9 * S, 41 * S, 39 * S], fill=(245, 236, 220, 255))
+    for (x, y), c in zip([(14, 16), (22, 13), (30, 16), (33, 25)],
+                         [(230, 60, 60), (250, 190, 40), (60, 180, 90), (60, 120, 230)]):
+        d.ellipse([x * S, y * S, (x + 6) * S, (y + 6) * S], fill=c + (255,))
+    d.ellipse([16 * S, 26 * S, 24 * S, 34 * S], fill=(60, 120, 210, 255))
+    return im
+
+
+def help_book():
+    im = gradient_tile((80, 170, 255), (30, 100, 210))
+    d = ImageDraw.Draw(im)
+    d.ellipse([10 * S, 8 * S, 38 * S, 36 * S], outline=(255, 255, 255, 255), width=3 * S)
+    d.arc([18 * S, 14 * S, 30 * S, 26 * S], 180, 90, fill=(255, 255, 255, 255), width=3 * S)
+    d.line([(24 * S, 26 * S), (24 * S, 29 * S)], fill=(255, 255, 255, 255), width=3 * S)
+    d.ellipse([22 * S, 31 * S, 26 * S, 35 * S], fill=(255, 255, 255, 255))
+    return im
+
+
 # Files' own pictures (Files.vxapp/Contents/Resources): kinds of files, places.
 FILE_ICONS = {
     "folder": files, "document": document, "text": text_file, "image": image_file,
@@ -248,6 +312,8 @@ FILE_ICONS = {
 ICONS = {
     "Terminal": terminal, "Files": files, "Editor": editor, "Viewer": viewer,
     "Settings": settings, "About": about, "XTerm": xterm,
+    "Monitor": activity, "Calculator": calculator, "Calendar": calendar,
+    "Notes": notes, "Paint": paint, "Help": help_book,
 }
 
 if __name__ == "__main__":

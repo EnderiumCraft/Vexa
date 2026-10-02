@@ -146,7 +146,7 @@ Vexa's file system starts in memory and has these folders:
 | `/apps` | the desktop's apps, as `.vxapp` bundles |
 | `/home` | your folders: `Desktop` (its files are the desktop's icons), `Documents`, `Pictures` (screenshots go here) |
 | `/etc` | settings: `motd`, `desktop.conf`, `hosts`, `resolv.conf` |
-| `/share/pictures` | pictures (the wallpaper, `meadow.png`, and `aurora.png`) |
+| `/share/pictures` | pictures (the default wallpaper, `aurora.png`, and `meadow.png`) |
 | `/share/fonts` | the fonts Vexa's apps draw text with (DejaVu Sans, Sans Bold, Sans Mono) |
 | `/tmp` | scratch space |
 | `/Trash` | what Files moved to the Trash |
@@ -247,6 +247,12 @@ in `.vxapp`, kept in `/apps`. Files shows each one as a single app with its icon
 | Image Viewer | `Viewer.vxapp` | shows PNG, BMP and PPM pictures |
 | Settings | `Settings.vxapp` | System Settings: the look, wallpaper, clock, mouse and keyboard, display, lock screen... |
 | About Vexa | `About.vxapp` | the version, and how the system is doing |
+| Activity Monitor | `Monitor.vxapp` | the processes, CPU and memory; Quit and Force Quit |
+| Calculator | `Calculator.vxapp` | a calculator |
+| Calendar | `Calendar.vxapp` | a month at a time, with your events |
+| Notes | `Notes.vxapp` | notes, saved as you type |
+| Paint | `Paint.vxapp` | drawing and painting; opens and saves PNG |
+| Help | `Help.vxapp` | this guide, with its contents and search |
 | XTerm | `XTerm.vxapp` | an xterm (a Linux X program; only when the Linux files are there) |
 
 **Opening things.** `open` does what a double click in Files does:
@@ -267,25 +273,104 @@ What's inside a bundle, and how to make one, is in the developer guide.
 
 ### Terminal
 
-A terminal window running `vsh` on a pseudo-terminal. It shows colors and moves the
-cursor the way the console does, so full-screen programs like `vi`, `less` and `top`
-(from BusyBox) work. It can be resized; the program inside is told its new size.
+A terminal window running `vsh` on a pseudo-terminal. It shows 16, 256 and 24-bit
+colours and moves the cursor the way the console does, so full-screen programs like
+`vi`, `less` and `top` (from BusyBox) work. It can be resized; the program inside is
+told its new size.
+
+| Keys | What they do |
+| --- | --- |
+| Ctrl+Shift+T, Ctrl+Shift+W | a new tab (each its own shell), close the tab |
+| Ctrl+PageUp, Ctrl+PageDown, Ctrl+Tab | the previous, next tab (or click it; + opens one) |
+| Shift+PageUp, Shift+PageDown, the wheel | scroll back through what went by (800 lines; a scroll bar shows) |
+| dragging, a double click | select (a double click: a word); selecting copies |
+| Ctrl+Shift+C, Ctrl+Shift+V, the middle button | copy, paste |
+| Ctrl+=, Ctrl+-, Ctrl+0 | bigger, smaller, the usual size |
+
+A right click opens a menu with the same.
 
 ### Text Editor
 
-`edit [file]` opens a file, or a new one. Arrows, Home, End, Page Up and Page Down
-move; a click puts the cursor there, and the mouse wheel scrolls. Ctrl+S saves (asking
-for a name the first time), Ctrl+Q or the close button quits.
+`edit [file...]` opens files (or a new one), each in a tab. C (and C-like languages),
+Python, shell scripts, Markdown and settings files are coloured.
+
+| Keys | What they do |
+| --- | --- |
+| arrows, Home, End, Page Up, Page Down, a click | move (Home: to the first letter, then the line's start) |
+| Shift with those, or dragging | select |
+| Ctrl+Z, Ctrl+Y (or Ctrl+Shift+Z) | undo, redo |
+| Ctrl+X, Ctrl+C, Ctrl+V, Ctrl+A | cut, copy, paste (the clipboard every app shares), select all |
+| Ctrl+F, Ctrl+H, F3 (Shift+F3) | find, replace (Next, Replace, All), find the next (the one before) |
+| Ctrl+N, Ctrl+O, Ctrl+S, Ctrl+Shift+S | new tab, open, save (asking for a name the first time), save as |
+| Ctrl+W, Ctrl+Tab, Ctrl+Q | close the tab, the next tab, quit |
+
+Files dropped on the window open in tabs.
 
 ### Image Viewer
 
-`view file` shows a PNG (8 bits per channel, not interlaced), BMP (24 or 32 bits) or
-PPM (P6) picture, fitted to the window. `+` and `-` zoom, `0` fits it again.
+`view [file]` shows a PNG (8 bits per channel, not interlaced), BMP (24 or 32 bits) or
+PPM (P6) picture, fitted to the window. The toolbar, or the keys: Left and Right (or
+Page Up and Page Down) the previous and next picture in the folder; `+`, `-` or the
+wheel zoom, `0` fits, `1` is actual size; dragging (or the arrows, when zoomed) moves
+it; `R` turns it right, Shift+R left; Space or `S` starts a slideshow (a picture every
+three seconds; any key stops it); Ctrl+O opens another.
 
 ### About Vexa
 
 The version, the number of CPUs, memory in use, time since boot, the number of
 processes and the network address, updated every second.
+
+### Activity Monitor
+
+Every process with its CPU use (over the last second), memory and threads, updated
+every second; a click on a column sorts by it. Below, CPU and memory over the last
+minute. Select a process and **Quit** asks it to stop (SIGTERM; Delete does the same),
+**Force Quit** stops it (SIGKILL).
+
+### Calculator
+
+Click the buttons or type: digits, `+ - * /`, `%`, Enter or `=`, Backspace, Escape
+to clear. Ctrl+C copies the answer, Ctrl+V pastes a number.
+
+### Calendar
+
+A month, with today marked and the day's events in it. A click picks a day; its
+events are on the right, where you add one (type it, with a time first if you like:
+"09:30 Dentist", and press Enter) or take one away (its x). The arrows (or Page Up and
+Page Down, or the wheel) go to other months, Today comes back. Events are kept in
+`/home/.calendar`.
+
+### Notes
+
+Your notes on the left, the newest first, each named by its first line; the one you
+chose on the right, wrapped to the window. Notes are saved as you type, as text files
+in `/home/Notes`. Ctrl+N (or +) makes one, Ctrl+Delete deletes it, and the search field
+finds notes by what's in them.
+
+### Paint
+
+A picture to draw on: Pencil, Brush, Line, Rectangle (Shift: a square), Ellipse, Fill,
+Eraser and Pick (a colour from the picture), four sizes and sixteen colours; a right
+click draws with the second colour (the square behind the first; a click on them swaps
+them). Ctrl+Z and Ctrl+Y undo and redo; New, Open and Save (Ctrl+N, O, S) use PNG files
+(BMP and PPM open too). `paint [file]` opens one.
+
+### Help
+
+This guide, set out to read: the contents on the left, search at the top (type, then
+Enter for the next place it's found).
+
+### Open and Save
+
+Apps that open and save files (Text Editor, Paint, Image Viewer) share the same dialog:
+places on the left (Home, Desktop, Documents, Pictures, Wallpapers, Vexa, Temporary),
+the folder's contents, and for saving a name. A double click opens a folder or chooses
+a file; Enter chooses; Backspace goes up; Escape cancels.
+
+### The clipboard
+
+Text copied in one app pastes in any other: the Terminal, the Text Editor, Notes, the
+Calculator, and X programs too (xterm, GTK programs), both ways.
 
 ## Files, the file manager
 
@@ -376,7 +461,7 @@ at once. `settings Display` opens a section directly.
 theme=light
 accent=blue
 wallpaper=image
-wallpaper_image=/share/pictures/meadow.png
+wallpaper_image=/share/pictures/aurora.png
 wallpaper_mode=fill
 time_zone=Berlin
 clock=24
@@ -508,9 +593,14 @@ Delete move to Trash, Ctrl+I Get Info, Ctrl+A select all, Ctrl+F search, Ctrl+L 
 location, Ctrl+H hidden files, Ctrl+1 list, Ctrl+2 icons, Ctrl+Shift+N new folder, Esc
 select nothing.
 
-**Text Editor**: Ctrl+S save, Ctrl+Q quit.
+**Terminal**: Ctrl+Shift+T new tab, Ctrl+Shift+W close it, Ctrl+Shift+C copy,
+Ctrl+Shift+V paste, Shift+PageUp scroll back, Ctrl+= and Ctrl+- the size.
 
-**Image Viewer**: `+` and `-` zoom, `0` fit.
+**Text Editor**: Ctrl+Z undo, Ctrl+Y redo, Ctrl+F find, Ctrl+H replace, Ctrl+O open,
+Ctrl+S save, Ctrl+N new tab, Ctrl+W close it, Ctrl+Q quit.
+
+**Image Viewer**: Left and Right the previous and next picture, `+` and `-` zoom, `0`
+fit, `R` turn, Space slideshow.
 
 ## When something goes wrong
 

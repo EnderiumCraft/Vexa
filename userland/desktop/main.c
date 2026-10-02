@@ -1864,6 +1864,17 @@ static void client_message(int client) {
     case DESKTOP_LOCK:
         lock_now();
         break;
+    case DESKTOP_CLIPBOARD_SET:
+        /* Everyone hears of it (Xvexa hands it to X programs), but the one
+         * that set it. */
+        for (int i = 0; i < MAX_CLIENTS; i++) {
+            if (clients[i].handle >= 0 && i != client) {
+                struct desktop_message clip = {.type = DESKTOP_CLIPBOARD};
+                send_to(i, &clip);
+            }
+        }
+        printf("desktop: clipboard changed%s\n", m.a ? " (from X)" : "");
+        break;
     case DESKTOP_RELOAD: {
         /* The wallpaper is made again only if it changed (a big picture
          * takes a while to read). */

@@ -19,6 +19,8 @@ if [ ! -S "$socket" ]; then
         [ -S "$socket" ] && break
         sleep 0.5
     done
+    # The clipboard, shared with Vexa's programs.
+    DISPLAY="$display" xclipboard </dev/null >/dev/null 2>&1 &
 fi
 export DISPLAY="$display"
 # No accessibility bus (D-Bus) yet: GTK needn't look for one.

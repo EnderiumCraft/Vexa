@@ -140,7 +140,8 @@ userland/<name>/      Vexa's programs, one directory each, built into /bin
 apps/<Name>.vxapp/    the desktop apps' bundles (Info.conf, icons)
 rootfs/               files for the root file system (/etc, /share: pictures, fonts)
 third_party/          Xvexa (Vexa's X server), stb_truetype, BusyBox's configuration, the X sources list
-tools/                build scripts, the test harness, disk images, icons
+tools/                build scripts, the test harness, disk images, icons, xclipboard (the
+                      X clipboard bridge xrun starts beside Xvexa)
 tests/                Linux test programs and test disk contents
 docs/                 this documentation
 ```

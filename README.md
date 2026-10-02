@@ -48,8 +48,10 @@ runs X programs such as `xterm` in windows of their own on it. The kernel:
   you move, resize, maximize, minimize and snap to a half or a quarter (by dragging, or
   Super+arrows), Alt+Tab with pictures of the windows, search (Ctrl+Space: apps,
   settings, files, sums), screenshots (PrintScreen), a screensaver and a lock screen,
-  and its own apps: a terminal, Files, a text editor, an image viewer (PNG, BMP, PPM)
-  and Settings; the default wallpaper is `/share/pictures/meadow.png`
+  and its own apps: a terminal with tabs, Files, a text editor with tabs, undo and
+  syntax colouring, an image viewer (PNG, BMP, PPM), Settings, Activity Monitor, a
+  calculator, a calendar, Notes, Paint and Help, sharing Open and Save dialogs and
+  one clipboard (with X programs too); the default wallpaper is `/share/pictures/aurora.png`
 - draws text smooth with TrueType fonts (DejaVu, through stb_truetype) in UTF-8, so
   Vexa's apps show and type any language's letters, with whole keyboard layouts
   (German, French, Spanish, UK, Dvorak: AltGr and accent keys)

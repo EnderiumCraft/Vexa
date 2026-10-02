@@ -19,6 +19,8 @@
  */
 
 #define DESKTOP_SOCKET "/run/desktop"
+/* The clipboard's text (UTF-8), shared by every program and X. */
+#define DESKTOP_CLIPBOARD_FILE "/run/clipboard"
 
 enum desktop_message_type {
     /* Program to desktop. */
@@ -39,6 +41,8 @@ enum desktop_message_type {
                             the paths, one per line: files dragged out of the window
                             and let go where the pointer is now */
     DESKTOP_LOCK = 13,   /* lock the screen now */
+    DESKTOP_CLIPBOARD_SET = 14, /* the clipboard changed: it's in DESKTOP_CLIPBOARD_FILE
+                                   (a = 1: Xvexa set it, from an X program) */
     /* Desktop to program. */
     DESKTOP_CREATED = 16, /* window (0 if it failed) */
     DESKTOP_KEY = 17,     /* window; a = key, b = value, c = character */
@@ -53,6 +57,7 @@ enum desktop_message_type {
     DESKTOP_THEME = 26,     /* the theme (or other settings) changed: read them again */
     DESKTOP_DROP = 27,      /* window; a, b = x, y; c = 1 to copy; text = the list file:
                                files dropped on the window (see DRAG) */
+    DESKTOP_CLIPBOARD = 28, /* the clipboard changed (Xvexa hands it to X programs) */
 };
 
 /* DESKTOP_WM requests. MOVE and RESIZE start dragging the window with the
@@ -92,7 +97,7 @@ struct desktop_message {
 
 /* The wallpaper without a DESKTOP_CONFIG: this picture (or, if it can't be
  * read, the first gradient). */
-#define DESKTOP_DEFAULT_WALLPAPER "/share/pictures/meadow.png"
+#define DESKTOP_DEFAULT_WALLPAPER "/share/pictures/aurora.png"
 
 struct desktop_wallpaper {
     const char *name, *label;

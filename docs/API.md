@@ -223,6 +223,8 @@ vx_draw_text(s, end + 8, 18, "café", VX_COLOR_DIM, VX_TRANSPARENT); /* The UI f
 | `size_t vx_text_fit_bytes(font, text, width)` | how many bytes of it fit in `width` pixels (whole characters) |
 | `int vx_draw_text(s, x, y, text, fg, bg)` | UI-font text, centered in a `VX_LINE_HEIGHT` (16) line whose top is `y` |
 | `void vx_draw_char(s, x, y, uint32_t c, fg, bg)` | one character in a monospaced cell, `VX_CELL_WIDTH` (8) by `VX_LINE_HEIGHT`: terminals and editors |
+| `int vx_font_cell_width(font)` | a monospaced font's cell width (its widest advance) |
+| `void vx_draw_cell(s, font, x, y, width, height, uint32_t c, fg, bg)` | one character in a `width` by `height` cell of any font and size: the Terminal's cells (box-drawing and block characters are drawn to fill the cell) |
 | `uint32_t vx_utf8_next(const char **text)` | the character at `*text`, moving past it (0xFFFD for a bad byte) |
 | `int vx_utf8_encode(uint32_t c, char out[4])` | a character's bytes; returns how many |
 | `size_t vx_utf8_previous(const char *text, size_t at)` | where the character before byte `at` starts |
@@ -244,6 +246,10 @@ vx_draw_text(s, end + 8, 18, "café", VX_COLOR_DIM, VX_TRANSPARENT); /* The UI f
 | `void vx_notify(const char *text)` | a notification on the desktop ("title: text") |
 | `void vx_desktop_reload(void)` | asks the desktop to read `/etc/desktop.conf` again |
 | `void vx_desktop_lock(void)` | locks the screen |
+| `void vx_clipboard_set(const char *text, size_t length)` | puts text on the clipboard every app shares (X programs too) |
+| `char *vx_clipboard_get(void)` | the clipboard's text, to `free()` (NULL if it's empty) |
+| `bool vx_open_dialog(title, folder, char *out, size_t size)` | the Open dialog (starting in `folder`, or home): the chosen file's path in `out`; false if cancelled |
+| `bool vx_save_dialog(title, folder, name, char *out, size_t size)` | the Save dialog, with `name` filled in: the path to save to in `out`; false if cancelled |
 
 `struct vx_gui_event` fields, by type:
 

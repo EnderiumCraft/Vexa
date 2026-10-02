@@ -325,9 +325,13 @@ static void free_items(void) {
     item_count = 0;
 }
 
+static unsigned long folder_signature(void);
+static unsigned long folder_seen;
+
 static void load(void) {
     free_items();
     shown_count = 0;
+    folder_seen = folder_signature();
     int handle = vx_open(cwd, VX_OPEN_READ);
     if (handle < 0) {
         snprintf(message, sizeof(message), "Can't open %s: %s", cwd, vx_strerror(handle));
@@ -395,6 +399,62 @@ static void select_names(char names[][256], int count) {
 static void reload_selecting(char names[][256], int count) {
     load();
     select_names(names, count);
+}
+
+/* What's in the folder, as one number (names, and for small folders sizes
+ * and times too): when it changes, something else changed the folder, and
+ * it's read again. */
+static unsigned long folder_signature(void) {
+    unsigned long hash = 5381;
+    int handle = vx_open(cwd, VX_OPEN_READ);
+    if (handle < 0) {
+        return 0;
+    }
+    struct vx_dir_entry entries[32];
+    long n;
+    int count = 0;
+    while ((n = vx_read_dir(handle, entries, 32)) > 0) {
+        for (long i = 0; i < n; i++, count++) {
+            unsigned long h = 5381;
+            for (const char *c = entries[i].name; *c; c++) {
+                h = h * 33 + (unsigned char)*c;
+            }
+            if (count < 200) {
+                char path[800];
+                struct vx_stat st;
+                vx_join_path(path, sizeof(path), cwd, entries[i].name);
+                if (vx_lstat(path, &st) == 0) {
+                    h = h * 31 + (unsigned long)st.size;
+                    h = h * 31 + (unsigned long)st.modified;
+                }
+            }
+            hash += h; /* The order doesn't matter. */
+        }
+    }
+    vx_close(handle);
+    return hash + (unsigned long)count;
+}
+
+static long folder_checked_ms;
+
+/* Reads the folder again if something else changed it (keeping what was
+ * selected); true if it did. */
+static bool refresh_if_changed(void) {
+    folder_checked_ms = vx_uptime();
+    unsigned long now = folder_signature();
+    if (now == folder_seen) {
+        return false;
+    }
+    static char names[64][256];
+    int count = 0;
+    for (int i = 0; i < item_count && count < 64; i++) {
+        if (items[i].selected) {
+            snprintf(names[count++], sizeof(names[0]), "%s", items[i].name);
+        }
+    }
+    reload_selecting(names, count);
+    printf("files: %s changed; read it again\n", cwd);
+    return true;
 }
 
 static void go_to(const char *path, bool remember) {
@@ -2161,7 +2221,7 @@ int main(int argc, char **argv) {
         /* Thumbnails are made when there's nothing else to do; and an old
          * message goes from the status bar after a while. */
         struct item *wanting = next_thumbnail();
-        long wait = wanting ? 0 : message[0] ? 1000 : -1;
+        long wait = wanting ? 0 : 1500; /* (Looking at the folder for changes.) */
         if (reload_at >= 0) {
             long left = reload_at - vx_uptime();
             wait = left < 0 ? 0 : wait < 0 || left < wait ? left : wait;
@@ -2180,8 +2240,11 @@ int main(int argc, char **argv) {
             continue;
         }
         if (got == 0) {
-            if (vx_uptime() - message_ms >= 5000) {
+            if (message[0] && vx_uptime() - message_ms >= 5000) {
                 message[0] = '\0';
+            }
+            if (mode == NORMAL && drag == DRAG_NONE && vx_uptime() - folder_checked_ms >= 1400) {
+                refresh_if_changed();
             }
             continue;
         }

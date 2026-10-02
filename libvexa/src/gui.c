@@ -394,3 +394,49 @@ void vx_desktop_lock(void) {
     struct desktop_message m = {.type = DESKTOP_LOCK};
     send_message(&m);
 }
+
+void vx_clipboard_set(const char *text, size_t length) {
+    /* Written aside, then renamed: a reader never sees half of it. */
+    char temporary[64];
+    snprintf(temporary, sizeof(temporary), "%s.%ld", DESKTOP_CLIPBOARD_FILE, vx_process_id());
+    int handle = vx_open(temporary, VX_OPEN_WRITE | VX_OPEN_CREATE | VX_OPEN_TRUNCATE);
+    if (handle < 0) {
+        return;
+    }
+    vx_write(handle, text, length);
+    vx_close(handle);
+    vx_rename(temporary, DESKTOP_CLIPBOARD_FILE);
+    if (connect_desktop() >= 0) {
+        struct desktop_message m = {.type = DESKTOP_CLIPBOARD_SET};
+        send_message(&m);
+    }
+}
+
+char *vx_clipboard_get(void) {
+    int handle = vx_open(DESKTOP_CLIPBOARD_FILE, VX_OPEN_READ);
+    size_t size = 0, capacity = 4096;
+    char *text = malloc(capacity);
+    if (!text) {
+        if (handle >= 0) {
+            vx_close(handle);
+        }
+        return NULL;
+    }
+    long n;
+    while (handle >= 0 && (n = vx_read(handle, text + size, capacity - size - 1)) > 0) {
+        size += (size_t)n;
+        if (capacity - size < 1024) {
+            char *more = realloc(text, capacity * 2);
+            if (!more) {
+                break;
+            }
+            text = more;
+            capacity *= 2;
+        }
+    }
+    if (handle >= 0) {
+        vx_close(handle);
+    }
+    text[size] = '\0';
+    return text;
+}

@@ -61,6 +61,11 @@ int vx_draw_text(struct vx_surface *s, int x, int y, const char *text, uint32_t 
 int vx_text_width(const char *text);
 /* One character in a monospaced cell (VX_CELL_WIDTH by VX_LINE_HEIGHT). */
 void vx_draw_char(struct vx_surface *s, int x, int y, uint32_t c, uint32_t fg, uint32_t bg);
+/* The same with any font and cell (VX_FACE_MONO at another size, say): a
+ * cell's width for the font, and drawing in one (centered in its height). */
+int vx_font_cell_width(const struct vx_font *font);
+void vx_draw_cell(struct vx_surface *s, const struct vx_font *font, int x, int y, int width,
+                  int height, uint32_t c, uint32_t fg, uint32_t bg);
 /* UTF-8: the character at *text (moving past it; 0xFFFD for a bad byte),
  * a character's bytes (returns how many), and where the character before
  * byte `at` starts. */
@@ -252,6 +257,19 @@ void vx_notify(const char *text);
 void vx_desktop_reload(void);
 /* Locks the screen (the lock screen asks for the password, if one is set). */
 void vx_desktop_lock(void);
+
+/* The clipboard: text (UTF-8), shared by every program, X programs too. */
+void vx_clipboard_set(const char *text, size_t length);
+/* Its text, in a new string to free() (empty if there's none); NULL if
+ * memory runs out. */
+char *vx_clipboard_get(void);
+
+/* Open and Save dialogs: a window of their own, until the user chooses.
+ * `folder` is where they start (NULL: the home folder); Save suggests
+ * `name`. True, with the chosen path in `out`, or false if cancelled. */
+bool vx_open_dialog(const char *title, const char *folder, char *out, size_t size);
+bool vx_save_dialog(const char *title, const char *folder, const char *name, char *out,
+                    size_t size);
 
 /* Writes a surface as a PNG file: 0, or a negative error. */
 int vx_image_save_png(const char *path, const struct vx_surface *surface);

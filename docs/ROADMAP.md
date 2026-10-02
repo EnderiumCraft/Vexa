@@ -238,6 +238,13 @@ Native track:
       a screensaver and a lock screen with a password; the Desktop folder and a home
       folder kept on disk; drag and drop between Files, other windows and the desktop
       (0.20.0)
+- [x] More apps and better ones: Terminal tabs, scrollback with a scroll bar, mouse
+      selection, copy and paste, 256 and 24-bit colour and font sizes; Text Editor
+      tabs, undo and redo, find and replace and syntax colouring; Image Viewer zoom and
+      pan, the next and previous picture, turning and a slideshow; Open and Save
+      dialogs and a clipboard shared by every app and X programs; Activity Monitor,
+      Calculator, Calendar, Notes, Paint and Help; Files windows refresh themselves;
+      the aurora wallpaper (0.21.0)
 
 Linux track:
 - [x] The X Window System built from source with musl: the X libraries, X.Org's

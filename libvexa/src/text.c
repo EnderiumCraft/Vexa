@@ -479,3 +479,31 @@ void vx_draw_char(struct vx_surface *s, int x, int y, uint32_t c, uint32_t fg, u
         draw_glyph(s, x, y + (VX_LINE_HEIGHT - f->height) / 2 + f->ascent, g, fg);
     }
 }
+
+int vx_font_cell_width(const struct vx_font *font) {
+    struct vx_font *f = (struct vx_font *)font;
+    if (f->mono_advance) {
+        return (int)f->mono_advance;
+    }
+    struct glyph *g = f->file ? find_glyph(f, 'M') : NULL;
+    return g ? text_ceil(g->advance) : FONT_WIDTH;
+}
+
+void vx_draw_cell(struct vx_surface *s, const struct vx_font *font, int x, int y, int width,
+                  int height, uint32_t c, uint32_t fg, uint32_t bg) {
+    struct vx_font *f = (struct vx_font *)font;
+    if (bg != VX_TRANSPARENT) {
+        vx_fill(s, x, y, width, height, bg);
+    }
+    if (c <= ' ') {
+        return;
+    }
+    if (!f->file) {
+        draw_bitmap_char(s, x, y, c, fg);
+        return;
+    }
+    struct glyph *g = find_glyph(f, c);
+    if (g) {
+        draw_glyph(s, x, y + (height - f->height) / 2 + f->ascent, g, fg);
+    }
+}

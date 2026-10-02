@@ -258,6 +258,20 @@ TYPED_COMMANDS = ([
     ("@sendkey print", "desktop: screenshot 1280x800 saved to /home/Pictures/Screenshot", 60),
     ("@sendkey meta_l-l", "desktop: locked", 10),
     ("@sendkey ret", "desktop: unlocked", 10),
+    # The apps: a second tab in the terminal (exit closes it); the
+    # Calculator (from search) does a sum; Notes makes a note.
+    ("@sendkey alt-tab", "desktop: switched to window", 10),
+    ("@sendkey ctrl-alt-t", "term: tab 1 of 1", 20),
+    ("@sendkey ctrl-shift-t", "term: tab 2 of 2", 20),
+    ("@type exit", None, 5),
+    ("@sendkey ctrl-spc", "desktop: search", 10),
+    ("@type Calculator", '"Calculator" (300x420)', 20),
+    ("@type 12*3=", "calc: 12 \u00d7 3 = 36", 10),
+    ("@sendkey alt-f4", "desktop: asked window", 10),
+    ("@sendkey ctrl-spc", "desktop: search", 10),
+    ("@type Notes", '"Notes" (780x520)', 20),
+    ("@sendkey ctrl-n", "notes: new note Note.txt", 10),
+    ("@sendkey alt-f4", "desktop: asked window", 10),
     ("@sendkey ctrl-alt-q", "desktop: asking before leaving", 20),
     ("@sendkey ret", "desktop: back to the console", 20),
     # (Keys typed while the desktop ran can be left at the console: Ctrl-U erases them.)
@@ -315,6 +329,12 @@ LINUX_COMMANDS = [
     ("desktop", 'desktop: window 1 "Terminal"', 30),
     ("@sendkey ctrl-alt-x", 'desktop: window 2 "xterm"', 90),
     ("@type echo typed-in-xterm > /dev/console", "typed-in-xterm", 20),
+    # The clipboard every app shares: what's written to /run/clipboard (here
+    # by the xterm's shell) pastes in X programs (Shift+Insert: PRIMARY,
+    # which xclipboard owns too).
+    ("@type printf 'echo pasted-%s-in-xterm > /dev/console' 42 > /run/clipboard", None, 3),
+    ("@sendkey shift-insert", None, 3),
+    ("@sendkey ret", "pasted-42-in-xterm", 20),
     ("@mouse_move 53 -150", None, 5),
     ("@mouse_move 53 -150", None, 5),
     ("@mouse_button 1", "desktop: asked window 2 to close", 10),
@@ -326,10 +346,11 @@ LINUX_COMMANDS = [
     ("@mouse_move -358 -44", None, 5),
     ("@mouse_button 1", "desktop: left button at 31,13", 10),
     ("@mouse_button 0", None, 5),
-    ("@mouse_move 0 182", None, 5),
-    ("@mouse_button 1", "desktop: left button at 31,195", 10),
+    ("@mouse_move 0 163", None, 5),
+    ("@mouse_move 0 163", None, 5),
+    ("@mouse_button 1", "desktop: left button at 31,339", 10),
     ("@mouse_button 0", "desktop: window 3", 300),
-    ("@mouse_move 181 113", None, 10),
+    ("@mouse_move 181 -31", None, 10),
     ("@mouse_button 1", "desktop: left button at 212,308", 10),
     ("@mouse_button 0", 'desktop: window 3 is now called "Change Display"', 60),
     # GTK draws its own title bar (the desktop draws none for it); its

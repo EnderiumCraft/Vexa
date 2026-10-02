@@ -53,7 +53,9 @@ void draw_shadow(struct vx_surface *view, struct rect r, int strength) {
             falloff[d] = (uint8_t)(t * t / 255);
         }
     }
-    /* A little below the window, and a little inside it at the sides. */
+    /* The shadow's shape: a little below the window, and a little inside it
+     * at the sides. What the window itself covers isn't drawn. */
+    struct rect window = r;
     r.y += 4;
     r.x += 2;
     r.width -= 4;
@@ -66,13 +68,15 @@ void draw_shadow(struct vx_surface *view, struct rect r, int strength) {
         if (dy > SHADOW) {
             continue;
         }
+        bool beside = y >= window.y && y < window.y + window.height;
         uint32_t *row = view->pixels + (long)y * view->stride;
         for (int x = area.x; x < area.x + area.width; x++) {
+            if (beside && x >= window.x && x < window.x + window.width) {
+                x = window.x + window.width - 1; /* Under the window: skip it. */
+                continue;
+            }
             int dx = x < r.x ? r.x - x : x >= r.x + r.width ? x - (r.x + r.width - 1) : 0;
-            if (dx > SHADOW || (dx == 0 && dy == 0)) {
-                if (dx == 0 && dy == 0) {
-                    x = r.x + r.width - 1; /* Skip what the window covers. */
-                }
+            if (dx > SHADOW) {
                 continue;
             }
             unsigned a = (unsigned)falloff[dx] * falloff[dy] / 255 * (unsigned)strength / 255;

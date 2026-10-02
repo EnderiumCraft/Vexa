@@ -128,6 +128,7 @@ PYTHON := $(PYTHON_ROOT)/.done
 X11_SYSROOT := $(BUILD)/x11
 X11 := $(X11_SYSROOT)/.done
 X11_SOURCES := third_party/x11-sources.txt
+XCLIPBOARD := $(BUILD)/xclipboard/xclipboard
 
 # Everything under /linux: the Linux programs and what they need.
 LINUX_ROOT := $(BUILD)/linux-root
@@ -206,10 +207,14 @@ LINUX_ON_CD := bin lib sbin usr
 # The starting root file system: rootfs/ plus the programs in /bin and the
 # apps in /apps, as a tar archive (ustar, with fixed owners and times so
 # builds are reproducible).
-$(INITRAMFS): $(PROGRAM_BINS) $(LIBVEXA_SO) $(VEXA_LD) $(ROOTFS_FILES) $(APP_FILES) $(LINUX_TREE)
+$(INITRAMFS): $(PROGRAM_BINS) $(LIBVEXA_SO) $(VEXA_LD) $(ROOTFS_FILES) $(APP_FILES) $(LINUX_TREE) \
+		docs/USER-GUIDE.md
 	rm -rf $(BUILD)/rootfs
 	mkdir -p $(BUILD)/rootfs/bin $(BUILD)/rootfs/lib
 	cp -R rootfs/. $(BUILD)/rootfs/
+	# The Help app's book: the user guide.
+	mkdir -p $(BUILD)/rootfs/share/help
+	cp docs/USER-GUIDE.md $(BUILD)/rootfs/share/help/
 	cp $(PROGRAM_BINS) $(BUILD)/rootfs/bin/
 	cp $(LIBVEXA_SO) $(VEXA_LD) $(BUILD)/rootfs/lib/
 	# Apps (.vxapp bundles): each app's program moves into its bundle, and
@@ -384,11 +389,20 @@ $(X11): $(X11_SOURCES) tools/build-x11.sh $(wildcard third_party/xvexa/*) | $(BU
 x11: $(X11)
 
 $(LINUX_ROOT)/.done: $(BUSYBOX) $(BASH) $(COREUTILS) $(PYTHON) $(X11) $(MUSL_LIBC) $(LINUX_TESTS) \
-		tools/make-linux-root.sh $(wildcard tools/linux-files/* tools/linux-files/applications/*)
+		$(XCLIPBOARD) tools/make-linux-root.sh \
+		$(wildcard tools/linux-files/* tools/linux-files/applications/*)
 	tools/make-linux-root.sh $(LINUX_ROOT) $(MUSL_LIBC) $(BUSYBOX) \
 		$(BUSYBOX_BUILD)/busybox.links $(BASH) $(COREUTILS) $(COREUTILS_BUILD)/programs.txt \
 		$(PYTHON_ROOT) $(X11_SYSROOT) $(LINUX_TESTS)
+	cp $(XCLIPBOARD) $(LINUX_ROOT)/usr/bin/xclipboard
 	touch $@
+
+# xclipboard: the clipboard between X programs and Vexa's (an X program,
+# started by xrun with the X server).
+$(XCLIPBOARD): tools/xclipboard.c $(X11)
+	@mkdir -p $(dir $@)
+	$(MUSL_CC) -O2 -Wall -I$(X11_SYSROOT)/usr/include -L$(X11_SYSROOT)/usr/lib \
+		-Wl,-rpath-link,$(X11_SYSROOT)/usr/lib $< -o $@ -lXfixes -lX11
 
 $(BUILD)/disk-content: $(DISK_CONTENT_FILES) $(BUILD)/programs/hello-world
 	rm -rf $@
