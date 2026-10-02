@@ -39,14 +39,20 @@ runs X programs such as `xterm` in windows of their own on it. The kernel:
 - gives programs memory on demand, and shares pages copy-on-write
 - runs on kernel stacks with guard pages, and reports stack overflows and other faults
   in plain words
-- reads the PS/2 keyboard (US layout, Shift, Caps Lock, Ctrl) and mouse (with a scroll
-  wheel), as input events programs can read
+- reads the PS/2 keyboard and mouse (with a scroll wheel), as input events programs
+  can read (the text console types a US layout; the desktop, the layout Settings chose)
 - has a graphical desktop: a compositor that draws programs' windows (shared buffers)
-  on the screen, with a panel (the Vexa menu, a button per window, a clock), desktop
-  icons, notifications, windows you move, resize, maximize, minimize and snap to an
-  edge, and its own apps: a terminal, Files, a text editor, an image viewer (PNG, BMP,
-  PPM) and Settings (wallpaper, clock, time zone); the default wallpaper is
-  `/share/pictures/meadow.png`
+  on the screen, with soft shadows, round corners and animations, a panel (the Vexa
+  menu, a button per window, search, a clock with a calendar and the notifications),
+  desktop icons (apps, the Desktop folder's files, the Trash), notifications, windows
+  you move, resize, maximize, minimize and snap to a half or a quarter (by dragging, or
+  Super+arrows), Alt+Tab with pictures of the windows, search (Ctrl+Space: apps,
+  settings, files, sums), screenshots (PrintScreen), a screensaver and a lock screen,
+  and its own apps: a terminal, Files, a text editor, an image viewer (PNG, BMP, PPM)
+  and Settings; the default wallpaper is `/share/pictures/meadow.png`
+- draws text smooth with TrueType fonts (DejaVu, through stb_truetype) in UTF-8, so
+  Vexa's apps show and type any language's letters, with whole keyboard layouts
+  (German, French, Spanish, UK, Dvorak: AltGr and accent keys)
 - keeps its desktop apps as bundles, as macOS does: `/apps/Files.vxapp` is a folder
   with the program, its icon and an `Info.conf` saying what it is and which files it
   opens; the menu, the desktop icons, Files and `open` all work from them, and
@@ -116,7 +122,7 @@ the `vexa:/>` prompt:
 | `bash` | GNU bash, a Linux program (`exit` to go back); inside it, `ls`, `vi`, `grep`, `ps`, `top`... are BusyBox's |
 | `sh`, `busybox` | BusyBox's shell; `busybox` alone lists its commands |
 | `ln -s`, `cat /proc/meminfo` | symbolic links; `/proc` |
-| `desktop` | the graphical desktop, with a terminal window; the Vexa menu (top left) and the icons on the left start programs, Alt+Tab switches windows, dragging a window to an edge snaps it, Ctrl+Alt+T opens a terminal, Ctrl+Alt+F Files, Ctrl+Alt+E the text editor, Ctrl+Alt+X an `xterm` (an X program), Ctrl+Alt+Q goes back to the text console |
+| `desktop` | the graphical desktop, with a terminal window; the Vexa menu (top left) and the icons on the left start programs, Alt+Tab switches windows (with pictures of them), dragging a window to an edge or corner snaps it (so do Super+arrows), Ctrl+Space searches, PrintScreen takes a screenshot, Super+L locks the screen, Ctrl+Alt+T opens a terminal, Ctrl+Alt+F Files, Ctrl+Alt+E the text editor, Ctrl+Alt+X an `xterm` (an X program), Ctrl+Alt+Q goes back to the text console |
 | `files`, `edit <file>`, `view <image>`, `settings` | the desktop's apps, from its terminal: `view /share/pictures/aurora.png`; in Files, a right click shows what you can do (copy, rename, Get Info, Move to Trash...) |
 | `open <file>`, `open -a <app>` | opens a file with its app, a folder in Files, or starts an app, like macOS's `open`: `open /share/pictures/aurora.png`, `open -a Editor notes.txt` |
 | `notify <text>` | a notification on the desktop |
@@ -269,7 +275,11 @@ starts it. To make it a desktop app, give it a bundle in `apps/` (see the
 [developer guide](docs/DEVELOPER-GUIDE.md#app-bundles)).
 
 The console font is [Spleen](https://github.com/fcambus/spleen) 8x16 by Frederic Cambus
-(BSD 2-Clause license, reproduced in `kernel/src/dev/font.c`).
+(BSD 2-Clause license, reproduced in `kernel/src/dev/font.c`). Vexa's apps draw text
+with the [DejaVu](https://dejavu-fonts.github.io) fonts (Bitstream Vera license and
+public domain changes, `rootfs/share/fonts/LICENSE`), rasterized by
+[stb_truetype](https://github.com/nothings/stb) (public domain or MIT,
+`third_party/stb/stb_truetype.h`).
 
 The ISO includes [BusyBox](https://busybox.net) 1.36.1 (GPL-2.0), built unmodified from
 its source with the configuration in `third_party/busybox.config`, and

@@ -27,7 +27,7 @@ success and a **negative `VX_E*` error** on failure; `vx_strerror(error)` descri
 | --- | --- |
 | `<stdio.h>` | `FILE`, `stdin`, `stdout`, `stderr`; `fopen` (`"r"`, `"w"`, `"a"`, and with `+`), `fdopen`, `fclose`, `fflush`, `fread`, `fwrite`, `fgetc`, `fgets`, `fputc`, `fputs`, `feof`, `ferror`, `fileno`, `getchar`, `putchar`, `puts`; `printf`, `fprintf`, `sprintf`, `snprintf` and their `v` forms |
 | `<stdlib.h>` | `malloc`, `calloc`, `realloc`, `free`; `getenv`, `setenv`, `unsetenv`, `environ`; `atoi`, `atol`, `strtol`, `strtoul`; `abs`, `labs`; `qsort`; `EXIT_SUCCESS`, `EXIT_FAILURE` |
-| `<string.h>` | `mem*` (`memcpy`, `memmove`, `memset`, `memcmp`, `memchr`), `strlen`, `strnlen`, `strcmp`, `strncmp`, `strcpy`, `strncpy`, `strcat`, `strncat`, `strchr`, `strrchr`, `strstr`, `strspn`, `strcspn`, `strdup`, `strndup` |
+| `<string.h>` | `mem*` (`memcpy`, `memmove`, `memset`, `memcmp`, `memchr`), `strlen`, `strnlen`, `strcmp`, `strncmp`, `strcpy`, `strncpy`, `strcat`, `strncat`, `strchr`, `strrchr`, `strstr`, `strspn`, `strcspn`, `strpbrk`, `strdup`, `strndup` |
 | `<ctype.h>` | `isdigit`, `isalpha`, `isalnum`, `isxdigit`, `isspace`, `isprint`, `ispunct`, `islower`, `isupper`, `tolower`, `toupper` |
 
 The compiler's own headers work too: `<stdint.h>`, `<stddef.h>`, `<stdbool.h>`,
@@ -197,9 +197,35 @@ Colors are `0xRRGGBB`. `VX_TRANSPARENT` as a background leaves what's there.
 | --- | --- |
 | `struct vx_surface { uint32_t *pixels; int width, height, stride; }` | pixels in memory |
 | `void vx_fill(s, x, y, width, height, color)` | a rectangle (clipped) |
-| `void vx_draw_char(s, x, y, c, fg, bg)` | one character of the 8x16 font |
-| `int vx_draw_text(s, x, y, text, fg, bg)` | a line of text; returns the x after it |
 | `void vx_blit(to, tx, ty, from, fx, fy, width, height)` | copies a rectangle between surfaces |
+
+### Text
+
+Text is UTF-8, drawn smooth with TrueType fonts: DejaVu Sans, Sans Bold and Sans Mono
+in `/share/fonts`, rasterized by [stb_truetype](https://github.com/nothings/stb) (in
+`third_party/stb`). A font is a face at a size in pixels; each program keeps the glyphs
+it has drawn. Without the font files, text falls back to the console's 8x16 bitmap font.
+
+```c
+const struct vx_font *title = vx_font(VX_FACE_BOLD, 24);
+int end = vx_text(s, title, 20, 10, "Größe", VX_COLOR_TEXT, VX_TRANSPARENT);
+vx_draw_text(s, end + 8, 18, "café", VX_COLOR_DIM, VX_TRANSPARENT); /* The UI font. */
+```
+
+| Function | What it does |
+| --- | --- |
+| `const struct vx_font *vx_font(int face, int size)` | `VX_FACE_SANS`, `VX_FACE_BOLD` or `VX_FACE_MONO` at `size` pixels (the em) |
+| `const struct vx_font *vx_font_ui(void)` | the apps' text: Sans at `VX_UI_FONT_SIZE` (13) |
+| `int vx_font_height(font)`, `int vx_font_ascent(font)` | a line's height; the baseline's distance from its top |
+| `int vx_text(s, font, x, y, text, fg, bg)` | a line of text with its top at `y`; returns the x after it (`bg`: filled behind it, unless `VX_TRANSPARENT`) |
+| `int vx_text_width_font(font, text)`, `int vx_text_width(text)` | how wide text is (the second: in the UI font) |
+| `int vx_text_width_bytes(font, text, length)` | the width of its first `length` bytes |
+| `size_t vx_text_fit_bytes(font, text, width)` | how many bytes of it fit in `width` pixels (whole characters) |
+| `int vx_draw_text(s, x, y, text, fg, bg)` | UI-font text, centered in a `VX_LINE_HEIGHT` (16) line whose top is `y` |
+| `void vx_draw_char(s, x, y, uint32_t c, fg, bg)` | one character in a monospaced cell, `VX_CELL_WIDTH` (8) by `VX_LINE_HEIGHT`: terminals and editors |
+| `uint32_t vx_utf8_next(const char **text)` | the character at `*text`, moving past it (0xFFFD for a bad byte) |
+| `int vx_utf8_encode(uint32_t c, char out[4])` | a character's bytes; returns how many |
+| `size_t vx_utf8_previous(const char *text, size_t at)` | where the character before byte `at` starts |
 
 ### Windows
 
@@ -210,17 +236,22 @@ Colors are `0xRRGGBB`. `VX_TRANSPARENT` as a background leaves what's there.
 | `int vx_window_resize(struct vx_window *w, int width, int height)` | a new, blank surface of that size |
 | `void vx_window_present(struct vx_window *w, int x, int y, int width, int height)` | shows what was drawn in the rectangle |
 | `void vx_window_set_title(w, const char *title)`, `void vx_window_destroy(w)` | |
+| `void vx_window_set_cursor(w, int shape)` | the pointer's shape over the window: `VX_CURSOR_ARROW`, `TEXT`, `HAND`, `WAIT`, `CROSS`, `MOVE` (sent only when it changes) |
+| `void vx_window_drag_files(w, const char *const *paths, int count, bool copy)` | files dragged out of the window and let go where the pointer is now: the desktop puts them there (on the desktop, or in another window as a `VX_GUI_DROP`) |
+| `char *vx_drop_paths(const struct vx_gui_event *e)` | a `VX_GUI_DROP`'s paths, one per line, in a string to `free()` |
 | `int vx_gui_wait(struct vx_gui_event *e, long timeout_ms)` | the next event: 1, 0 on timeout (-1 waits forever), `-VX_EPIPE` if the desktop is gone |
 | `int vx_gui_handle(void)` | the desktop connection's handle, for `vx_poll` |
 | `void vx_notify(const char *text)` | a notification on the desktop ("title: text") |
 | `void vx_desktop_reload(void)` | asks the desktop to read `/etc/desktop.conf` again |
+| `void vx_desktop_lock(void)` | locks the screen |
 
 `struct vx_gui_event` fields, by type:
 
 | `type` | Fields |
 | --- | --- |
-| `VX_GUI_KEY` | `key` (`VX_KEY_*`, Linux key codes), `value` (1 down, 0 up, 2 repeat), `character` (what it types, or 0; Ctrl+letter gives 1-26) |
-| `VX_GUI_POINTER` | `x`, `y` (in the window), `buttons` (bit 0 left, 1 right, 2 middle), `wheel` |
+| `VX_GUI_KEY` | `key` (`VX_KEY_*`, Linux key codes), `value` (1 down, 0 up, 2 repeat), `character` (what it types, in Unicode, in the keyboard layout Settings chose; or 0; Ctrl+letter gives 1-26) |
+| `VX_GUI_POINTER` | `x`, `y` (in the window), `buttons` (bit 0 left, 1 right, 2 middle), `wheel`. While a button pressed in the window is down, the window gets the pointer even outside it (`x`, `y` beyond its size) |
+| `VX_GUI_DROP` | `x`, `y`, `value` (1 to copy, not move), `text`: files dropped on the window (`vx_drop_paths`) |
 | `VX_GUI_CLOSE` | the user asked to close the window |
 | `VX_GUI_FOCUS` | `value`: 1 gained the keyboard, 0 lost it |
 | `VX_GUI_RESIZE` | `width`, `height`: the size the user asked for |
@@ -239,10 +270,10 @@ two colors.
 | Function | What it does |
 | --- | --- |
 | `void vx_draw_outline(s, x, y, width, height, color)` | a one-pixel outline |
-| `void vx_draw_text_fit(s, x, y, width, text, fg, bg)` | text cut to fit, ending in "..." |
+| `void vx_draw_text_fit(s, x, y, width, text, fg, bg)` | text cut to fit, ending in "…" |
 | `void vx_draw_button(s, x, y, width, height, label, bool hot)` | a push button |
 | `void vx_draw_field(s, x, y, width, text, bool focused)` | a one-line text field |
-| `bool vx_field_key(char *text, size_t size, const struct vx_gui_event *e)` | edits a field's text with a key event; true if it changed |
+| `bool vx_field_key(char *text, size_t size, const struct vx_gui_event *e)` | edits a field's text (UTF-8) with a key event; true if it changed |
 | `bool vx_inside(px, py, x, y, width, height)` | a point in a rectangle |
 | `void vx_menu_size(items, count, int *width, int *height)` | a pop-up menu's size |
 | `void vx_draw_menu(s, x, y, items, count, int hot)` | draws it (`hot`: the item under the pointer, or -1) |
@@ -260,6 +291,7 @@ bool disabled; }`; an item with no label is a line between groups.
 | `void vx_image_free(struct vx_image *image)` | |
 | `void vx_blit_scaled(to, x, y, width, height, from)` | draws a surface scaled (nearest pixel) |
 | `void vx_blit_alpha(to, x, y, width, height, from)` | draws a `VX_IMAGE_ALPHA` image scaled and blended (averaged when smaller: icons) |
+| `int vx_image_save_png(const char *path, const struct vx_surface *s)` | writes a surface as a PNG (RGB; deflate-compressed): 0 or an error |
 
 ## `<vexa/app.h>`: app bundles
 
@@ -311,6 +343,7 @@ vx_desktop_reload(); /* The desktop, and every program, read them again. */
 | `int vx_settings_write_file(const char *name, const char *text, size_t length)` | a whole file in `/etc` (and on disk) |
 | `bool vx_settings_disk(char *out, size_t size)` | the disk that keeps settings, if any |
 | `int vx_settings_restore(void)` | copies them back to `/etc` (vinit does it at boot) |
+| `void vx_password_hash(const char *password, char out[17])` | the lock screen password's hash, as `lock_password` keeps it |
 
 ## `<vexa/time.h>`: dates and time zones
 
@@ -327,7 +360,8 @@ vx_desktop_reload(); /* The desktop, and every program, read them again. */
 
 The console's font (Spleen 8x16): `FONT_WIDTH` 8, `FONT_HEIGHT` 16, printable ASCII
 from `FONT_FIRST_CHAR` (0x20), `FONT_GLYPH_COUNT` glyphs in `font_glyphs`, one byte a
-row, most significant bit on the left. `vx_draw_text` uses it.
+row, most significant bit on the left. Text falls back to it when the TrueType fonts
+aren't there.
 
 ## `<vexa/desktop.h>`: the desktop protocol
 

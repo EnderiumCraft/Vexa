@@ -201,12 +201,22 @@ PACKET command), as `cd0`... with 2048-byte sectors.
 - **The desktop** (`userland/desktop`) is an ordinary program: it grabs the keyboard and
   mouse, listens on the local socket `/run/desktop`, keeps windows in a stack, composes
   the parts of the screen that changed into memory and copies them to the display.
-  It draws the panel (the Vexa menu, window buttons, a clock from `vx_time`), title
-  bars with minimize, maximize and close buttons, and the outline of a window being
-  resized. Programs use `<vexa/gui.h>`: `vx_window_create`, draw into
+  It draws the panel (the Vexa menu, window buttons, search, a clock from `vx_time`
+  with a calendar under it), title bars with round corners and minimize, maximize and
+  close buttons, soft shadows, the outline of a window being resized, and animations
+  (a window is drawn into a scratch surface and scaled, at about 60 frames a second
+  while one runs). Its parts are in `userland/desktop/` (see the developer guide):
+  Alt+Tab, search, the desktop's icons and the Desktop folder, screenshots (a PNG
+  writer in libvexa), the screensaver and the lock screen. Programs use
+  `<vexa/gui.h>`: `vx_window_create`, draw into
   `window->surface`, `vx_window_present`, and `vx_gui_wait` for key, pointer and close
   events. A window made with `VX_WINDOW_RESIZABLE` gets `VX_GUI_RESIZE` events and
   answers with `vx_window_resize`, which hands the desktop a new buffer.
+- **Text** in Vexa's programs is TrueType: libvexa maps the DejaVu fonts in
+  `/share/fonts` and rasterizes glyphs with stb_truetype (anti-aliased, kept per font
+  and size in each program); strings are UTF-8. The desktop turns key codes into
+  Unicode characters through the keyboard layout (with dead keys) and sends them with
+  each key event.
 - **Apps** are bundles, as on macOS: a folder `/apps/Name.vxapp` with
   `Contents/Info.conf` (name, executable, icon, the file types it opens, a shortcut,
   its place in the menu, whether it has a desktop icon), `Contents/Vexa/<program>`

@@ -138,8 +138,8 @@ abi/vexa/abi.h        system call numbers, structures and errors: kernel and lib
 libvexa/              Vexa's C library (libvexa.so) and dynamic loader (ld/)
 userland/<name>/      Vexa's programs, one directory each, built into /bin
 apps/<Name>.vxapp/    the desktop apps' bundles (Info.conf, icons)
-rootfs/               files for the root file system (/etc, /share)
-third_party/          Xvexa (Vexa's X server), BusyBox's configuration, the X sources list
+rootfs/               files for the root file system (/etc, /share: pictures, fonts)
+third_party/          Xvexa (Vexa's X server), stb_truetype, BusyBox's configuration, the X sources list
 tools/                build scripts, the test harness, disk images, icons
 tests/                Linux test programs and test disk contents
 docs/                 this documentation
@@ -234,9 +234,20 @@ int main(void) {
 - `vx_gui_wait(&e, timeout)` also takes a timeout (0: don't wait), for animations or
   work done between events; `vx_gui_handle()` gives the connection's handle for
   `vx_poll` with other handles.
+- Text is UTF-8 and drawn smooth (TrueType). `vx_draw_text` is the apps' font in
+  16-pixel lines; measure with `vx_text_width` (characters aren't all as wide), and
+  for other sizes or bold, `vx_text(s, vx_font(VX_FACE_BOLD, 24), ...)`. Grids of
+  characters (terminals, editors) use `vx_draw_char`: monospaced cells, 8 by 16.
+  `character` in key events is Unicode: encode it with `vx_utf8_encode`.
 - Widgets in Vexa's look: `vx_draw_button`, `vx_draw_field` and `vx_field_key` (a text
   field), `vx_draw_menu` (a right-click menu), `vx_draw_text_fit`, `vx_draw_outline`, and
   the `VX_COLOR_*` theme colors.
+- `vx_window_set_cursor(w, VX_CURSOR_TEXT)` changes the pointer over the window (an
+  I-beam over text, say).
+- Drag and drop: while a button pressed in the window is down, pointer events keep
+  coming even outside it. Let go outside, and `vx_window_drag_files(w, paths, n, copy)`
+  hands the files to the desktop, which puts them where the pointer is (the desktop, or
+  another window: it gets a `VX_GUI_DROP`, whose paths `vx_drop_paths` reads).
 - Pictures: `vx_image_load` (PNG, BMP, PPM), `vx_blit_scaled`, and with `VX_IMAGE_ALPHA`,
   `vx_blit_alpha` for icons with transparency.
 - `vx_notify("App: something happened")` shows a desktop notification.
@@ -302,15 +313,35 @@ wraps all of it; only the desktop and Xvexa use it directly.
 - **Program to desktop**: `CREATE` (size, flags: `RESIZABLE`, `POPUP` for menus and
   tooltips, `UNDECORATED` for windows that draw their own title bar), `PRESENT` (a
   rectangle), `TITLE`, `DESTROY`, `BUFFER` (a new buffer after a resize), `MOVE`, `INFO`
-  (the screen's size), `NOTIFY`, `RELOAD` (read `/etc/desktop.conf` again), and `WM`
+  (the screen's size), `NOTIFY`, `RELOAD` (read `/etc/desktop.conf` again), `WM`
   (what a program asks of a window manager: maximize, restore, minimize, activate, or
-  start dragging to move or resize).
+  start dragging to move or resize), `CURSOR` (the pointer's shape over the window),
+  `DRAG` (files dragged out and let go: a list file in `/tmp`) and `LOCK`.
 - **Desktop to program**: `CREATED`, `KEY`, `POINTER`, `CLOSE`, `FOCUS`, `CONFIGURE`
   (please be this size), `RESIZED`, `MOVED`, `INFO_REPLY`, `STATE` (maximized,
-  minimized).
+  minimized), `THEME` (read the theme again) and `DROP` (files dropped on the window).
 
-The desktop also reads `/etc/desktop.conf` (wallpaper, clock, time zone) and builds
-its menu, icons and shortcuts from `/apps` and `/linux/usr/share/applications`.
+The desktop also reads `/etc/desktop.conf` (wallpaper, clock, time zone, lock screen...)
+and builds its menu, icons and shortcuts from `/apps`, `/home/Desktop` and
+`/linux/usr/share/applications`.
+
+The desktop is in parts, in `userland/desktop/`:
+
+| File | What it does |
+| --- | --- |
+| `main.c` | windows (frames, stacking, focus, moving, resizing, snapping, animations), the panel and the Vexa menu, the protocol, the keyboard (layouts, dead keys, shortcuts) and the pointer, the display |
+| `shell.h` | what the parts share |
+| `look.c` | shadows, round corners, smooth scaling, blur, the pointer's shapes |
+| `icons.c` | the icons on the desktop: apps, the Desktop folder's files, the Trash |
+| `switcher.c` | Alt+Tab |
+| `search.c` | search (Ctrl+Space) |
+| `clock.c` | the calendar and the notifications under the clock |
+| `shot.c` | screenshots |
+| `lock.c` | the screensaver and the lock screen |
+
+It prints what it does to its standard output (the serial log, when it's started from
+the console): `desktop: window 3 "Settings" (860x580) at 144,138`, `desktop: snapped
+window 1 to the top left`, `desktop: locked`... The tests wait for these lines.
 
 ## Linux programs in the ISO
 

@@ -229,6 +229,15 @@ Native track:
       window; time zones with summer time; keyboard layouts; display modes (Bochs DISPI)
       and 2x scaling; settings kept on disk; ACPI power off, restart, the computer's
       name, `df` (0.19.0)
+- [x] Desktop polish: TrueType text (DejaVu, stb_truetype) and UTF-8 in every Vexa
+      app, with whole keyboard layouts (AltGr, dead keys); window shadows, round
+      corners and animations; Alt+Tab with pictures of the windows; Alt+F4, Super+arrows,
+      snapping to halves and quarters with a preview; pointer shapes (resizing from
+      the left edge too); search (Ctrl+Space: apps, settings, files, sums); a calendar
+      and the notifications under the clock; screenshots (PrintScreen, a PNG writer);
+      a screensaver and a lock screen with a password; the Desktop folder and a home
+      folder kept on disk; drag and drop between Files, other windows and the desktop
+      (0.20.0)
 
 Linux track:
 - [x] The X Window System built from source with musl: the X libraries, X.Org's

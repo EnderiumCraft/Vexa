@@ -16,7 +16,7 @@ static int saver_minutes = 10;
 static bool lock_on_wake;
 static char password_hash[24];
 static char typed[64];
-static long last_input, wrong_at = -1, unlocked_minute = -1;
+static long last_input, wrong_at = -1;
 static struct vx_surface blurred;
 static int saver_x, saver_y, saver_dx = 1, saver_dy = 1;
 static long saver_moved;
@@ -167,7 +167,6 @@ void lock_tick(void) {
         shown_minute = minute;
         damage_all();
     }
-    (void)unlocked_minute;
 }
 
 long lock_wait_ms(void) {

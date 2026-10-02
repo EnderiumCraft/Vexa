@@ -144,8 +144,10 @@ Vexa's file system starts in memory and has these folders:
 | `/bin` | Vexa's programs (the apps' programs are links into their bundles) |
 | `/lib` | `libvexa.so` and Vexa's dynamic loader, `vexa-ld.so` |
 | `/apps` | the desktop's apps, as `.vxapp` bundles |
+| `/home` | your folders: `Desktop` (its files are the desktop's icons), `Documents`, `Pictures` (screenshots go here) |
 | `/etc` | settings: `motd`, `desktop.conf`, `hosts`, `resolv.conf` |
 | `/share/pictures` | pictures (the wallpaper, `meadow.png`, and `aurora.png`) |
+| `/share/fonts` | the fonts Vexa's apps draw text with (DejaVu Sans, Sans Bold, Sans Mono) |
 | `/tmp` | scratch space |
 | `/Trash` | what Files moved to the Trash |
 | `/dev` | devices: the console, terminals (`/dev/pts`), `/dev/input`, `/dev/display0` |
@@ -156,44 +158,81 @@ Vexa's file system starts in memory and has these folders:
 | `/linux` | the Linux programs' own file tree (`/linux/usr/bin`, ...) |
 
 Everything outside `/mnt` is in memory: it starts fresh at every boot. To keep files,
-put them on a disk (see [Disks and CDs](#disks-and-cds)).
+put them on a disk (see [Disks and CDs](#disks-and-cds)). When Vexa has a disk it can
+write to (the first writable ext2 disk), `/home` is kept on it (as `home` there), so
+the Desktop, Documents and Pictures folders stay from one boot to the next.
 
 ## The desktop
 
 Type `desktop` at the shell. The desktop takes the screen and opens a terminal window.
-Ctrl+Alt+Q goes back to the text console.
+Ctrl+Alt+Q (it asks first) goes back to the text console.
 
 ![The desktop](desktop-screenshot.png)
 
 **The panel** along the top has:
 
-- the **Vexa menu** (top left): the apps, then the Linux programs, then "Back to the
-  console"; each shows its keyboard shortcut
+- the **Vexa menu** (top left): the apps, then the Linux programs, then Lock Screen,
+  Restart..., Shut Down... and Back to the console...; each shows its keyboard shortcut
 - a **button for each window**: a click shows it (or minimizes it, if it's in front)
-- the **clock** (Settings changes its format and time zone)
+- the **magnifier**: search (below)
+- the **clock**: a click opens the **calendar** (the arrows go to other months; the
+  month's name comes back to this one) and the **notifications** seen lately, newest
+  first, which Clear takes away. A dot by the clock means there are new ones.
 
-The Vexa menu also has **Restart...**, **Shut Down...** and **Back to the console**.
-
-**Desktop icons** on the left start apps with a double click: Terminal, Files, Editor,
-Settings and XTerm. A **right click** on the desktop opens a menu (New Terminal, Open
-Files, Change Wallpaper, About Vexa); on an icon, Open and Show in Files.
+**Desktop icons.** On the left: the apps (Terminal, Files, Editor, Settings, XTerm),
+then whatever is in the **Desktop folder** (`/home/Desktop`), as on a Mac; the **Trash**
+is in the bottom right corner. A click selects an icon (Ctrl+click adds to the
+selection; dragging over the desktop selects all the icons it covers), a double click
+opens it. Drag files' icons to move them on the desktop (they stay where they're put),
+onto a folder's icon or the Trash, or into a Files window. Files dragged out of a
+Files window onto the desktop go into the Desktop folder (hold Ctrl to copy rather
+than move). A **right click** on the desktop opens a menu (New Terminal, Open Files,
+New Folder, Change Wallpaper, About Vexa); on an icon, Open, Show in Files and Move to
+Trash; on the Trash, Open and Empty Trash.
 
 **Windows**
 
 - drag a window by its **title bar**; a click raises it and gives it the keyboard
-- the buttons on the right of the title bar **minimize**, **maximize** and **close** it;
-  a double click on the title bar maximizes it
-- drag the **right or bottom edge** (or the corner) to resize it
-- drag a window to the **top edge** of the screen to maximize it, or to the **left or
-  right edge** to make it fill that half; dragging a maximized window brings back its
-  old size
-- **Alt+Tab** goes to the next window
+- the buttons on the right of the title bar **minimize**, **maximize** and **close** it
+  (they light up under the pointer); a double click on the title bar maximizes it
+- drag the **left, right or bottom edge** (or a bottom corner) to resize it: the
+  pointer changes over them
+- drag a window to the **top edge** of the screen to maximize it, to the **left or right
+  edge** to fill that half, or into a **corner** for a quarter; a see-through outline
+  shows where it will go. Dragging a maximized or snapped window brings back its old size
+- **Super+arrows** do the same from the keyboard: Super+Left or Right a half, then
+  Super+Up or Down a quarter (or maximize, or minimize), and the opposite arrow back
+- **Alt+Tab** shows a picture of each window, the most recently used first: hold Alt
+  and press Tab (Shift+Tab goes back), and let go of Alt to bring that one to the front
+- **Alt+F4** closes the window in front; **Super+D** minimizes everything (again: back)
+- windows have soft **shadows**; they grow in when they open, fade when they close and
+  fly to their panel button when minimized (Settings, Desktop & Panel, can turn the
+  animations off)
 
-**Notifications** appear at the top right for a few seconds (`notify Hello!` shows one).
+**Search** (Ctrl+Space or Super+Space, or the magnifier on the panel): type, and it
+finds apps, Settings' sections (by name or by what's in them: "password", "resolution")
+and files (in `/home`, `/share`, `/tmp` and the disks). It also does sums: `12*(3+4)`
+shows 84. Up and Down choose, Enter opens, Escape closes.
 
-**Keyboard shortcuts** on the desktop: Ctrl+Alt+T a terminal, Ctrl+Alt+F Files,
-Ctrl+Alt+E the text editor, Ctrl+Alt+X an xterm, Alt+Tab the next window, Ctrl+Alt+Q
-back to the console.
+**Screenshots**: PrintScreen takes the whole screen, Alt+PrintScreen the window in
+front, and Shift+PrintScreen an area (drag over it; Escape cancels). They're saved in
+`/home/Pictures` as PNG files ("Screenshot 2026-10-02 at 20.45.13.png"), and a
+notification says so.
+
+**The lock screen and the screensaver.** Super+L (or Ctrl+Alt+L, or Lock Screen in the
+Vexa menu) locks the screen: the time and date over the blurred wallpaper, and the
+password field if a password is set (Settings, Lock Screen); without one, any key or
+click unlocks. After some minutes without the keyboard or the mouse (10, unless
+Settings says otherwise), the screensaver starts: the time drifting slowly over the
+dark, blurred wallpaper. Any key or movement wakes it, to the lock screen if Settings
+says so.
+
+**Notifications** appear at the top right for a few seconds (`notify Hello!` shows one);
+the clock keeps them for later.
+
+**Text** in Vexa's own apps is drawn smooth, with TrueType fonts (DejaVu), and can be
+any language's letters: with a German, French or Spanish layout, ü, é, ñ and € type as
+they should.
 
 ## Apps
 
@@ -206,7 +245,7 @@ in `.vxapp`, kept in `/apps`. Files shows each one as a single app with its icon
 | Files | `Files.vxapp` | the file manager |
 | Text Editor | `Editor.vxapp` | a text editor; opens any file |
 | Image Viewer | `Viewer.vxapp` | shows PNG, BMP and PPM pictures |
-| Settings | `Settings.vxapp` | wallpaper, clock and time zone |
+| Settings | `Settings.vxapp` | System Settings: the look, wallpaper, clock, mouse and keyboard, display, lock screen... |
 | About Vexa | `About.vxapp` | the version, and how the system is doing |
 | XTerm | `XTerm.vxapp` | an xterm (a Linux X program; only when the Linux files are there) |
 
@@ -319,9 +358,10 @@ at once. `settings Display` opens a section directly.
 | --- | --- |
 | **Appearance** | Dark or Light, and the accent color (Purple, Blue, Teal, Green, Orange, Pink, Red, Graphite): the panel, menus, title bars and Vexa's apps follow; the terminal stays dark |
 | **Wallpaper** | the pictures in `/share/pictures` (as thumbnails), five gradients, how a picture fits (Fill, Fit, Center, Tile, Stretch), and any other PNG, BMP or PPM file by its path |
-| **Desktop & Panel** | desktop icons on or off, and which apps have one; the clock (24 or 12 hours, the weekday, the date, seconds); snapping windows to the edges; what a double click on a title bar does (maximize, minimize, nothing); how long notifications stay |
+| **Desktop & Panel** | desktop icons on or off, and which apps have one; the clock (24 or 12 hours, the weekday, the date, seconds); snapping windows to the edges; animations; what a double click on a title bar does (maximize, minimize, nothing); how long notifications stay |
 | **Date & Time** | the time now, and the time zone: a city (54 of them) from a list, with summer time handled by itself (the European, North American, Australian and New Zealand rules) |
 | **Mouse & Keyboard** | pointer speed, double click speed (with a place to try it), natural scrolling, left-handed buttons; the keyboard layout (US, UK, German, French, Spanish, Dvorak), how soon and how fast a held key repeats; the keyboard shortcuts |
+| **Lock Screen** | when the screensaver starts (never, or after 1 to 30 minutes), whether the lock screen comes when it ends, the password (or none), and a button to lock now |
 | **Display** | the resolution (a list of sizes, on QEMU's and Bochs's standard VGA; elsewhere the firmware's size) and the scale (everything twice as big); after a change, "Keep" it, or it goes back by itself in 15 seconds |
 | **Default Apps** | which app opens each kind of file (`.png`, `.txt`, `.c`...) |
 | **Startup** | whether a terminal opens when the desktop starts, and which apps open with it |
@@ -350,9 +390,14 @@ display_height=1080
 disk), Settings also keeps a copy there, in `.vexa/etc`, and Vexa puts them back when
 it starts. Without a disk, settings last until Vexa restarts. Storage says which.
 
-**Keyboard layouts.** Vexa's own apps type the ASCII characters of the layout (the
-screen font has no others: a German keyboard's ü types nothing yet); X programs get the
-whole layout, through XKB. The text console (outside the desktop) stays US.
+**Keyboard layouts.** Vexa's own apps type every character of the layout, AltGr's too
+(€, @, { on a German keyboard), and the accent keys work as they do there: ^ then e
+types ê, ´ then a types á (the accent twice, or then Space, types it alone). X programs
+get the whole layout, through XKB. The text console (outside the desktop) stays US.
+
+**The lock screen's password** is kept in `desktop.conf` as a hash (`lock_password`),
+not as itself. It's there to keep someone at the keyboard out, not someone who can
+read your disk.
 
 **Restarting and turning off.** The Vexa menu has **Restart...** and **Shut Down...**
 (each asks first), and so does About; from the shell, `shutdown` and `shutdown -r`.
@@ -447,9 +492,15 @@ input, Ctrl-U erase the line.
 | Ctrl+Alt+F | Files |
 | Ctrl+Alt+E | the text editor |
 | Ctrl+Alt+X | an xterm |
-| Alt+Tab | the next window |
-| Ctrl+Alt+Q | back to the text console |
-| Esc | closes the Vexa menu |
+| Alt+Tab, Alt+Shift+Tab | switch windows (with pictures of them, while Alt is held) |
+| Alt+F4 | close the window in front |
+| Super+Left, Right, Up, Down | snap to a half or a quarter, maximize, back (or minimize) |
+| Super+D | show the desktop (minimize everything; again: back) |
+| Ctrl+Space, Super+Space | search |
+| Super+L, Ctrl+Alt+L | lock the screen |
+| PrintScreen | a screenshot (Alt: the window in front; Shift: an area) |
+| Ctrl+Alt+Q | back to the text console (it asks first: Enter) |
+| Esc | closes the Vexa menu, the calendar, a menu or search |
 
 **Files**: Enter open, Space Quick Look, Backspace or Alt+Up up, Alt+Left back,
 Alt+Right forward, Ctrl+C copy, Ctrl+X cut, Ctrl+V paste, Ctrl+D duplicate, F2 rename,
@@ -466,8 +517,8 @@ select nothing.
 - **A program misbehaves**: Vexa stops it and prints why (a page fault, say, with the
   address), and everything else carries on. Ctrl-C stops a program that doesn't
   end.
-- **The desktop stops responding**: Ctrl+Alt+Q goes back to the console, if the
-  desktop still reads the keyboard.
+- **The desktop stops responding**: Ctrl+Alt+Q, then Enter, goes back to the console,
+  if the desktop still reads the keyboard.
 - **Vexa doesn't boot on a machine**: try **safe mode** from the boot menu, then add
   `nosmp` in `limine.conf`.
 - **Something is badly broken**: the **kernel monitor** entry in the boot menu starts
