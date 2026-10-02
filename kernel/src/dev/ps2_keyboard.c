@@ -76,6 +76,7 @@ static uint16_t extended_keycode(uint8_t code) {
     case 0x1c: return 96;  /* Keypad Enter */
     case 0x1d: return VX_KEY_RIGHTCTRL;
     case 0x35: return 98;  /* Keypad / */
+    case 0x37: return 99;  /* PrintScreen (SysRq) */
     case 0x38: return VX_KEY_RIGHTALT;
     case 0x47: return VX_KEY_HOME;
     case 0x48: return VX_KEY_UP;
@@ -228,7 +229,8 @@ static void handle_scancode(uint8_t scancode) {
         handle_extended(code, released);
         return;
     }
-    report_key(code < 0x59 ? code : 0, released);
+    /* 0x54: SysRq, PrintScreen with Alt held. */
+    report_key(code == 0x54 ? 99 : code < 0x59 ? code : 0, released);
 
     switch (code) {
     case SC_LSHIFT: shift_left = !released; return;

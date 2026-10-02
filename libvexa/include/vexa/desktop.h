@@ -34,6 +34,11 @@ enum desktop_message_type {
     DESKTOP_RELOAD = 9,  /* read DESKTOP_CONFIG again */
     DESKTOP_WM = 10,     /* window; a = DESKTOP_WM_*, b = its argument: what a program
                             asks of a window manager (X programs, through Xvexa) */
+    DESKTOP_CURSOR = 11, /* window; a = VX_CURSOR_*: the pointer's shape over it */
+    DESKTOP_DRAG = 12,   /* window; a = 1 to copy (not move); text = a file listing
+                            the paths, one per line: files dragged out of the window
+                            and let go where the pointer is now */
+    DESKTOP_LOCK = 13,   /* lock the screen now */
     /* Desktop to program. */
     DESKTOP_CREATED = 16, /* window (0 if it failed) */
     DESKTOP_KEY = 17,     /* window; a = key, b = value, c = character */
@@ -46,10 +51,12 @@ enum desktop_message_type {
     DESKTOP_INFO_REPLY = 24, /* a, b = the screen's width and height */
     DESKTOP_STATE = 25,     /* window; a = 1 if maximized, b = 1 if minimized */
     DESKTOP_THEME = 26,     /* the theme (or other settings) changed: read them again */
+    DESKTOP_DROP = 27,      /* window; a, b = x, y; c = 1 to copy; text = the list file:
+                               files dropped on the window (see DRAG) */
 };
 
 /* DESKTOP_WM requests. MOVE and RESIZE start dragging the window with the
- * pointer, as if by its title bar or edges (b: 1 right edge, 2 bottom). */
+ * pointer, as if by its title bar or edges (b: 1 right edge, 2 bottom, 4 left). */
 enum {
     DESKTOP_WM_MAXIMIZE = 1, DESKTOP_WM_RESTORE, DESKTOP_WM_TOGGLE_MAXIMIZED,
     DESKTOP_WM_MINIMIZE, DESKTOP_WM_MOVE, DESKTOP_WM_RESIZE, DESKTOP_WM_ACTIVATE,

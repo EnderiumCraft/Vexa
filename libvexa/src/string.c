@@ -176,3 +176,8 @@ char *strndup(const char *s, size_t n) {
     }
     return copy;
 }
+
+char *strpbrk(const char *s, const char *accept) {
+    s += strcspn(s, accept);
+    return *s ? (char *)s : NULL;
+}

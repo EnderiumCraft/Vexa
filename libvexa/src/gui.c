@@ -41,38 +41,6 @@ void vx_fill(struct vx_surface *s, int x, int y, int width, int height, uint32_t
     }
 }
 
-void vx_draw_char(struct vx_surface *s, int x, int y, char c, uint32_t fg, uint32_t bg) {
-    if (c < FONT_FIRST_CHAR || c >= FONT_FIRST_CHAR + FONT_GLYPH_COUNT) {
-        c = ' ';
-    }
-    const uint8_t *rows = font_glyphs[c - FONT_FIRST_CHAR];
-    for (int r = 0; r < FONT_HEIGHT; r++) {
-        int py = y + r;
-        if (py < 0 || py >= s->height) {
-            continue;
-        }
-        uint32_t *line = s->pixels + (long)py * s->stride;
-        for (int col = 0; col < FONT_WIDTH; col++) {
-            int px = x + col;
-            if (px < 0 || px >= s->width) {
-                continue;
-            }
-            if (rows[r] & (0x80 >> col)) {
-                line[px] = fg;
-            } else if (bg != VX_TRANSPARENT) {
-                line[px] = bg;
-            }
-        }
-    }
-}
-
-int vx_draw_text(struct vx_surface *s, int x, int y, const char *text, uint32_t fg, uint32_t bg) {
-    for (; *text; text++, x += FONT_WIDTH) {
-        vx_draw_char(s, x, y, *text, fg, bg);
-    }
-    return x;
-}
-
 void vx_blit(struct vx_surface *to, int tx, int ty, const struct vx_surface *from, int fx, int fy,
              int width, int height) {
     /* Clip against the source, then the destination. */
@@ -271,6 +239,58 @@ void vx_window_set_title(struct vx_window *window, const char *title) {
     send_message(&m);
 }
 
+void vx_window_set_cursor(struct vx_window *window, int shape) {
+    if (window->cursor == shape) {
+        return;
+    }
+    window->cursor = shape;
+    struct desktop_message m = {.type = DESKTOP_CURSOR, .window = (uint32_t)window->id, .a = shape};
+    send_message(&m);
+}
+
+void vx_window_drag_files(struct vx_window *window, const char *const *paths, int count,
+                          bool copy) {
+    static int drags;
+    struct desktop_message m = {.type = DESKTOP_DRAG, .window = (uint32_t)window->id, .a = copy};
+    snprintf(m.text, sizeof(m.text), "/tmp/.drag-%ld-%d", vx_process_id(), ++drags);
+    int handle = vx_open(m.text, VX_OPEN_WRITE | VX_OPEN_CREATE | VX_OPEN_TRUNCATE);
+    if (handle < 0) {
+        return;
+    }
+    for (int i = 0; i < count; i++) {
+        vx_write(handle, paths[i], strlen(paths[i]));
+        vx_write(handle, "\n", 1);
+    }
+    vx_close(handle);
+    send_message(&m);
+}
+
+char *vx_drop_paths(const struct vx_gui_event *event) {
+    int handle = vx_open(event->text, VX_OPEN_READ);
+    if (handle < 0) {
+        return NULL;
+    }
+    size_t size = 0, capacity = 4096;
+    char *text = malloc(capacity);
+    long n;
+    while (text && (n = vx_read(handle, text + size, capacity - size - 1)) > 0) {
+        size += (size_t)n;
+        if (capacity - size < 512) {
+            char *more = realloc(text, capacity *= 2);
+            if (!more) {
+                free(text);
+                text = NULL;
+            }
+            text = more;
+        }
+    }
+    vx_close(handle);
+    if (text) {
+        text[size] = '\0';
+    }
+    return text;
+}
+
 void vx_window_destroy(struct vx_window *window) {
     struct desktop_message m = {.type = DESKTOP_DESTROY, .window = (uint32_t)window->id};
     send_message(&m);
@@ -311,6 +331,14 @@ static void to_event(const struct desktop_message *m, struct vx_gui_event *e) {
     case DESKTOP_THEME:
         vx_theme_load();
         e->type = VX_GUI_THEME;
+        break;
+    case DESKTOP_DROP:
+        e->type = VX_GUI_DROP;
+        e->x = m->a;
+        e->y = m->b;
+        e->value = m->c;
+        memcpy(e->text, m->text, sizeof(e->text));
+        e->text[sizeof(e->text) - 1] = '\0';
         break;
     }
 }
@@ -356,5 +384,13 @@ void vx_desktop_reload(void) {
         return;
     }
     struct desktop_message m = {.type = DESKTOP_RELOAD};
+    send_message(&m);
+}
+
+void vx_desktop_lock(void) {
+    if (connect_desktop() < 0) {
+        return;
+    }
+    struct desktop_message m = {.type = DESKTOP_LOCK};
     send_message(&m);
 }

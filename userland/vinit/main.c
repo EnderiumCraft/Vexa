@@ -2,8 +2,10 @@
  * vinit: the first user program, started by the kernel as process 1.
  *
  * Puts back the settings kept on disk (see <vexa/settings.h>) and the
- * computer's name, shows the welcome message, then keeps a shell (vsh)
- * running on the console: if the shell exits, it starts a new one.
+ * computer's name, makes the home folder (/home, with Desktop, Documents
+ * and Pictures: on that disk too, when there is one, so what's in them
+ * stays), shows the welcome message, then keeps a shell (vsh) running on
+ * the console: if the shell exits, it starts a new one.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -42,6 +44,21 @@ int main(int argc, char **argv, char **envp) {
     }
     if (name) {
         fclose(name);
+    }
+    /* The home folder: on the disk that keeps settings, or in memory. */
+    if (vx_settings_disk(disk, sizeof(disk))) {
+        char home[200];
+        snprintf(home, sizeof(home), "%s/home", disk);
+        vx_mkdir(home);
+        if (vx_symlink(home, "/home") == 0) {
+            printf("vinit: home folder on %s\n", disk);
+        }
+    }
+    vx_mkdir("/home");
+    static const char *const folders[] = {"/home/Desktop", "/home/Documents", "/home/Pictures",
+                                          "/Trash"};
+    for (size_t i = 0; i < sizeof(folders) / sizeof(folders[0]); i++) {
+        vx_mkdir(folders[i]);
     }
     show("/etc/motd");
     fflush(stdout);

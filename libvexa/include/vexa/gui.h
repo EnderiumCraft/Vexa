@@ -2,6 +2,7 @@
 #define LIBVEXA_GUI_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 /*
@@ -26,9 +27,47 @@ struct vx_surface {
 };
 
 void vx_fill(struct vx_surface *s, int x, int y, int width, int height, uint32_t color);
-void vx_draw_char(struct vx_surface *s, int x, int y, char c, uint32_t fg, uint32_t bg);
-/* Draws a line of text (no wrapping); returns the x after it. */
+
+/* ---- Text ----
+ *
+ * Text is UTF-8, drawn smooth with TrueType fonts (DejaVu, in /share/fonts):
+ * a face at a size in pixels. Apps' text is the UI font (VX_UI_FONT_SIZE
+ * Sans) in lines of VX_LINE_HEIGHT pixels; terminals and editors use the
+ * monospaced face in cells of VX_CELL_WIDTH by VX_LINE_HEIGHT. Without the
+ * font files, text is the console's 8x16 bitmap font. */
+enum { VX_FACE_SANS, VX_FACE_BOLD, VX_FACE_MONO, VX_FACE_COUNT };
+#define VX_UI_FONT_SIZE 13
+#define VX_MONO_FONT_SIZE 13
+#define VX_LINE_HEIGHT 16
+#define VX_CELL_WIDTH 8
+struct vx_font;
+/* A face at a size (kept for the program's life: just ask again). */
+const struct vx_font *vx_font(int face, int size);
+const struct vx_font *vx_font_ui(void);
+/* A line's height, and the baseline's distance from its top. */
+int vx_font_height(const struct vx_font *font);
+int vx_font_ascent(const struct vx_font *font);
+/* Draws a line of text with its top at y (no wrapping); returns the x after
+ * it. A `bg` other than VX_TRANSPARENT fills behind it first. */
+int vx_text(struct vx_surface *s, const struct vx_font *font, int x, int y, const char *text,
+            uint32_t fg, uint32_t bg);
+int vx_text_width_font(const struct vx_font *font, const char *text);
+/* The width of the text's first `length` bytes. */
+int vx_text_width_bytes(const struct vx_font *font, const char *text, size_t length);
+/* How many bytes of the text fit in `width` pixels (whole characters). */
+size_t vx_text_fit_bytes(const struct vx_font *font, const char *text, int width);
+/* In the UI font, centered in a VX_LINE_HEIGHT line whose top is y. */
 int vx_draw_text(struct vx_surface *s, int x, int y, const char *text, uint32_t fg, uint32_t bg);
+int vx_text_width(const char *text);
+/* One character in a monospaced cell (VX_CELL_WIDTH by VX_LINE_HEIGHT). */
+void vx_draw_char(struct vx_surface *s, int x, int y, uint32_t c, uint32_t fg, uint32_t bg);
+/* UTF-8: the character at *text (moving past it; 0xFFFD for a bad byte),
+ * a character's bytes (returns how many), and where the character before
+ * byte `at` starts. */
+uint32_t vx_utf8_next(const char **text);
+int vx_utf8_encode(uint32_t c, char out[4]);
+size_t vx_utf8_previous(const char *text, size_t at);
+
 /* Copies a rectangle of `from` (at fx, fy) to `to` (at tx, ty), clipped to both. */
 void vx_blit(struct vx_surface *to, int tx, int ty, const struct vx_surface *from, int fx, int fy,
              int width, int height);
@@ -39,6 +78,7 @@ struct vx_window {
     int id;
     struct vx_surface surface; /* Draw here, then vx_window_present. */
     int buffer_handle;
+    int cursor;
 };
 
 /* Opens a window (connecting to the desktop the first time). NULL if there
@@ -55,6 +95,16 @@ int vx_window_resize(struct vx_window *window, int width, int height);
 /* Shows what was drawn in the rectangle. */
 void vx_window_present(struct vx_window *window, int x, int y, int width, int height);
 void vx_window_set_title(struct vx_window *window, const char *title);
+/* The pointer's shape over the window (until it's set again). */
+enum { VX_CURSOR_ARROW, VX_CURSOR_TEXT, VX_CURSOR_HAND, VX_CURSOR_WAIT, VX_CURSOR_CROSS,
+       VX_CURSOR_MOVE, VX_CURSOR_COUNT };
+void vx_window_set_cursor(struct vx_window *window, int shape);
+/* Files dragged out of the window, let go where the pointer is now (a
+ * pointer event outside the window, with the button up: the desktop keeps
+ * sending them while a button that was pressed in the window is down). The
+ * desktop puts them there: on the desktop, or in another window (a
+ * VX_GUI_DROP event for it). */
+void vx_window_drag_files(struct vx_window *window, const char *const *paths, int count, bool copy);
 void vx_window_destroy(struct vx_window *window);
 
 enum vx_gui_event_type {
@@ -64,6 +114,7 @@ enum vx_gui_event_type {
     VX_GUI_FOCUS = 4,   /* value: 1 gained, 0 lost */
     VX_GUI_RESIZE = 5,  /* width, height: what the user asked for (see vx_window_resize) */
     VX_GUI_THEME = 6,   /* The theme changed (vx_theme has the new one): draw again. */
+    VX_GUI_DROP = 7,    /* x, y; value 1 to copy; text: files dropped (vx_drop_paths) */
 };
 
 struct vx_gui_event {
@@ -71,9 +122,14 @@ struct vx_gui_event {
     int window;
     int x, y, buttons, wheel;
     int key, value;
-    int character; /* What the key types, or 0 (arrows...). Ctrl+letter gives 1-26. */
+    int character; /* What the key types (Unicode), or 0 (arrows...). Ctrl+letter gives 1-26. */
     int width, height;
+    char text[104];
 };
+
+/* The paths of a VX_GUI_DROP, one per line, in a new string to free(); NULL
+ * if they can't be read. */
+char *vx_drop_paths(const struct vx_gui_event *event);
 
 /* Waits up to timeout_ms (-1: no limit) for an event. Returns 1 with one,
  * 0 on timeout, or a negative VX_E* error (-VX_EPIPE: the desktop is gone). */
@@ -194,5 +250,10 @@ void vx_blit_alpha(struct vx_surface *to, int x, int y, int width, int height,
 void vx_notify(const char *text);
 /* Asks the desktop to read its settings (/etc/desktop.conf) again. */
 void vx_desktop_reload(void);
+/* Locks the screen (the lock screen asks for the password, if one is set). */
+void vx_desktop_lock(void);
+
+/* Writes a surface as a PNG file: 0, or a negative error. */
+int vx_image_save_png(const char *path, const struct vx_surface *surface);
 
 #endif

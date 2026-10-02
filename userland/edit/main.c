@@ -7,7 +7,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <vexa/font.h>
 #include <vexa/gui.h>
 #include <vexa/syscall.h>
 
@@ -170,12 +169,43 @@ static void new_line(void) {
     modified = true;
 }
 
+/* Characters are UTF-8: `col` is a byte, at the start of one. */
+static int previous_char(const struct line *l, int at) {
+    return (int)vx_utf8_previous(l->text, (size_t)at);
+}
+
+static int next_char(const struct line *l, int at) {
+    const char *p = l->text + at;
+    if (at < l->length) {
+        vx_utf8_next(&p);
+    }
+    return (int)(p - l->text) > l->length ? l->length : (int)(p - l->text);
+}
+
+/* The cell (character) of byte `at`, and the byte of a cell. */
+static int cell_of(const struct line *l, int at) {
+    int cells = 0;
+    for (int i = 0; i < at && i < l->length; i = next_char(l, i)) {
+        cells++;
+    }
+    return cells;
+}
+
+static int byte_of(const struct line *l, int cell) {
+    int i = 0;
+    while (cell-- > 0 && i < l->length) {
+        i = next_char(l, i);
+    }
+    return i;
+}
+
 static void backspace(void) {
     if (col > 0) {
         struct line *l = &lines[row];
-        memmove(l->text + col - 1, l->text + col, (size_t)(l->length - col + 1));
-        l->length--;
-        col--;
+        int start = previous_char(l, col);
+        memmove(l->text + start, l->text + col, (size_t)(l->length - col + 1));
+        l->length -= col - start;
+        col = start;
         modified = true;
     } else if (row > 0) {
         col = lines[row - 1].length;
@@ -188,7 +218,7 @@ static void backspace(void) {
 
 static void delete_forward(void) {
     if (col < lines[row].length) {
-        col++;
+        col = next_char(&lines[row], col);
         backspace();
     } else if (row + 1 < line_count) {
         append(&lines[row], lines[row + 1].text, lines[row + 1].length);
@@ -200,13 +230,14 @@ static void delete_forward(void) {
 /* ---- Drawing ---- */
 
 static int text_rows(void) {
-    return (window->surface.height - STATUS - 2 * MARGIN) / FONT_HEIGHT;
+    return (window->surface.height - STATUS - 2 * MARGIN) / VX_LINE_HEIGHT;
 }
 
 static int text_columns(void) {
-    return (window->surface.width - 2 * MARGIN) / FONT_WIDTH - GUTTER - 1;
+    return (window->surface.width - 2 * MARGIN) / VX_CELL_WIDTH - GUTTER - 1;
 }
 
+/* `left` is the first cell shown. */
 static void keep_cursor_visible(void) {
     int rows = text_rows(), columns = text_columns();
     if (row < top) {
@@ -214,10 +245,11 @@ static void keep_cursor_visible(void) {
     } else if (row >= top + rows) {
         top = row - rows + 1;
     }
-    if (col < left) {
-        left = col;
-    } else if (col >= left + columns) {
-        left = col - columns + 1;
+    int cell = cell_of(&lines[row], col);
+    if (cell < left) {
+        left = cell;
+    } else if (cell >= left + columns) {
+        left = cell - columns + 1;
     }
 }
 
@@ -226,37 +258,37 @@ static void draw(void) {
     int w = s->width, h = s->height, rows = text_rows(), columns = text_columns();
     keep_cursor_visible();
     vx_fill(s, 0, 0, w, h, VX_COLOR_VIEW);
-    int text_x = MARGIN + (GUTTER + 1) * FONT_WIDTH;
+    int text_x = MARGIN + (GUTTER + 1) * VX_CELL_WIDTH;
     for (int i = 0; i < rows && top + i < line_count; i++) {
-        int y = MARGIN + i * FONT_HEIGHT;
+        int y = MARGIN + i * VX_LINE_HEIGHT;
         char number[16];
         snprintf(number, sizeof(number), "%*d", GUTTER - 1, top + i + 1);
-        vx_draw_text(s, MARGIN, y, number, top + i == row ? VX_COLOR_ACCENT : VX_COLOR_LINE,
-                     VX_TRANSPARENT);
+        for (int k = 0; number[k]; k++) {
+            vx_draw_char(s, MARGIN + k * VX_CELL_WIDTH, y, (unsigned char)number[k],
+                         top + i == row ? VX_COLOR_ACCENT : VX_COLOR_DIM, VX_TRANSPARENT);
+        }
         struct line *l = &lines[top + i];
-        if (l->length > left) {
-            char shown[512];
-            int n = l->length - left < columns ? l->length - left : columns;
-            n = n < (int)sizeof(shown) - 1 ? n : (int)sizeof(shown) - 1;
-            memcpy(shown, l->text + left, (size_t)n);
-            shown[n] = '\0';
-            vx_draw_text(s, text_x, y, shown, VX_COLOR_TEXT, VX_TRANSPARENT);
+        const char *p = l->text + byte_of(l, left);
+        for (int c = 0; c < columns && *p; c++) {
+            vx_draw_char(s, text_x + c * VX_CELL_WIDTH, y, vx_utf8_next(&p), VX_COLOR_TEXT,
+                         VX_TRANSPARENT);
         }
     }
     if (!asking) {
-        vx_fill(s, text_x + (col - left) * FONT_WIDTH, MARGIN + (row - top) * FONT_HEIGHT, 2,
-                FONT_HEIGHT, VX_COLOR_ACCENT);
+        vx_fill(s, text_x + (cell_of(&lines[row], col) - left) * VX_CELL_WIDTH,
+                MARGIN + (row - top) * VX_LINE_HEIGHT, 2, VX_LINE_HEIGHT, VX_COLOR_ACCENT);
     }
     /* The status line: where the cursor is, or the question. */
     vx_fill(s, 0, h - STATUS, w, STATUS, VX_COLOR_WINDOW);
     if (asking) {
         vx_draw_text(s, MARGIN, h - STATUS + 3, "Save as:", VX_COLOR_TEXT, VX_TRANSPARENT);
-        vx_draw_field(s, MARGIN + 9 * FONT_WIDTH, h - STATUS - 1, w - 10 * FONT_WIDTH - 2 * MARGIN,
-                      answer, true);
+        int field_x = MARGIN + vx_text_width("Save as:") + 8;
+        vx_draw_field(s, field_x, h - STATUS - 1, w - field_x - MARGIN, answer, true);
     } else {
         char where[64];
-        snprintf(where, sizeof(where), "Ln %d, Col %d   Ctrl+S save", row + 1, col + 1);
-        int x = w - MARGIN - (int)strlen(where) * FONT_WIDTH;
+        snprintf(where, sizeof(where), "Ln %d, Col %d   Ctrl+S save", row + 1,
+                 cell_of(&lines[row], col) + 1);
+        int x = w - MARGIN - vx_text_width(where);
         vx_draw_text_fit(s, MARGIN, h - STATUS + 3, x - 2 * MARGIN, message, VX_COLOR_DIM,
                          VX_TRANSPARENT);
         vx_draw_text(s, x, h - STATUS + 3, where, VX_COLOR_DIM, VX_TRANSPARENT);
@@ -305,14 +337,21 @@ static void key(const struct vx_gui_event *e) {
         exit(0);
     }
     int rows = text_rows();
+    int cell = cell_of(&lines[row], col); /* Up and down keep to the same cell. */
     switch (e->key) {
-    case VX_KEY_UP: row = row > 0 ? row - 1 : 0; break;
-    case VX_KEY_DOWN: row = row + 1 < line_count ? row + 1 : row; break;
-    case VX_KEY_PAGEUP: row = row > rows ? row - rows : 0; break;
-    case VX_KEY_PAGEDOWN: row = row + rows < line_count ? row + rows : line_count - 1; break;
+    case VX_KEY_UP: row = row > 0 ? row - 1 : 0; col = byte_of(&lines[row], cell); break;
+    case VX_KEY_DOWN:
+        row = row + 1 < line_count ? row + 1 : row;
+        col = byte_of(&lines[row], cell);
+        break;
+    case VX_KEY_PAGEUP: row = row > rows ? row - rows : 0; col = byte_of(&lines[row], cell); break;
+    case VX_KEY_PAGEDOWN:
+        row = row + rows < line_count ? row + rows : line_count - 1;
+        col = byte_of(&lines[row], cell);
+        break;
     case VX_KEY_LEFT:
         if (col > 0) {
-            col--;
+            col = previous_char(&lines[row], col);
         } else if (row > 0) {
             row--;
             col = lines[row].length;
@@ -320,7 +359,7 @@ static void key(const struct vx_gui_event *e) {
         break;
     case VX_KEY_RIGHT:
         if (col < lines[row].length) {
-            col++;
+            col = next_char(&lines[row], col);
         } else if (row + 1 < line_count) {
             row++;
             col = 0;
@@ -331,11 +370,11 @@ static void key(const struct vx_gui_event *e) {
     case VX_KEY_ENTER: new_line(); break;
     case VX_KEY_BACKSPACE: backspace(); break;
     case VX_KEY_DELETE: delete_forward(); break;
-    case VX_KEY_TAB: type_text("    ", TAB - col % TAB); break;
+    case VX_KEY_TAB: type_text("    ", TAB - cell % TAB); break;
     default:
-        if (e->character >= ' ' && e->character < 127 && !ctrl_held) {
-            char c = (char)e->character;
-            type_text(&c, 1);
+        if (e->character >= ' ' && e->character != 127 && !ctrl_held) {
+            char bytes[4];
+            type_text(bytes, vx_utf8_encode((uint32_t)e->character, bytes));
         }
         return;
     }
@@ -345,6 +384,8 @@ static void key(const struct vx_gui_event *e) {
 }
 
 static void pointer(const struct vx_gui_event *e, int *buttons) {
+    vx_window_set_cursor(window, e->y < window->surface.height - STATUS ? VX_CURSOR_TEXT
+                                                                       : VX_CURSOR_ARROW);
     bool click = (e->buttons & 1) && !(*buttons & 1);
     *buttons = e->buttons;
     if (e->wheel) {
@@ -361,12 +402,13 @@ static void pointer(const struct vx_gui_event *e, int *buttons) {
         if (col > lines[row].length) {
             col = lines[row].length;
         }
+        col = byte_of(&lines[row], cell_of(&lines[row], col));
     }
     if (click && !asking) {
-        int r = top + (e->y - MARGIN) / FONT_HEIGHT;
-        int c = left + (e->x - MARGIN) / FONT_WIDTH - GUTTER - 1;
+        int r = top + (e->y - MARGIN) / VX_LINE_HEIGHT;
+        int c = left + (e->x - MARGIN) / VX_CELL_WIDTH - GUTTER - 1;
         row = r < 0 ? 0 : r >= line_count ? line_count - 1 : r;
-        col = c < 0 ? 0 : c > lines[row].length ? lines[row].length : c;
+        col = byte_of(&lines[row], c < 0 ? 0 : c);
     }
 }
 

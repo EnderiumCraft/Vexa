@@ -29,7 +29,6 @@
 #include <string.h>
 #include <vexa/app.h>
 #include <vexa/files.h>
-#include <vexa/font.h>
 #include <vexa/gui.h>
 #include <vexa/settings.h>
 #include <vexa/syscall.h>
@@ -106,7 +105,7 @@ static char back_stack[MAX_HISTORY][512], forward_stack[MAX_HISTORY][512];
 static int back_count, forward_count;
 
 /* Files' own pictures, from its bundle. */
-static struct vx_image *kind_icons[8], *place_icons[8], *disk_icon;
+static struct vx_image *kind_icons[8], *place_icons[16], *disk_icon;
 
 /* ---- Small helpers ---- */
 
@@ -212,7 +211,9 @@ static void find_places(void) {
         const char *label, *path, *icon;
     } fixed[] = {
         {"Vexa", "/", "computer"}, {"Apps", VX_APPS_DIR, "apps"},
-        {"Pictures", "/share/pictures", "pictures"}, {"Temporary", "/tmp", "folder"},
+        {"Home", "/home", "folder"}, {"Desktop", "/home/Desktop", "folder"},
+        {"Documents", "/home/Documents", "folder"}, {"Pictures", "/home/Pictures", "pictures"},
+        {"Wallpapers", "/share/pictures", "pictures"}, {"Temporary", "/tmp", "folder"},
         {"Trash", TRASH, "trash"},
     };
     place_count = 0;
@@ -1325,24 +1326,32 @@ static void draw_icons(struct vx_surface *s) {
             vx_draw_field(s, x + 2, y + 64, cw - 4, new_name, true);
             continue;
         }
-        /* Two lines of the name, centered. */
-        int fits = (cw - 8) / FONT_WIDTH, length = (int)strlen(name);
-        for (int line = 0; line < 2 && line * fits < length; line++) {
-            char part[64];
-            int n = length - line * fits;
-            n = n > fits ? fits : n;
-            if (line == 1 && length > 2 * fits) { /* Too long: "..." at the end. */
-                n = fits;
-                memcpy(part, name + fits, (size_t)n - 3);
-                strcpy(part + n - 3, "...");
-            } else {
-                memcpy(part, name + line * fits, (size_t)n);
-                part[n] = '\0';
+        /* Two lines of the name, centered (the second ends in an ellipsis if
+         * it's still too long). */
+        const struct vx_font *font = vx_font_ui();
+        const char *rest = name;
+        for (int line = 0; line < 2 && *rest; line++) {
+            char part[256];
+            size_t n = vx_text_fit_bytes(font, rest, cw - 8);
+            if (line == 0 && rest[n]) { /* Break after a space, if there's one. */
+                size_t space = n;
+                while (space > 0 && rest[space - 1] != ' ') {
+                    space--;
+                }
+                n = space > 0 ? space : n;
             }
-            int tw = (int)strlen(part) * FONT_WIDTH;
-            int ty = y + 64 + line * (FONT_HEIGHT + 1);
+            if (line == 1 && rest[n]) {
+                static const char ellipsis[] = "\xe2\x80\xa6";
+                n = vx_text_fit_bytes(font, rest, cw - 8 - vx_text_width(ellipsis));
+                snprintf(part, sizeof(part), "%.*s%s", (int)n, rest, ellipsis);
+            } else {
+                snprintf(part, sizeof(part), "%.*s", (int)n, rest);
+            }
+            rest += n ? n : strlen(rest);
+            int tw = vx_text_width(part);
+            int ty = y + 64 + line * (VX_LINE_HEIGHT + 1);
             if (item->selected) {
-                vx_fill(s, x + (cw - tw) / 2 - 3, ty - 1, tw + 6, FONT_HEIGHT + 2, VX_COLOR_SELECTED);
+                vx_fill(s, x + (cw - tw) / 2 - 3, ty - 1, tw + 6, VX_LINE_HEIGHT + 2, VX_COLOR_SELECTED);
             }
             vx_draw_text(s, x + (cw - tw) / 2, ty, part, VX_COLOR_TEXT, VX_TRANSPARENT);
         }
@@ -1382,7 +1391,7 @@ static void draw_toolbar(struct vx_surface *s, int hot) {
                    (b == B_UP && !strcmp(cwd, "/"));
         vx_draw_button(s, x, 8, w, 24, labels[b], hot == b || on);
         if (off) {
-            vx_draw_text(s, x + (w - FONT_WIDTH) / 2, 12, labels[b], VX_COLOR_DIM, VX_COLOR_BUTTON);
+            vx_draw_text(s, x + (w - vx_text_width(labels[b])) / 2, 12, labels[b], VX_COLOR_DIM, VX_COLOR_BUTTON);
         }
     }
     vx_draw_field(s, path_x(), 8, path_w(), field == FIELD_PATH ? typed : cwd, field == FIELD_PATH);
@@ -1434,7 +1443,7 @@ static void dialog_button(int px, int py, int pw, int ph, int i, int *x, int *y)
 #define INFO_W 460
 
 static int info_h(void) {
-    return 96 + info_count * (FONT_HEIGHT + 4);
+    return 96 + info_count * (VX_LINE_HEIGHT + 4);
 }
 
 static void draw_confirm(struct vx_surface *s) {
@@ -1465,9 +1474,9 @@ static void draw_info(struct vx_surface *s) {
         vx_blit_alpha(s, x + 16, y + 16, 48, 48, &info_icon->surface);
     }
     for (int i = 0; i < info_count; i++) {
-        int ly = y + 16 + i * (FONT_HEIGHT + 4);
+        int ly = y + 16 + i * (VX_LINE_HEIGHT + 4);
         vx_draw_text(s, x + 80, ly, info_labels[i], VX_COLOR_DIM, VX_TRANSPARENT);
-        vx_draw_text_fit(s, x + 80 + 12 * FONT_WIDTH, ly, INFO_W - 96 - 12 * FONT_WIDTH,
+        vx_draw_text_fit(s, x + 80 + 96, ly, INFO_W - 96 - 96,
                          info_values[i], i == 0 ? VX_COLOR_ACCENT : VX_COLOR_TEXT, VX_TRANSPARENT);
     }
     dialog_button(x, y, INFO_W, h, 0, &bx, &by);
@@ -1495,12 +1504,12 @@ static void draw_preview(struct vx_surface *s) {
         int line_y = ay + 4, col = 0;
         char line[256];
         for (const char *p = preview_text;; p++) {
-            if (*p == '\n' || !*p || col >= (aw - 8) / FONT_WIDTH || col >= 255) {
+            if (*p == '\n' || !*p || col >= 255) {
                 line[col] = '\0';
-                vx_draw_text(s, ax + 4, line_y, line, VX_COLOR_TEXT, VX_TRANSPARENT);
-                line_y += FONT_HEIGHT;
+                vx_draw_text_fit(s, ax + 4, line_y, aw - 8, line, VX_COLOR_TEXT, VX_TRANSPARENT);
+                line_y += VX_LINE_HEIGHT;
                 col = 0;
-                if (!*p || line_y + FONT_HEIGHT > ay + ah) {
+                if (!*p || line_y + VX_LINE_HEIGHT > ay + ah) {
                     break;
                 }
                 if (*p != '\n') {
@@ -1528,7 +1537,7 @@ static void draw_preview(struct vx_surface *s) {
             vx_blit_alpha(s, x + (w - 96) / 2, y + (h - 96) / 2 - 10, 96, 96, &icon->surface);
         }
         const char *note = "No preview for this kind of file.";
-        vx_draw_text(s, x + (w - (int)strlen(note) * FONT_WIDTH) / 2, y + h / 2 + 50, note,
+        vx_draw_text(s, x + (w - vx_text_width(note)) / 2, y + h / 2 + 50, note,
                      VX_COLOR_DIM, VX_TRANSPARENT);
     }
 }
@@ -1653,6 +1662,45 @@ static void act(enum action action) {
 static enum { DRAG_NONE, DRAG_MAYBE, DRAG_ON } drag;
 static int drag_x, drag_y, pointer_x, pointer_y;
 
+static long reload_at = -1; /* Read the folder again then (something else changed it). */
+static void find_drop_target(int px, int py);
+
+/* Files dropped on the window from somewhere else (the desktop, another
+ * Files): into the folder or place under the pointer, or this folder. */
+static void dropped(const struct vx_gui_event *e) {
+    static char paths[MAX_CLIP][512];
+    char *text = vx_drop_paths(e);
+    vx_remove(e->text);
+    if (!text) {
+        return;
+    }
+    int n = 0;
+    for (char *line = text, *next; line && *line && n < MAX_CLIP; line = next) {
+        next = strchr(line, '\n');
+        if (next) {
+            *next++ = '\0';
+        }
+        if (line[0] == '/') {
+            snprintf(paths[n++], sizeof(paths[0]), "%s", line);
+        }
+    }
+    free(text);
+    find_drop_target(e->x, e->y);
+    char into[512];
+    if (drop_place >= 0) {
+        snprintf(into, sizeof(into), "%s", places[drop_place].path);
+    } else if (drop_position >= 0) {
+        item_path(into, sizeof(into), at(drop_position));
+    } else {
+        snprintf(into, sizeof(into), "%s", cwd);
+    }
+    drop_place = drop_position = -1;
+    vx_mkdir(into);
+    int done = transfer(paths, n, into, !e->value, NULL);
+    printf("files: dropped %d item%s into %s\n", done, done == 1 ? "" : "s", into);
+    load();
+}
+
 static void drop(void) {
     static char paths[MAX_CLIP][512];
     char into[512];
@@ -1707,8 +1755,8 @@ static void draw(void) {
         char text[64];
         int count = selected_count();
         snprintf(text, sizeof(text), "%s%d item%s", ctrl ? "+ " : "", count, count == 1 ? "" : "s");
-        int tw = (int)strlen(text) * FONT_WIDTH + 12;
-        vx_fill(s, pointer_x + 14, pointer_y + 10, tw, FONT_HEIGHT + 6, VX_COLOR_SELECTED);
+        int tw = vx_text_width(text) + 12;
+        vx_fill(s, pointer_x + 14, pointer_y + 10, tw, VX_LINE_HEIGHT + 6, VX_COLOR_SELECTED);
         vx_draw_text(s, pointer_x + 20, pointer_y + 13, text, VX_COLOR_TEXT, VX_TRANSPARENT);
     }
     if (mode == MENU) {
@@ -1729,13 +1777,15 @@ static char typeahead[32];
 static long typeahead_ms;
 
 /* Letters typed on the list go to the first name that starts with them. */
-static void type_ahead(char c) {
+static void type_ahead(uint32_t c) {
     long now = vx_uptime();
     size_t n = now - typeahead_ms > 1000 ? 0 : strlen(typeahead);
     typeahead_ms = now;
-    if (n + 1 < sizeof(typeahead)) {
-        typeahead[n] = c;
-        typeahead[n + 1] = '\0';
+    char bytes[4];
+    int length_of_c = vx_utf8_encode(c, bytes);
+    if (n + (size_t)length_of_c < sizeof(typeahead)) {
+        memcpy(typeahead + n, bytes, (size_t)length_of_c);
+        typeahead[n + (size_t)length_of_c] = '\0';
     }
     size_t length = strlen(typeahead);
     for (int i = 0; i < shown_count; i++) {
@@ -1897,8 +1947,8 @@ static void key(const struct vx_gui_event *e) {
         cursor = anchor = -1;
         return;
     }
-    if (e->character > ' ' && e->character < 127) {
-        type_ahead((char)e->character);
+    if (e->character > ' ' && e->character != 127) {
+        type_ahead((uint32_t)e->character);
     }
 }
 
@@ -1940,10 +1990,10 @@ static void toolbar_click(int px, int py) {
             return;
         }
     }
-    if (vx_inside(px, py, path_x(), 8, path_w(), FONT_HEIGHT + 8)) {
+    if (vx_inside(px, py, path_x(), 8, path_w(), VX_LINE_HEIGHT + 8)) {
         field = FIELD_PATH;
         snprintf(typed, sizeof(typed), "%s", cwd);
-    } else if (vx_inside(px, py, search_x(), 8, 160, FONT_HEIGHT + 8)) {
+    } else if (vx_inside(px, py, search_x(), 8, 160, VX_LINE_HEIGHT + 8)) {
         field = FIELD_SEARCH;
     }
 }
@@ -1954,6 +2004,9 @@ static void pointer(const struct vx_gui_event *e, int *held) {
     bool right_click = (e->buttons & 2) && !(*held & 2);
     *held = e->buttons;
     pointer_x = e->x, pointer_y = e->y;
+    bool on_field = mode == NORMAL && (vx_inside(e->x, e->y, path_x(), 8, path_w(), VX_LINE_HEIGHT + 8) ||
+                                       vx_inside(e->x, e->y, search_x(), 8, 160, VX_LINE_HEIGHT + 8));
+    vx_window_set_cursor(window, on_field ? VX_CURSOR_TEXT : VX_CURSOR_ARROW);
     if (mode == MENU) {
         menu_hot = vx_menu_item_at(menu, menu_count, menu_x, menu_y, e->x, e->y);
         if (click || right_click) {
@@ -1989,9 +2042,24 @@ static void pointer(const struct vx_gui_event *e, int *held) {
         drag = DRAG_ON;
     }
     if (drag == DRAG_ON) {
+        struct vx_surface *s = &window->surface;
+        bool outside = e->x < 0 || e->y < 0 || e->x >= s->width || e->y >= s->height;
         find_drop_target(e->x, e->y);
-        if (release) {
+        if (release && outside) {
+            /* Out of the window: the desktop puts them where they were let go. */
+            static char paths[MAX_CLIP][512];
+            const char *list[MAX_CLIP];
+            int n = selected_paths(paths, MAX_CLIP);
+            for (int i = 0; i < n; i++) {
+                list[i] = paths[i];
+            }
+            vx_window_drag_files(window, list, n, ctrl);
+            printf("files: dragged %d item%s out\n", n, n == 1 ? "" : "s");
+            reload_at = vx_uptime() + 700;
+        } else if (release) {
             drop();
+        }
+        if (release) {
             drag = DRAG_NONE;
             drop_place = drop_position = -1;
         }
@@ -2093,9 +2161,19 @@ int main(int argc, char **argv) {
         /* Thumbnails are made when there's nothing else to do; and an old
          * message goes from the status bar after a while. */
         struct item *wanting = next_thumbnail();
-        int got = vx_gui_wait(&e, wanting ? 0 : message[0] ? 1000 : -1);
+        long wait = wanting ? 0 : message[0] ? 1000 : -1;
+        if (reload_at >= 0) {
+            long left = reload_at - vx_uptime();
+            wait = left < 0 ? 0 : wait < 0 || left < wait ? left : wait;
+        }
+        int got = vx_gui_wait(&e, wait);
         if (got < 0) {
             return 0;
+        }
+        if (got == 0 && reload_at >= 0 && vx_uptime() >= reload_at) {
+            reload_at = -1;
+            load();
+            continue;
         }
         if (got == 0 && wanting) {
             make_thumbnail(wanting);
@@ -2119,6 +2197,9 @@ int main(int argc, char **argv) {
             break;
         case VX_GUI_THEME:
             read_settings();
+            break;
+        case VX_GUI_DROP:
+            dropped(&e);
             break;
         case VX_GUI_FOCUS:
             if (!e.value) {

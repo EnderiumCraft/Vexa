@@ -3,7 +3,6 @@
  */
 #include <stdio.h>
 #include <string.h>
-#include <vexa/font.h>
 #include <vexa/gui.h>
 #include <vexa/net.h>
 #include <vexa/syscall.h>
@@ -20,28 +19,10 @@
 #define COLOR_BAR VX_COLOR_BUTTON
 #define COLOR_BAR_USED VX_COLOR_ACCENT
 
-static void draw_big(struct vx_surface *s, int x, int y, const char *text, int scale,
-                     uint32_t color) {
-    for (; *text; text++, x += FONT_WIDTH * scale) {
-        char c = *text;
-        if (c < FONT_FIRST_CHAR || c >= FONT_FIRST_CHAR + FONT_GLYPH_COUNT) {
-            continue;
-        }
-        const uint8_t *rows = font_glyphs[c - FONT_FIRST_CHAR];
-        for (int r = 0; r < FONT_HEIGHT; r++) {
-            for (int col = 0; col < FONT_WIDTH; col++) {
-                if (rows[r] & (0x80 >> col)) {
-                    vx_fill(s, x + col * scale, y + r * scale, scale, scale, color);
-                }
-            }
-        }
-    }
-}
-
 static int line(struct vx_surface *s, int y, const char *label, const char *value) {
     vx_draw_text(s, LEFT, y, label, COLOR_LABEL, VX_TRANSPARENT);
     vx_draw_text(s, VALUE_LEFT, y, value, COLOR_TEXT, VX_TRANSPARENT);
-    return y + FONT_HEIGHT + 6;
+    return y + VX_LINE_HEIGHT + 6;
 }
 
 static void draw(struct vx_window *window) {
@@ -51,12 +32,12 @@ static void draw(struct vx_window *window) {
     if (vx_system_info(&info)) {
         memset(&info, 0, sizeof(info));
     }
-    draw_big(s, LEFT, 16, "Vexa", 3, COLOR_TITLE);
+    const struct vx_font *big = vx_font(VX_FACE_BOLD, 40);
+    int end = vx_text(s, big, LEFT, 12, "Vexa", COLOR_TITLE, VX_TRANSPARENT);
     char text[96];
     snprintf(text, sizeof(text), "version %s", info.version);
-    vx_draw_text(s, LEFT + 4 * FONT_WIDTH * 3 + 16, 16 + FONT_HEIGHT * 3 - FONT_HEIGHT - 4, text,
-                 COLOR_LABEL, VX_TRANSPARENT);
-    int y = 16 + FONT_HEIGHT * 3 + 16;
+    vx_draw_text(s, end + 12, 12 + vx_font_ascent(big) - 13, text, COLOR_LABEL, VX_TRANSPARENT);
+    int y = 12 + vx_font_height(big) + 12;
 
     snprintf(text, sizeof(text), "%u", info.cpus);
     y = line(s, y, "CPUs", text);
@@ -96,7 +77,7 @@ static void draw(struct vx_window *window) {
     }
     y = line(s, y, "Network", address);
 
-    vx_draw_text(s, LEFT, HEIGHT - FONT_HEIGHT - 12, "A hobby operating system, from scratch.",
+    vx_draw_text(s, LEFT, HEIGHT - VX_LINE_HEIGHT - 12, "A hobby operating system, from scratch.",
                  COLOR_LABEL, VX_TRANSPARENT);
     vx_window_present(window, 0, 0, s->width, s->height);
 }

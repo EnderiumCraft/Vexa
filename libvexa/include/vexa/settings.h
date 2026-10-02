@@ -53,4 +53,9 @@ bool vx_settings_disk(char *out, size_t size);
 /* At boot (vinit): copies what's on the disk back to /etc; returns how many files. */
 int vx_settings_restore(void);
 
+/* The lock screen's password is kept as this (16 hex digits), not as
+ * itself. (A simple hash: it keeps the password from being read in the
+ * file, not from a determined attacker.) */
+void vx_password_hash(const char *password, char out[17]);
+
 #endif

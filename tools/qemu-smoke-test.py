@@ -216,13 +216,10 @@ TYPED_COMMANDS = ([
     ("@mouse_move 292 16", None, 5),
     ("@mouse_button 2", "desktop: menu at 1000,650", 10),
     ("@mouse_button 0", None, 2),
-    ("@mouse_move 20 90", None, 5),
+    ("@mouse_move 20 112", None, 5),
     ("@mouse_button 1", 'desktop: menu item "About Vexa"', 10),
     ("@mouse_button 0", 'desktop: window 6 "About Vexa"', 20),
-    ("@mouse_move -245 -148", None, 5),
-    ("@mouse_move -245 -148", None, 5),
-    ("@mouse_move -245 -147", None, 5),
-    ("@mouse_move -245 -147", None, 5),
+    ] + move(1020, 762, 40, 150) + [
     # Settings (from the Vexa menu; window 7, at 272,49): the light theme
     # (every window changes), dark again, a time zone, and 1024x768 (which
     # goes back by itself after 15 seconds), then closed.
@@ -248,7 +245,23 @@ TYPED_COMMANDS = ([
     ("@mouse_move -300 0", None, 5),
     ("@mouse_button 0", "desktop: snapped window 1 to the left", 10),
     ("@mouse_move 1 0", "desktop: window 1 is now 632x744", 20),
-    ("@sendkey ctrl-alt-q", "desktop: back to the console", 20),
+    # A file in the Desktop folder is an icon on the desktop; Super+arrows
+    # snap (the left half, then its top quarter, then the top right one);
+    # Alt+Tab switches; Ctrl+Space searches (and does sums); PrintScreen
+    # saves a screenshot in Pictures; Super+L locks, and Enter unlocks.
+    ("@type echo hi > /home/Desktop/note.txt", "desktop: desktop folder changed", 20),
+    ("@sendkey meta_l-up", "desktop: snapped window 1 to the top left", 10),
+    ("@sendkey meta_l-right", "desktop: snapped window 1 to the top right", 10),
+    ("@sendkey alt-tab", "desktop: switched to window", 10),
+    ("@sendkey ctrl-spc", "desktop: search", 10),
+    ("@type 12*(3+4)", 'desktop: notification "Calculator: 12*(3+4) = 84"', 10),
+    ("@sendkey print", "desktop: screenshot 1280x800 saved to /home/Pictures/Screenshot", 60),
+    ("@sendkey meta_l-l", "desktop: locked", 10),
+    ("@sendkey ret", "desktop: unlocked", 10),
+    ("@sendkey ctrl-alt-q", "desktop: asking before leaving", 20),
+    ("@sendkey ret", "desktop: back to the console", 20),
+    ("ls /home/Pictures /home/Desktop", "note.txt", 10),
+    ("ls /home/Pictures", "Screenshot 20", 10),
     ("#shell",),
     ("Hello Vexa", "Hello: command not found", 10),
 ])
@@ -323,7 +336,8 @@ LINUX_COMMANDS = [
     ("@mouse_move 338 -72", None, 5),
     ("@mouse_button 1", "desktop: left button at 887,164", 10),
     ("@mouse_button 0", "desktop: maximized window 3", 30),
-    ("@sendkey ctrl-alt-q", "desktop: back to the console", 30),
+    ("@sendkey ctrl-alt-q", "desktop: asking before leaving", 30),
+    ("@sendkey ret", "desktop: back to the console", 30),
     ("#linux-net",),
     # Networking: BSD sockets (with SCM_RIGHTS), wget, ifconfig, ping and
     # Python's urllib, asyncio and multiprocessing pipes.

@@ -582,3 +582,286 @@ void vx_blit_alpha(struct vx_surface *to, int x, int y, int width, int height,
         }
     }
 }
+
+/* ---- Writing PNG ----
+ *
+ * RGB, 8 bits a channel, each row with the filter that makes it smallest
+ * (as a guess: the least sum of bytes), compressed with deflate: LZ77
+ * matches (a hash of three bytes, a few earlier places tried) in fixed
+ * Huffman codes. Screens compress well like this. */
+
+struct bit_writer {
+    uint8_t *data;
+    size_t size, capacity;
+    uint32_t bits;
+    int count;
+    bool failed;
+};
+
+static void write_byte(struct bit_writer *w, uint8_t byte) {
+    if (w->size == w->capacity) {
+        size_t capacity = w->capacity ? w->capacity * 2 : 65536;
+        uint8_t *data = realloc(w->data, capacity);
+        if (!data) {
+            w->failed = true;
+            return;
+        }
+        w->data = data;
+        w->capacity = capacity;
+    }
+    w->data[w->size++] = byte;
+}
+
+/* Bits, the first in the lowest. */
+static void write_bits(struct bit_writer *w, uint32_t value, int n) {
+    w->bits |= value << w->count;
+    w->count += n;
+    while (w->count >= 8) {
+        write_byte(w, (uint8_t)w->bits);
+        w->bits >>= 8;
+        w->count -= 8;
+    }
+}
+
+/* A Huffman code: its first bit is the highest. */
+static void write_code(struct bit_writer *w, uint32_t code, int n) {
+    uint32_t reversed = 0;
+    for (int i = 0; i < n; i++) {
+        reversed = reversed << 1 | ((code >> i) & 1);
+    }
+    write_bits(w, reversed, n);
+}
+
+static void write_literal(struct bit_writer *w, int symbol) {
+    if (symbol < 144) {
+        write_code(w, 0x30 + symbol, 8);
+    } else if (symbol < 256) {
+        write_code(w, 0x190 + symbol - 144, 9);
+    } else if (symbol < 280) {
+        write_code(w, symbol - 256, 7);
+    } else {
+        write_code(w, 0xc0 + symbol - 280, 8);
+    }
+}
+
+static void write_match(struct bit_writer *w, int length, int distance) {
+    int code = 0;
+    while (code < 28 && length_base[code + 1] <= length) {
+        code++;
+    }
+    write_literal(w, 257 + code);
+    write_bits(w, (uint32_t)(length - length_base[code]), length_extra[code]);
+    int d = 0;
+    while (d < 29 && distance_base[d + 1] <= distance) {
+        d++;
+    }
+    write_code(w, (uint32_t)d, 5);
+    write_bits(w, (uint32_t)(distance - distance_base[d]), distance_extra[d]);
+}
+
+#define WINDOW_SIZE 32768
+#define HASH_SIZE 65536
+#define CHAIN_TRIES 8
+
+static void deflate_fixed(struct bit_writer *w, const uint8_t *in, size_t size) {
+    int32_t *head = malloc(HASH_SIZE * sizeof(int32_t));
+    int32_t *prev = malloc(WINDOW_SIZE * sizeof(int32_t));
+    if (!head || !prev) {
+        free(head);
+        free(prev);
+        w->failed = true;
+        return;
+    }
+    memset(head, 0xff, HASH_SIZE * sizeof(int32_t));
+    write_bits(w, 1, 1); /* The last block, */
+    write_bits(w, 1, 2); /* in fixed codes. */
+    size_t i = 0;
+    while (i < size) {
+        int best = 0, best_distance = 0;
+        if (i + 3 <= size) {
+            uint32_t h = ((uint32_t)in[i] << 16 | in[i + 1] << 8 | in[i + 2]) * 2654435761u >> 16;
+            int32_t candidate = head[h];
+            int max = size - i < 258 ? (int)(size - i) : 258;
+            for (int tries = 0; candidate >= 0 && tries < CHAIN_TRIES &&
+                                i - (size_t)candidate <= WINDOW_SIZE - 1;
+                 tries++) {
+                const uint8_t *a = in + candidate, *b = in + i;
+                int n = 0;
+                while (n < max && a[n] == b[n]) {
+                    n++;
+                }
+                if (n > best) {
+                    best = n;
+                    best_distance = (int)(i - (size_t)candidate);
+                    if (n == max) {
+                        break;
+                    }
+                }
+                int32_t next = prev[candidate % WINDOW_SIZE];
+                candidate = next < candidate ? next : -1;
+            }
+            prev[i % WINDOW_SIZE] = head[h];
+            head[h] = (int32_t)i;
+        }
+        if (best >= 3) {
+            write_match(w, best, best_distance);
+            /* The bytes inside the match go in the hash too (a few of them,
+             * for speed on long runs). */
+            for (size_t k = i + 1; k < i + (size_t)best && k + 3 <= size; k++) {
+                if (best > 32 && k > i + 4 && k < i + (size_t)best - 4) {
+                    continue;
+                }
+                uint32_t h = ((uint32_t)in[k] << 16 | in[k + 1] << 8 | in[k + 2]) * 2654435761u >> 16;
+                prev[k % WINDOW_SIZE] = head[h];
+                head[h] = (int32_t)k;
+            }
+            i += (size_t)best;
+        } else {
+            write_literal(w, in[i]);
+            i++;
+        }
+    }
+    write_literal(w, 256);
+    if (w->count) {
+        write_bits(w, 0, 8 - w->count);
+    }
+    free(head);
+    free(prev);
+}
+
+static uint32_t crc_table[256];
+
+static uint32_t crc32_of(uint32_t crc, const uint8_t *p, size_t n) {
+    if (!crc_table[1]) {
+        for (uint32_t k = 0; k < 256; k++) {
+            uint32_t c = k;
+            for (int j = 0; j < 8; j++) {
+                c = c & 1 ? 0xedb88320u ^ (c >> 1) : c >> 1;
+            }
+            crc_table[k] = c;
+        }
+    }
+    crc = ~crc;
+    while (n--) {
+        crc = crc_table[(crc ^ *p++) & 0xff] ^ (crc >> 8);
+    }
+    return ~crc;
+}
+
+static void put_be32(uint8_t *p, uint32_t v) {
+    p[0] = (uint8_t)(v >> 24), p[1] = (uint8_t)(v >> 16), p[2] = (uint8_t)(v >> 8), p[3] = (uint8_t)v;
+}
+
+static bool write_chunk(int handle, const char *type, const uint8_t *data, size_t size) {
+    uint8_t header[8], tail[4];
+    put_be32(header, (uint32_t)size);
+    memcpy(header + 4, type, 4);
+    uint32_t crc = crc32_of(crc32_of(0, (const uint8_t *)type, 4), data, size);
+    put_be32(tail, crc);
+    return vx_write(handle, header, 8) == 8 && (!size || vx_write(handle, data, size) == (long)size) &&
+           vx_write(handle, tail, 4) == 4;
+}
+
+int vx_image_save_png(const char *path, const struct vx_surface *s) {
+    int width = s->width, height = s->height;
+    size_t row = (size_t)width * 3 + 1;
+    uint8_t *raw = malloc(row * (size_t)height);
+    uint8_t *lines[5];
+    for (int f = 0; f < 5; f++) {
+        lines[f] = malloc(row);
+    }
+    bool ok = raw && lines[0] && lines[1] && lines[2] && lines[3] && lines[4];
+    for (int y = 0; ok && y < height; y++) {
+        uint8_t *plain = lines[0] + 1;
+        const uint32_t *pixels = s->pixels + (long)y * s->stride;
+        for (int x = 0; x < width; x++) {
+            plain[3 * x] = (uint8_t)(pixels[x] >> 16);
+            plain[3 * x + 1] = (uint8_t)(pixels[x] >> 8);
+            plain[3 * x + 2] = (uint8_t)pixels[x];
+        }
+        static uint8_t *up_plain; /* The row above, unfiltered. */
+        static size_t up_size;
+        if (up_size < row) {
+            free(up_plain);
+            up_plain = calloc(1, row);
+            up_size = up_plain ? row : 0;
+            if (!up_plain) {
+                ok = false;
+                break;
+            }
+        }
+        if (!y) {
+            memset(up_plain, 0, row);
+        }
+        int best = 0;
+        long best_sum = -1;
+        for (int f = 0; f < 5; f++) {
+            uint8_t *out = lines[f] + 1;
+            lines[f][0] = (uint8_t)f;
+            long sum = 0;
+            for (size_t i = 0; i < row - 1; i++) {
+                int a = i >= 3 ? plain[i - 3] : 0, b = up_plain[i], c = i >= 3 ? up_plain[i - 3] : 0;
+                int v = plain[i];
+                switch (f) {
+                case 1: v -= a; break;
+                case 2: v -= b; break;
+                case 3: v -= (a + b) / 2; break;
+                case 4: v -= paeth(a, b, c); break;
+                }
+                if (f) {
+                    out[i] = (uint8_t)v;
+                }
+                int sv = (int8_t)(uint8_t)v;
+                sum += sv < 0 ? -sv : sv;
+            }
+            if (best_sum < 0 || sum < best_sum) {
+                best_sum = sum;
+                best = f;
+            }
+        }
+        memcpy(raw + (size_t)y * row, lines[best], row);
+        memcpy(up_plain, plain, row - 1);
+    }
+    for (int f = 0; f < 5; f++) {
+        free(lines[f]);
+    }
+    if (!ok) {
+        free(raw);
+        return -VX_ENOMEM;
+    }
+    struct bit_writer w = {0};
+    write_byte(&w, 0x78); /* zlib: deflate, 32K window, */
+    write_byte(&w, 0x01); /* no dictionary. */
+    size_t raw_size = row * (size_t)height;
+    deflate_fixed(&w, raw, raw_size);
+    uint32_t s1 = 1, s2 = 0; /* Adler-32. */
+    for (size_t i = 0; i < raw_size; i++) {
+        s1 = (s1 + raw[i]) % 65521;
+        s2 = (s2 + s1) % 65521;
+    }
+    free(raw);
+    for (int k = 3; k >= 0; k--) {
+        write_byte(&w, (uint8_t)((s2 << 16 | s1) >> (8 * k)));
+    }
+    if (w.failed) {
+        free(w.data);
+        return -VX_ENOMEM;
+    }
+    int handle = vx_open(path, VX_OPEN_WRITE | VX_OPEN_CREATE | VX_OPEN_TRUNCATE);
+    if (handle < 0) {
+        free(w.data);
+        return handle;
+    }
+    static const uint8_t signature[8] = {0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'};
+    uint8_t header[13];
+    put_be32(header, (uint32_t)width);
+    put_be32(header + 4, (uint32_t)height);
+    header[8] = 8;  /* Bits a channel. */
+    header[9] = 2;  /* RGB. */
+    header[10] = header[11] = header[12] = 0;
+    bool written = vx_write(handle, signature, 8) == 8 && write_chunk(handle, "IHDR", header, 13) &&
+                   write_chunk(handle, "IDAT", w.data, w.size) && write_chunk(handle, "IEND", NULL, 0);
+    vx_close(handle);
+    free(w.data);
+    return written ? 0 : -VX_EIO;
+}

@@ -19,7 +19,6 @@
 #include <string.h>
 #include <vexa/app.h>
 #include <vexa/desktop.h>
-#include <vexa/font.h>
 #include <vexa/gui.h>
 #include <vexa/net.h>
 #include <vexa/settings.h>
@@ -42,8 +41,8 @@ static int pointer_x, pointer_y;
 /* ---- Sections ---- */
 
 enum section {
-    S_APPEARANCE, S_WALLPAPER, S_DESKTOP, S_DATE, S_INPUT, S_DISPLAY, S_DEFAULTS, S_STARTUP,
-    S_NETWORK, S_STORAGE, S_ABOUT, SECTION_COUNT
+    S_APPEARANCE, S_WALLPAPER, S_DESKTOP, S_DATE, S_INPUT, S_DISPLAY, S_LOCK, S_DEFAULTS,
+    S_STARTUP, S_NETWORK, S_STORAGE, S_ABOUT, SECTION_COUNT
 };
 
 static const struct {
@@ -60,6 +59,7 @@ static const struct {
      "pointer speed double click scroll natural left handed buttons layout key repeat shortcuts",
      0x8e8ea0, 'M'},
     {"Display", "resolution screen size scale bigger mode monitor", 0x2ec4b6, 'S'},
+    {"Lock Screen", "screensaver password lock idle security", 0x5a6acf, 'K'},
     {"Default Apps", "open with file types extensions", 0xff5fa2, 'O'},
     {"Startup", "login start apps terminal", 0xf0524f, 'L'},
     {"Network", "computer name hostname address ip dns router internet", 0x4c8dff, 'N'},
@@ -72,15 +72,16 @@ static char search[40];
 
 /* ---- Fields (typing) ---- */
 
-static enum { FIELD_NONE, FIELD_SEARCH, FIELD_PICTURE, FIELD_NAME } field;
-static char picture_path[256], computer_name[80];
+static enum { FIELD_NONE, FIELD_SEARCH, FIELD_PICTURE, FIELD_NAME, FIELD_PASSWORD } field;
+static char picture_path[256], computer_name[80], password[64];
 
 /* ---- What was drawn where: clicking finds it here ---- */
 
 enum hit_kind {
     H_SECTION, H_SEGMENT, H_TOGGLE, H_SLIDER, H_ACCENT, H_PICTURE, H_GRADIENT, H_PICTURE_FIELD,
     H_USE_PICTURE, H_ICON_APP, H_STARTUP_APP, H_ZONE, H_MODE, H_DEFAULT_APP, H_NAME_FIELD,
-    H_SAVE_NAME, H_POWER, H_KEEP, H_REVERT, H_SEARCH_FIELD, H_TEST_AREA,
+    H_SAVE_NAME, H_POWER, H_KEEP, H_REVERT, H_SEARCH_FIELD, H_TEST_AREA, H_PASSWORD_FIELD,
+    H_SET_PASSWORD, H_REMOVE_PASSWORD, H_LOCK_NOW,
 };
 
 struct hit {
@@ -187,20 +188,8 @@ static void text(int x, int y, const char *t, uint32_t color) {
     vx_draw_text(S(), x, y, t, color, VX_TRANSPARENT);
 }
 
-static void big_text(int x, int y, const char *t, int scale, uint32_t color) {
-    for (; *t; t++, x += FONT_WIDTH * scale) {
-        if (*t < FONT_FIRST_CHAR || *t >= FONT_FIRST_CHAR + FONT_GLYPH_COUNT) {
-            continue;
-        }
-        const uint8_t *rows = font_glyphs[*t - FONT_FIRST_CHAR];
-        for (int r = 0; r < FONT_HEIGHT; r++) {
-            for (int c = 0; c < FONT_WIDTH; c++) {
-                if (rows[r] & (0x80 >> c)) {
-                    vx_fill(S(), x + c * scale, y + r * scale, scale, scale, color);
-                }
-            }
-        }
-    }
+static int big_text(int x, int y, const char *t, int size, uint32_t color) {
+    return vx_text(S(), vx_font(VX_FACE_BOLD, size), x, y, t, color, VX_TRANSPARENT);
 }
 
 static void rounded(int x, int y, int w, int h, uint32_t color) {
@@ -211,7 +200,7 @@ static void rounded(int x, int y, int w, int h, uint32_t color) {
 
 static void heading(const char *t, int y) {
     text(LEFT, y, t, VX_COLOR_ACCENT);
-    vx_fill(S(), LEFT, y + FONT_HEIGHT + 3, window->surface.width - LEFT - 24, 1, VX_COLOR_LINE);
+    vx_fill(S(), LEFT, y + VX_LINE_HEIGHT + 3, window->surface.width - LEFT - 24, 1, VX_COLOR_LINE);
 }
 
 static void label(int y, const char *t) {
@@ -230,7 +219,7 @@ static void toggle(int y, const char *title, const char *key, bool fallback) {
     int x = CONTROL;
     rounded(x, y + 3, 40, 20, on ? VX_COLOR_ACCENT : VX_COLOR_BUTTON_HOT);
     rounded(on ? x + 22 : x + 2, y + 5, 16, 16, 0xffffff);
-    struct hit *h = add_hit(x, y, 40 + 8 * FONT_WIDTH, 26, H_TOGGLE);
+    struct hit *h = add_hit(x, y, 40 + 64, 26, H_TOGGLE);
     h->key = key;
     h->index = fallback;
     text(x + 50, y + 5, on ? "On" : "Off", VX_COLOR_DIM);
@@ -249,7 +238,7 @@ static void segments(int y, const char *title, const char *key, const struct opt
     const char *value = vx_settings_get(&desk, key, fallback);
     int x = title ? CONTROL : LEFT;
     for (int i = 0; i < count; i++) {
-        int w = (int)strlen(options[i].title) * FONT_WIDTH + 20;
+        int w = vx_text_width(options[i].title) + 20;
         bool on = !strcmp(value, options[i].value);
         vx_fill(S(), x, y + 1, w, 26, on ? VX_COLOR_SELECTED : VX_COLOR_BUTTON);
         vx_draw_outline(S(), x, y + 1, w, 26, on ? VX_COLOR_ACCENT : VX_COLOR_LINE);
@@ -524,7 +513,7 @@ static void draw_desktop(void) {
         char stem[64];
         bundle_stem(&apps[i], stem, sizeof(stem));
         bool on = chosen[0] ? list_has(chosen, stem) : apps[i].desktop;
-        int w = 24 + (int)strlen(stem) * FONT_WIDTH + 16;
+        int w = 24 + vx_text_width(stem) + 16;
         if (x + w > window->surface.width - 20) {
             x = CONTROL;
             row_y += 26;
@@ -549,6 +538,8 @@ static void draw_desktop(void) {
     heading("Windows and notifications", y);
     y += 28;
     toggle(y, "Snap to the screen's edges", "snapping", true);
+    y += ROW;
+    toggle(y, "Animations", "animations", true);
     y += ROW;
     static const struct option clicks[] = {
         {"maximize", "Maximize"}, {"minimize", "Minimize"}, {"none", "Nothing"},
@@ -575,7 +566,7 @@ static void draw_date(void) {
     } else {
         snprintf(line, sizeof(line), "%02d:%02d:%02d", d.hour, d.minute, d.second);
     }
-    big_text(LEFT, y, line, 3, VX_COLOR_TEXT);
+    big_text(LEFT, y, line, 40, VX_COLOR_TEXT);
     snprintf(line, sizeof(line), "%s %d %s %d", vx_weekday_names[d.weekday], d.day,
              vx_month_names[d.month - 1], d.year);
     text(LEFT, y + 56, line, VX_COLOR_DIM);
@@ -808,6 +799,65 @@ static void draw_startup(void) {
     }
 }
 
+/* ---- Lock Screen ---- */
+
+static void save_password(void) {
+    field = FIELD_NONE;
+    if (!password[0]) {
+        return;
+    }
+    char hash[17];
+    vx_password_hash(password, hash);
+    memset(password, 0, sizeof(password));
+    vx_settings_set(&desk, "lock_password", hash);
+    vx_settings_save(&desk);
+    changed("lock_password", "(set)");
+    vx_desktop_reload();
+}
+
+static void draw_lock(void) {
+    int y = 64;
+    heading("Screensaver", y);
+    y += 28;
+    static const struct option minutes[] = {
+        {"0", "Never"}, {"1", "1"}, {"2", "2"}, {"5", "5"}, {"10", "10"}, {"15", "15"}, {"30", "30"},
+    };
+    segments(y, "Start after (minutes)", "screensaver_minutes", minutes, 7, "10");
+    y += ROW;
+    toggle(y, "Lock when it ends", "lock_on_wake", false);
+    y += ROW;
+    note(y, "The time drifts over the wallpaper, blurred; a key or the mouse wakes it.");
+    y += 34;
+    heading("Password", y);
+    y += 28;
+    bool set_already = vx_settings_get(&desk, "lock_password", "")[0];
+    label(y, set_already ? "New password" : "Password");
+    char dots[200] = "";
+    size_t n = 0;
+    for (const char *p = password; *p && n + 4 < sizeof(dots);) {
+        vx_utf8_next(&p);
+        n += (size_t)snprintf(dots + n, sizeof(dots) - n, "\xe2\x80\xa2"); /* A dot. */
+    }
+    vx_draw_field(S(), CONTROL, y + 1, 220, dots, field == FIELD_PASSWORD);
+    add_hit(CONTROL, y + 1, 220, 24, H_PASSWORD_FIELD);
+    vx_draw_button(S(), CONTROL + 228, y + 1, 60, 24, "Set", false);
+    add_hit(CONTROL + 228, y + 1, 60, 24, H_SET_PASSWORD);
+    if (set_already) {
+        vx_draw_button(S(), CONTROL + 296, y + 1, 80, 24, "Remove", false);
+        add_hit(CONTROL + 296, y + 1, 80, 24, H_REMOVE_PASSWORD);
+    }
+    y += ROW;
+    note(y, set_already ? "A password is set: the lock screen asks for it."
+                        : "No password: any key or click unlocks the lock screen.");
+    y += 34;
+    heading("Lock now", y);
+    y += 28;
+    vx_draw_button(S(), LEFT, y, 140, 28, "Lock Screen", false);
+    add_hit(LEFT, y, 140, 28, H_LOCK_NOW);
+    y += 38;
+    note(y, "Anywhere: Super+L or Ctrl+Alt+L, or Lock Screen in the Vexa menu.");
+}
+
 /* ---- Network ---- */
 
 static void draw_network(void) {
@@ -885,7 +935,7 @@ static void draw_storage(void) {
                  m->read_only ? ", read-only" : "");
         text(LEFT, y, line, VX_COLOR_TEXT);
         snprintf(line, sizeof(line), "%s free of %s", free, total);
-        text(LEFT + w - (int)strlen(line) * FONT_WIDTH, y, line, VX_COLOR_DIM);
+        text(LEFT + w - vx_text_width(line), y, line, VX_COLOR_DIM);
         bar(LEFT, y + 22, w, m->total - m->free, m->total);
         y += 48;
     }
@@ -911,10 +961,10 @@ static void draw_about(void) {
     if (vx_system_info(&info)) {
         memset(&info, 0, sizeof(info));
     }
-    big_text(LEFT, y, "Vexa", 4, VX_COLOR_ACCENT);
+    int end = big_text(LEFT, y, "Vexa", 52, VX_COLOR_ACCENT);
     char line[128];
     snprintf(line, sizeof(line), "version %s", info.version);
-    text(LEFT + 4 * FONT_WIDTH * 4 + 18, y + 40, line, VX_COLOR_DIM);
+    text(end + 16, y + 40, line, VX_COLOR_DIM);
     y += 88;
     char name[80] = "";
     vx_get_hostname(name, sizeof(name));
@@ -1004,7 +1054,7 @@ static void draw_sidebar(void) {
         }
         rounded(16, y + 5, 20, 20, sections[i].color);
         char symbol[2] = {sections[i].symbol, 0};
-        text(22, y + 7, symbol, 0xffffff);
+        text(26 - vx_text_width(symbol) / 2, y + 7, symbol, 0xffffff);
         text(46, y + 7, sections[i].label, VX_COLOR_TEXT);
         struct hit *hit = add_hit(8, y, SIDEBAR - 16, 30, H_SECTION);
         hit->index = i;
@@ -1020,7 +1070,7 @@ static void draw(void) {
     hit_count = 0;
     vx_fill(s, 0, 0, s->width, s->height, VX_COLOR_WINDOW);
     draw_sidebar();
-    big_text(LEFT, 16, sections[current].label, 2, VX_COLOR_TEXT);
+    big_text(LEFT, 14, sections[current].label, 24, VX_COLOR_TEXT);
     switch (current) {
     case S_APPEARANCE: draw_appearance(); break;
     case S_WALLPAPER: draw_wallpaper(); break;
@@ -1028,6 +1078,7 @@ static void draw(void) {
     case S_DATE: draw_date(); break;
     case S_INPUT: draw_input(); break;
     case S_DISPLAY: draw_display(); break;
+    case S_LOCK: draw_lock(); break;
     case S_DEFAULTS: draw_defaults(); break;
     case S_STARTUP: draw_startup(); break;
     case S_NETWORK: draw_network(); break;
@@ -1209,6 +1260,15 @@ static void click(struct hit *h, int px) {
     case H_REVERT: revert_display(); break;
     case H_DEFAULT_APP: choose_default_app(h->index, h->x, h->y + h->h); break;
     case H_NAME_FIELD: field = FIELD_NAME; break;
+    case H_PASSWORD_FIELD: field = FIELD_PASSWORD; break;
+    case H_SET_PASSWORD: save_password(); break;
+    case H_REMOVE_PASSWORD:
+        set("lock_password", "");
+        break;
+    case H_LOCK_NOW:
+        changed("lock", "now");
+        vx_desktop_lock();
+        break;
     case H_SAVE_NAME: save_name(); break;
     case H_POWER:
         menu_count = 0;
@@ -1273,6 +1333,16 @@ static void key(const struct vx_gui_event *e) {
             vx_field_key(picture_path, sizeof(picture_path), e);
         }
         return;
+    case FIELD_PASSWORD:
+        if (e->key == VX_KEY_ENTER) {
+            save_password();
+        } else if (e->key == VX_KEY_ESC) {
+            memset(password, 0, sizeof(password));
+            field = FIELD_NONE;
+        } else {
+            vx_field_key(password, sizeof(password), e);
+        }
+        return;
     case FIELD_NAME:
         if (e->key == VX_KEY_ENTER) {
             save_name();
@@ -1290,7 +1360,7 @@ static void key(const struct vx_gui_event *e) {
         show_section(current - 1);
     } else if (e->key == VX_KEY_DOWN && current + 1 < SECTION_COUNT) {
         show_section(current + 1);
-    } else if (e->character > ' ' && e->character < 127) {
+    } else if (e->character > ' ' && e->character != 127) {
         field = FIELD_SEARCH;
         vx_field_key(search, sizeof(search), e);
     }

@@ -1,3 +1,4 @@
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -198,4 +199,24 @@ int vx_settings_restore(void) {
     }
     vx_close(handle);
     return restored;
+}
+
+void vx_password_hash(const char *password, char out[17]) {
+    /* FNV-1a, 64 bits, of "vexa:" and the password, stirred a few times. */
+    uint64_t h = 0xcbf29ce484222325ULL;
+    for (int round = 0; round < 64; round++) {
+        for (const char *p = "vexa:"; *p; p++) {
+            h = (h ^ (unsigned char)*p) * 0x100000001b3ULL;
+        }
+        for (const char *p = password; *p; p++) {
+            h = (h ^ (unsigned char)*p) * 0x100000001b3ULL;
+        }
+        h ^= h >> 29;
+    }
+    static const char digits[] = "0123456789abcdef";
+    for (int i = 15; i >= 0; i--) {
+        out[i] = digits[h & 15];
+        h >>= 4;
+    }
+    out[16] = '\0';
 }

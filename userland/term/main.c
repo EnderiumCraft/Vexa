@@ -8,7 +8,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <vexa/font.h>
 #include <vexa/gui.h>
 #include <vexa/syscall.h>
 
@@ -31,7 +30,7 @@ static const uint32_t palette[16] = {
 };
 
 struct cell {
-    char c;
+    uint32_t c; /* Unicode. */
     uint32_t fg, bg;
 };
 
@@ -207,9 +206,31 @@ static bool escape(char c) {
     return false;
 }
 
-static void put(char c) {
+/* UTF-8 from the program, a byte at a time. */
+static uint32_t pending;
+static int pending_left;
+
+static void put(char byte) {
     int old_y = cursor_y;
-    if (!escape(c)) {
+    unsigned char b = (unsigned char)byte;
+    uint32_t c = b;
+    if (pending_left && (b & 0xc0) == 0x80) {
+        pending = pending << 6 | (b & 0x3f);
+        if (--pending_left) {
+            return;
+        }
+        c = pending;
+    } else if (b >= 0xc0 && b < 0xf8 && state == NORMAL) {
+        pending_left = b >= 0xf0 ? 3 : b >= 0xe0 ? 2 : 1;
+        pending = b & (b >= 0xf0 ? 0x07 : b >= 0xe0 ? 0x0f : 0x1f);
+        return;
+    } else {
+        pending_left = 0;
+        if (b >= 0x80) {
+            c = 0xfffd; /* Not UTF-8. */
+        }
+    }
+    if (c >= 0x80 || !escape((char)c)) {
         switch (c) {
         case '\n': line_feed(); break;
         case '\r': cursor_x = 0; break;
@@ -228,7 +249,7 @@ static void put(char c) {
             }
             break;
         default:
-            if ((unsigned char)c < ' ') {
+            if (c < ' ' || c == 0x7f) {
                 break;
             }
             if (cursor_x >= columns) { /* Wrap before writing past the edge. */
@@ -255,23 +276,23 @@ static void redraw(void) {
         dirty[y] = false;
         first = first < 0 ? y : first;
         last = y;
-        int py = MARGIN + y * FONT_HEIGHT;
+        int py = MARGIN + y * VX_LINE_HEIGHT;
         for (int x = 0; x < columns; x++) {
             struct cell *cell = &cells[y][x];
-            vx_draw_char(s, MARGIN + x * FONT_WIDTH, py, cell->c, cell->fg, cell->bg);
+            vx_draw_char(s, MARGIN + x * VX_CELL_WIDTH, py, cell->c, cell->fg, cell->bg);
         }
         if (y == cursor_y && cursor_x < columns) {
-            int cx = MARGIN + cursor_x * FONT_WIDTH;
+            int cx = MARGIN + cursor_x * VX_CELL_WIDTH;
             if (focused) {
-                vx_fill(s, cx, py + FONT_HEIGHT - 3, FONT_WIDTH, 2, COLOR_CURSOR);
+                vx_fill(s, cx, py + VX_LINE_HEIGHT - 3, VX_CELL_WIDTH, 2, COLOR_CURSOR);
             } else {
-                vx_fill(s, cx, py + FONT_HEIGHT - 1, FONT_WIDTH, 1, COLOR_CURSOR);
+                vx_fill(s, cx, py + VX_LINE_HEIGHT - 1, VX_CELL_WIDTH, 1, COLOR_CURSOR);
             }
         }
     }
     if (first >= 0) {
-        vx_window_present(window, 0, MARGIN + first * FONT_HEIGHT, s->width,
-                          (last - first + 1) * FONT_HEIGHT);
+        vx_window_present(window, 0, MARGIN + first * VX_LINE_HEIGHT, s->width,
+                          (last - first + 1) * VX_LINE_HEIGHT);
     }
 }
 
@@ -279,12 +300,12 @@ static void redraw(void) {
  * where it was (the bottom rows, if there are fewer), and the programs on
  * the terminal hear of it (SIGWINCH). */
 static void resize(int master, int width, int height) {
-    int new_columns = (width - 2 * MARGIN) / FONT_WIDTH;
-    int new_rows = (height - 2 * MARGIN) / FONT_HEIGHT;
+    int new_columns = (width - 2 * MARGIN) / VX_CELL_WIDTH;
+    int new_rows = (height - 2 * MARGIN) / VX_LINE_HEIGHT;
     new_columns = new_columns < 10 ? 10 : new_columns > MAX_COLUMNS ? MAX_COLUMNS : new_columns;
     new_rows = new_rows < 2 ? 2 : new_rows > MAX_ROWS ? MAX_ROWS : new_rows;
-    if (vx_window_resize(window, 2 * MARGIN + new_columns * FONT_WIDTH,
-                         2 * MARGIN + new_rows * FONT_HEIGHT)) {
+    if (vx_window_resize(window, 2 * MARGIN + new_columns * VX_CELL_WIDTH,
+                         2 * MARGIN + new_rows * VX_LINE_HEIGHT)) {
         return;
     }
     int lost = cursor_y - (new_rows - 1); /* Lines to drop off the top. */
@@ -337,14 +358,15 @@ static void type_key(int master, const struct vx_gui_event *e) {
         vx_write(master, sequence, strlen(sequence));
         return;
     }
-    char c = (char)e->character;
+    uint32_t c = (uint32_t)e->character;
     if (c == '\b') {
         c = 0x7f; /* Backspace sends DEL, like other terminals. */
     } else if (c == '\n') {
         c = '\r';
     }
     if (c) {
-        vx_write(master, &c, 1);
+        char bytes[4]; /* UTF-8. */
+        vx_write(master, bytes, (size_t)vx_utf8_encode(c, bytes));
     }
 }
 
@@ -368,9 +390,10 @@ static int start_shell(int *master_out, const char *program) {
         return terminal;
     }
     const char *argv[] = {program};
-    const char *envp[] = {"TERM=vt100", "PATH=/bin:/linux/bin:/linux/usr/bin:/linux/sbin:/linux/usr/sbin"};
+    const char *envp[] = {"TERM=vt100", "PATH=/bin:/linux/bin:/linux/usr/bin:/linux/sbin:/linux/usr/sbin",
+                          "LANG=C.UTF-8", "HOME=/home"};
     struct vx_spawn spawn = {
-        .argv = argv, .argc = 1, .envp = envp, .envc = 2,
+        .argv = argv, .argc = 1, .envp = envp, .envc = 4,
         .handles = {terminal, terminal, terminal}, .flags = VX_SPAWN_NEW_GROUP,
     };
     int process = vx_spawn(program, &spawn);
@@ -381,12 +404,13 @@ static int start_shell(int *master_out, const char *program) {
 
 int main(int argc, char **argv) {
     const char *program = argc > 1 ? argv[1] : "/bin/vsh";
-    window = vx_window_create_flags("Terminal", 2 * MARGIN + columns * FONT_WIDTH,
-                                    2 * MARGIN + rows * FONT_HEIGHT, VX_WINDOW_RESIZABLE);
+    window = vx_window_create_flags("Terminal", 2 * MARGIN + columns * VX_CELL_WIDTH,
+                                    2 * MARGIN + rows * VX_LINE_HEIGHT, VX_WINDOW_RESIZABLE);
     if (!window) {
         fprintf(stderr, "term: no desktop to open a window on\n");
         return 1;
     }
+    vx_window_set_cursor(window, VX_CURSOR_TEXT);
     vx_fill(&window->surface, 0, 0, window->surface.width, window->surface.height,
             COLOR_BACKGROUND);
     for (int y = 0; y < rows; y++) {

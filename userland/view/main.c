@@ -5,7 +5,6 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
-#include <vexa/font.h>
 #include <vexa/gui.h>
 #include <vexa/syscall.h>
 
@@ -39,7 +38,7 @@ static void draw(void) {
     } else {
         const char *text = path ? "Can't read this image (PNG, BMP and PPM are known)."
                                 : "Open an image from Files, or: view <file>";
-        vx_draw_text(s, 16, h / 2 - FONT_HEIGHT / 2, text, VX_COLOR_DIM, VX_TRANSPARENT);
+        vx_draw_text(s, 16, h / 2 - VX_LINE_HEIGHT / 2, text, VX_COLOR_DIM, VX_TRANSPARENT);
         snprintf(status, sizeof(status), "%s", path ? path : "");
     }
     vx_fill(s, 0, s->height - STATUS, s->width, STATUS, VX_COLOR_WINDOW);

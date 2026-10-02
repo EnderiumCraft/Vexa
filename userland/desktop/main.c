@@ -2,16 +2,29 @@
  *
  * It takes the screen, the keyboard and the mouse, and draws programs'
  * windows (buffers they share with it) with a title bar you can drag them
- * by, and buttons to minimize, maximize and close them; resizable windows
- * are resized by their right and bottom edges. A panel along the top has the
- * Vexa menu (programs to start), a button for each window and a clock.
+ * by, buttons to minimize, maximize and close them, and a soft shadow;
+ * resizable windows are resized by their left, right and bottom edges.
+ * Windows grow in when they open, fade when they close, and fly to the
+ * panel when minimized. A panel along the top has the Vexa menu (programs
+ * to start), a button for each window, search, and the clock (a calendar
+ * and the notifications under it).
  *
- * Clicking a window raises it and gives it the keyboard. Alt+Tab goes to the
- * next window, Ctrl+Alt+T opens a terminal, Ctrl+Alt+X starts X (Xvexa) with
- * an xterm, and Ctrl+Alt+Q goes back to the text console.
+ * Clicking a window raises it and gives it the keyboard. The keys:
+ *
+ *     Alt+Tab, Alt+Shift+Tab   switch windows (pictures of them while Alt is held)
+ *     Alt+F4                   close the window
+ *     Super+Left/Right/Up/Down snap to a half, a quarter, maximize, restore
+ *     Super+D                  show the desktop (minimize all; again: back)
+ *     Ctrl+Space, Super+Space  search for apps, settings and files
+ *     Super+L, Ctrl+Alt+L      lock the screen
+ *     PrintScreen              a screenshot (Alt: the window; Shift: an area)
+ *     Ctrl+Alt+T, F, E, X      Terminal, Files, Text Editor, an xterm (apps' shortcuts)
+ *     Ctrl+Alt+Q               back to the text console (it asks first)
  *
  * Programs talk to it over the local socket /run/desktop (see
- * <vexa/desktop.h>; <vexa/gui.h> has the easy way).
+ * <vexa/desktop.h>; <vexa/gui.h> has the easy way). The other parts are
+ * in look.c, icons.c, switcher.c, search.c, clock.c, shot.c and lock.c
+ * (shell.h says what they share).
  */
 #include <stdbool.h>
 #include <stdio.h>
@@ -19,24 +32,29 @@
 #include <string.h>
 #include <vexa/app.h>
 #include <vexa/desktop.h>
-#include <vexa/font.h>
+#include <vexa/files.h>
 #include <vexa/gui.h>
 #include <vexa/net.h>
 #include <vexa/settings.h>
 #include <vexa/syscall.h>
 #include <vexa/time.h>
+#include "shell.h"
 
-#define MAX_WINDOWS 32
 #define MAX_CLIENTS 32
 #define MAX_CHILDREN 32
-#define PANEL_HEIGHT 26
-#define TITLE_HEIGHT 22
-#define BORDER 1
-#define GRIP 6         /* How far past a resizable window's edge you can grab it. */
+#define GRIP 6          /* How far past a resizable window's edge you can grab it. */
+#define EDGE 4          /* How far inside it. */
 #define BUTTON_WIDTH 20 /* The title bar's buttons. */
+#define CORNER 8        /* The title bar's round corners. */
 #define MIN_WIDTH 120
 #define MIN_HEIGHT 60
 #define DOUBLE_CLICK_MS setting_double_click
+#define SEARCH_BUTTON_WIDTH 28
+
+/* How long animations take (milliseconds). */
+#define OPEN_MS 170
+#define MINIMIZE_MS 220
+#define CLOSE_MS 150
 
 /* The theme (Settings, Appearance: <vexa/gui.h>). */
 #define COLOR_PANEL (vx_theme.panel)
@@ -50,101 +68,102 @@
 #define COLOR_TITLE_FOCUSED (vx_theme.title_focused)
 #define COLOR_TITLE_TEXT (vx_theme.title_text)
 #define COLOR_BORDER (vx_theme.line)
-#define COLOR_CLOSE 0xff6b81
+#define COLOR_CLOSE 0xff5f6d
 #define COLOR_OUTLINE (vx_theme.accent)
 #define COLOR_MENU (vx_theme.menu)
 #define COLOR_MENU_HOT (vx_theme.selected)
 
 /* ---- Settings (DESKTOP_CONFIG: Settings writes it, <vexa/settings.h>) ---- */
 
-static struct vx_settings config;
+struct vx_settings config;
 static char setting_wallpaper[32] = "image";
 static char setting_image[256] = DESKTOP_DEFAULT_WALLPAPER;
 static char setting_wallpaper_mode[16] = "fill"; /* fill, fit, center, tile, stretch */
 static int setting_clock = 24;                   /* Hours. */
 static bool setting_clock_seconds, setting_clock_date = true, setting_clock_weekday = true;
-static bool setting_icons = true;       /* Icons on the desktop. */
-static char setting_icon_apps[256];     /* Which ("Terminal,Files"; empty: as the apps say). */
 static int setting_note_ms = 4000;      /* How long notifications stay. */
 static bool setting_snapping = true;
+static bool setting_animations = true;
 static char setting_title_click[16] = "maximize"; /* A double click on a title bar. */
 static int setting_pointer_speed = 5;   /* 1 to 10; 5 moves as the mouse says. */
 static int setting_double_click = 500;  /* Milliseconds between the clicks. */
 static bool setting_natural_scroll, setting_left_handed;
-static char setting_layout[16] = "us";  /* The keyboard layout. */
+char setting_layout[16] = "us";         /* The keyboard layout. */
 static int setting_key_delay = 500, setting_key_rate = 20;
 static int setting_width, setting_height; /* The display's mode (0: as it started). */
 static int setting_scale = 1;           /* 2: everything twice as big. */
-
-struct rect {
-    int x, y, width, height;
-};
 
 struct client {
     int handle;
 };
 
-struct window {
-    int id;
-    int client; /* Index in clients[]. */
-    char title[64];
-    int x, y; /* The content's top-left corner on the screen. */
-    struct vx_surface content;
-    size_t mapped_size;
-    int buffer_handle;
-    bool resizable, minimized, maximized;
-    bool popup; /* A menu or tooltip: no frame, always on top, no keyboard. */
-    bool undecorated; /* It draws its own title bar: no frame. */
-    struct rect restore; /* Where it was before it was maximized (content). */
-};
-
 static struct vx_display_info display;
 static uint32_t *frame;             /* The display's memory. */
-static struct vx_surface screen;    /* Composed here, then copied to `frame`. */
-static struct vx_surface wallpaper; /* Drawn once. */
-static struct window *stack[MAX_WINDOWS]; /* Bottom to top. */
-static int window_count, next_window_id = 1;
-static struct window *focused;
+struct vx_surface screen;           /* Composed here, then copied to `frame`. */
+struct vx_surface wallpaper;        /* Drawn once. */
+struct window *stack[MAX_WINDOWS];  /* Bottom to top. */
+int window_count;
+static int next_window_id = 1;
+struct window *focused;
 static struct client clients[MAX_CLIENTS];
 static int listener, keyboard = -1, mouse = -1;
 static int children[MAX_CHILDREN];
 
-static int pointer_x, pointer_y, buttons;
+int pointer_x, pointer_y, buttons;
 static struct rect damage; /* What must be drawn again (width 0: nothing). */
 static bool quit;
+static bool frames_wanted; /* An animation: draw again soon. */
+static bool hide_cursor;   /* For screenshots. */
 
 /* What the left button is doing. */
 static enum { IDLE, MOVING, RESIZING } drag;
 static struct window *dragged;
-static int drag_dx, drag_dy;
-static bool resize_right, resize_bottom;
+static int drag_dx, drag_dy, drag_right; /* drag_right: the right edge, resizing by the left. */
+static bool resize_left, resize_right, resize_bottom;
 static struct rect outline; /* The size a window is being resized to (content). */
 static long last_click_ms;
 static struct window *last_click_window;
+/* The window a button was pressed in: it gets the pointer until the
+ * buttons are up, even outside it (dragging out of it). */
+static struct window *grab;
+static bool desktop_press; /* The left button went down on the desktop. */
+
+/* The pointer's shape, and the title bar button under it. */
+static int cursor_shape;
+static struct window *hot_window;
+static int hot_button = -1;
 
 static bool menu_open;
 
 /* Notifications: up to three at a time, each for a few seconds. */
 #define MAX_NOTES 3
-#define NOTE_WIDTH 320
-#define NOTE_HEIGHT 44
+#define NOTE_WIDTH 340
+#define NOTE_HEIGHT 52
 static struct note {
     char text[104];
     long until; /* vx_uptime() */
 } notes[MAX_NOTES];
 static int note_count;
 
-/* Dragging a window to an edge snaps it there (see snap_target). */
-enum snap { SNAP_NONE, SNAP_TOP, SNAP_LEFT, SNAP_RIGHT };
+/* Dragging a window to an edge or a corner snaps it there (see snap_target). */
 static enum snap snap;
 static int menu_hot = -1;
 static long shown_minute = -1;
 
-static bool shift, ctrl, alt, caps_lock;
+bool shift, ctrl, alt, super_key;
+static bool caps_lock, altgr;
+
+long now_ms(void) {
+    return vx_uptime();
+}
+
+void want_frames(void) {
+    frames_wanted = true;
+}
 
 /* ---- Rectangles and damage ---- */
 
-static struct rect frame_rect(const struct window *w) {
+struct rect frame_rect(const struct window *w) {
     if (w->popup || w->undecorated) {
         return (struct rect){w->x, w->y, w->content.width, w->content.height};
     }
@@ -153,22 +172,33 @@ static struct rect frame_rect(const struct window *w) {
                          w->content.height + TITLE_HEIGHT + 2 * BORDER};
 }
 
+/* What a window covers, with its shadow. */
+static struct rect window_damage(const struct window *w) {
+    struct rect r = frame_rect(w);
+    if (w->popup || w->undecorated) {
+        return r;
+    }
+    return (struct rect){r.x - SHADOW, r.y - SHADOW, r.width + 2 * SHADOW,
+                         r.height + 2 * SHADOW + 4};
+}
+
 /* Where clicks reach the window: its frame, and for a resizable one a little
- * past its right and bottom edges. */
+ * past its left, right and bottom edges. */
 static struct rect hit_rect(const struct window *w) {
     struct rect r = frame_rect(w);
     if (w->resizable && !w->maximized && !w->popup && !w->undecorated) {
-        r.width += GRIP;
+        r.x -= GRIP;
+        r.width += 2 * GRIP;
         r.height += GRIP;
     }
     return r;
 }
 
-static bool inside(struct rect r, int x, int y) {
+bool inside(struct rect r, int x, int y) {
     return x >= r.x && y >= r.y && x < r.x + r.width && y < r.y + r.height;
 }
 
-static void add_damage(struct rect r) {
+void add_damage(struct rect r) {
     if (r.width <= 0 || r.height <= 0) {
         return;
     }
@@ -184,12 +214,16 @@ static void add_damage(struct rect r) {
     damage = (struct rect){x0, y0, x1 - x0, y1 - y0};
 }
 
-static struct rect panel_rect(void) {
+void damage_all(void) {
+    add_damage((struct rect){0, 0, screen.width, screen.height});
+}
+
+struct rect panel_rect(void) {
     return (struct rect){0, 0, screen.width, PANEL_HEIGHT};
 }
 
 /* The space windows get when maximized. */
-static struct rect work_area(void) {
+struct rect work_area(void) {
     return (struct rect){BORDER, PANEL_HEIGHT + TITLE_HEIGHT + BORDER,
                          screen.width - 2 * BORDER,
                          screen.height - PANEL_HEIGHT - TITLE_HEIGHT - 2 * BORDER};
@@ -200,16 +234,15 @@ static struct rect work_area(void) {
 enum menu_action {
     RUN_APP,       /* An app from /apps (see <vexa/app.h>). */
     RUN_LINUX_APP, /* An X program from /linux/usr/share/applications, through xrun. */
-    SEPARATOR, LEAVE, RESTART, POWER_OFF
+    SEPARATOR, LOCK, LEAVE, RESTART, POWER_OFF
 };
 
 /* The apps in /apps, and their icons. */
-#define MAX_APPS 32
-static struct vx_app apps[MAX_APPS];
-static struct vx_image *app_icons[MAX_APPS];
-static int app_count;
+struct vx_app apps[MAX_APPS];
+struct vx_image *app_icons[MAX_APPS];
+int app_count;
 
-#define MAX_MENU_ITEMS 24
+#define MAX_MENU_ITEMS 28
 #define MAX_ARGS 4
 #define APPLICATIONS "/linux/usr/share/applications"
 
@@ -240,6 +273,11 @@ static struct rect menu_rect(void) {
     return (struct rect){4, PANEL_HEIGHT, MENU_WIDTH, height};
 }
 
+static struct rect menu_damage(void) {
+    struct rect r = menu_rect();
+    return (struct rect){r.x - SHADOW, r.y, r.width + 2 * SHADOW, r.height + SHADOW + 4};
+}
+
 /* The menu item at a point, or -1. */
 static int menu_item_at(int x, int y) {
     struct rect r = menu_rect();
@@ -261,8 +299,7 @@ static void set_menu(bool open) {
     if (menu_open != open) {
         menu_open = open;
         menu_hot = -1;
-        struct rect r = menu_rect();
-        add_damage(r);
+        add_damage(menu_damage());
         add_damage(panel_rect());
     }
 }
@@ -373,7 +410,7 @@ static void build_menu(void) {
             for (long i = 0; i < n; i++) {
                 size_t length = strlen(entries[i].name);
                 if (length > 8 && !strcmp(entries[i].name + length - 8, ".desktop") &&
-                    menu_item_count < MAX_MENU_ITEMS - 2) {
+                    menu_item_count < MAX_MENU_ITEMS - 6) {
                     char path[320];
                     snprintf(path, sizeof(path), "%s/%s", APPLICATIONS, entries[i].name);
                     add_linux_app(path);
@@ -385,12 +422,13 @@ static void build_menu(void) {
     qsort(menu_items + first, (size_t)(menu_item_count - first), sizeof(menu_items[0]),
           compare_labels);
     add_menu_item("", "", SEPARATOR);
+    add_menu_item("Lock Screen", "Super+L", LOCK);
     add_menu_item("Restart...", "", RESTART);
     add_menu_item("Shut Down...", "", POWER_OFF);
-    add_menu_item("Back to the console", "Ctrl+Alt+Q", LEAVE);
+    add_menu_item("Back to the console...", "Ctrl+Alt+Q", LEAVE);
 }
 
-/* ---- The panel's window buttons ---- */
+/* ---- The panel ---- */
 
 /* Windows in the order they were opened (their buttons' order). */
 static int windows_by_id(struct window **out) {
@@ -410,17 +448,24 @@ static int windows_by_id(struct window **out) {
     return n;
 }
 
-/* The clock's text, in the time zone and format from the settings: false
- * if the time isn't known. */
-static bool clock_text(char *out, size_t size) {
+bool local_date(struct vx_date *d) {
     long now = vx_time();
     if (now <= 0) {
         return false;
     }
     const struct vx_zone *zone = vx_find_zone(vx_settings_get(&config, "time_zone", NULL));
     int offset = zone ? vx_zone_offset(zone, now) : vx_settings_int(&config, "utc_offset", 0);
+    vx_date_of(now + offset * 60L, d);
+    return true;
+}
+
+/* The clock's text, in the time zone and format from the settings: false
+ * if the time isn't known. */
+bool clock_text(char *out, size_t size) {
     struct vx_date d;
-    vx_date_of(now + offset * 60L, &d);
+    if (!local_date(&d)) {
+        return false;
+    }
     char date[24] = "", time[24];
     if (setting_clock_weekday && setting_clock_date) {
         snprintf(date, sizeof(date), "%.3s %d %.3s  ", vx_weekday_names[d.weekday], d.day,
@@ -441,11 +486,22 @@ static bool clock_text(char *out, size_t size) {
     return true;
 }
 
-static struct rect task_button(int index, int count) {
-    int left = MENU_BUTTON_WIDTH + 12;
+/* The clock on the panel (and the dot for notifications not seen yet). */
+struct rect clock_button_rect(void) {
     char clock[48] = "";
     clock_text(clock, sizeof(clock));
-    int room = screen.width - left - (int)strlen(clock) * FONT_WIDTH - 36;
+    int width = vx_text_width(clock) + 16 + (unread_notes ? 12 : 0);
+    return (struct rect){screen.width - width - 4, 2, width, PANEL_HEIGHT - 4};
+}
+
+static struct rect search_button_rect(void) {
+    struct rect c = clock_button_rect();
+    return (struct rect){c.x - SEARCH_BUTTON_WIDTH - 4, 2, SEARCH_BUTTON_WIDTH, PANEL_HEIGHT - 4};
+}
+
+static struct rect task_button(int index, int count) {
+    int left = MENU_BUTTON_WIDTH + 12;
+    int room = search_button_rect().x - left - 12;
     int width = count ? room / count - 4 : 0;
     if (width > 180) {
         width = 180;
@@ -455,73 +511,8 @@ static struct rect task_button(int index, int count) {
 
 /* ---- Drawing ---- */
 
-#define CURSOR_WIDTH 12
-#define CURSOR_HEIGHT 19
-
-/* An arrow, and the one for resizing: '#' outline, '.' fill. */
-static const char *const cursor_shape[CURSOR_HEIGHT] = {
-    "#           ", "##          ", "#.#         ", "#..#        ", "#...#       ",
-    "#....#      ", "#.....#     ", "#......#    ", "#.......#   ", "#........#  ",
-    "#.........# ", "#..........#", "#......#####", "#...#..#    ", "#..# #..#   ",
-    "#.#  #..#   ", "##    #..#  ", "#     #..#  ", "       ##   ",
-};
-static const char *const resize_shape[CURSOR_HEIGHT] = {
-    "######      ", "#....#      ", "#...#       ", "#....#      ", "#.#..#      ",
-    "## #..#     ", "    #..#    ", "     #..# ##", "      #..#.#", "       #....#",
-    "       #...#", "      #....#", "      ######", "            ", "            ",
-    "            ", "            ", "            ", "            ",
-};
-
-static bool resize_cursor;
-
-static struct rect cursor_rect(void) {
-    return (struct rect){pointer_x, pointer_y, CURSOR_WIDTH + 1, CURSOR_HEIGHT};
-}
-
-/* Text cut to fit `width` pixels, with "..." when it doesn't. */
-static void draw_text_fit(struct vx_surface *s, int x, int y, int width, const char *text,
-                          uint32_t color) {
-    int fits = width / FONT_WIDTH;
-    int length = (int)strlen(text);
-    if (fits <= 0) {
-        return;
-    }
-    char line[128];
-    if (length <= fits) {
-        vx_draw_text(s, x, y, text, color, VX_TRANSPARENT);
-        return;
-    }
-    if (fits > (int)sizeof(line) - 1) {
-        fits = sizeof(line) - 1;
-    }
-    int keep = fits > 3 ? fits - 3 : fits;
-    memcpy(line, text, (size_t)keep);
-    strcpy(line + keep, fits > 3 ? "..." : "");
-    vx_draw_text(s, x, y, line, color, VX_TRANSPARENT);
-}
-
-/* Draws a character `scale` times its size. */
-static void draw_big_char(struct vx_surface *s, int x, int y, char c, int scale, uint32_t color) {
-    if (c < FONT_FIRST_CHAR || c >= FONT_FIRST_CHAR + FONT_GLYPH_COUNT) {
-        return;
-    }
-    const uint8_t *rows = font_glyphs[c - FONT_FIRST_CHAR];
-    for (int r = 0; r < FONT_HEIGHT; r++) {
-        for (int col = 0; col < FONT_WIDTH; col++) {
-            if (rows[r] & (0x80 >> col)) {
-                vx_fill(s, x + col * scale, y + r * scale, scale, scale, color);
-            }
-        }
-    }
-}
-
 static uint32_t mix(uint32_t a, uint32_t b, int num, int den) {
-    uint32_t out = 0;
-    for (int shift = 0; shift <= 16; shift += 8) {
-        int ca = (a >> shift) & 0xff, cb = (b >> shift) & 0xff;
-        out |= (uint32_t)(ca + (cb - ca) * num / den) << shift;
-    }
-    return out;
+    return vx_mix(a, b, num * 255 / den);
 }
 
 /* Reads the settings (at start, and when Settings says they changed). */
@@ -533,7 +524,6 @@ static void read_config(void) {
     TEXT_SETTING(setting_wallpaper, "wallpaper", "image");
     TEXT_SETTING(setting_image, "wallpaper_image", DESKTOP_DEFAULT_WALLPAPER);
     TEXT_SETTING(setting_wallpaper_mode, "wallpaper_mode", "fill");
-    TEXT_SETTING(setting_icon_apps, "desktop_apps", "");
     TEXT_SETTING(setting_title_click, "title_double_click", "maximize");
     TEXT_SETTING(setting_layout, "keyboard_layout", "us");
 #undef TEXT_SETTING
@@ -541,10 +531,10 @@ static void read_config(void) {
     setting_clock_seconds = vx_settings_bool(&config, "clock_seconds", false);
     setting_clock_date = vx_settings_bool(&config, "clock_date", true);
     setting_clock_weekday = vx_settings_bool(&config, "clock_weekday", true);
-    setting_icons = vx_settings_bool(&config, "desktop_icons", true);
     setting_note_ms = vx_settings_int(&config, "notification_seconds", 4) * 1000;
     setting_note_ms = setting_note_ms < 1000 ? 1000 : setting_note_ms;
     setting_snapping = vx_settings_bool(&config, "snapping", true);
+    setting_animations = vx_settings_bool(&config, "animations", true);
     setting_pointer_speed = vx_settings_int(&config, "pointer_speed", 5);
     setting_pointer_speed = setting_pointer_speed < 1 ? 1 : setting_pointer_speed > 10 ? 10
                                                                               : setting_pointer_speed;
@@ -556,6 +546,7 @@ static void read_config(void) {
     setting_width = vx_settings_int(&config, "display_width", 0);
     setting_height = vx_settings_int(&config, "display_height", 0);
     setting_scale = vx_settings_int(&config, "display_scale", 1) == 2 ? 2 : 1;
+    lock_settings();
 }
 
 /* Fills a surface with a vertical gradient. */
@@ -590,7 +581,7 @@ static void make_wallpaper(void) {
         } else if (!strcmp(mode, "center")) {
             vx_blit(&wallpaper, (sw - iw) / 2, (sh - ih) / 2, &image->surface, 0, 0, iw, ih);
         } else if (!strcmp(mode, "stretch")) {
-            vx_blit_scaled(&wallpaper, 0, 0, sw, sh, &image->surface);
+            blit_smooth(&wallpaper, (struct rect){0, 0, sw, sh}, &image->surface, 255);
         } else {
             bool fit = !strcmp(mode, "fit");
             int w = sw, h = iw ? ih * sw / iw : sh;
@@ -598,75 +589,146 @@ static void make_wallpaper(void) {
                 h = sh;
                 w = iw * sh / ih;
             }
-            vx_blit_scaled(&wallpaper, (sw - w) / 2, (sh - h) / 2, w, h, &image->surface);
+            blit_smooth(&wallpaper, (struct rect){(sw - w) / 2, (sh - h) / 2, w, h},
+                        &image->surface, 255);
         }
         vx_image_free(image);
-        return;
-    }
-    /* ... or a gradient. */
-    const struct desktop_wallpaper *choice = &desktop_wallpapers[0];
-    for (int i = 0; i < DESKTOP_WALLPAPER_COUNT; i++) {
-        if (!strcmp(desktop_wallpapers[i].name, setting_wallpaper)) {
-            choice = &desktop_wallpapers[i];
+    } else {
+        /* ... or a gradient, with the name large in the bottom right corner
+         * (a little lighter than the gradient's top). */
+        const struct desktop_wallpaper *choice = &desktop_wallpapers[0];
+        for (int i = 0; i < DESKTOP_WALLPAPER_COUNT; i++) {
+            if (!strcmp(desktop_wallpapers[i].name, setting_wallpaper)) {
+                choice = &desktop_wallpapers[i];
+            }
         }
+        gradient(&wallpaper, choice->top, choice->bottom);
+        uint32_t text_color = mix(choice->top, 0xffffff, 1, 8);
+        const struct vx_font *big = vx_font(VX_FACE_BOLD, wallpaper.width >= 1024 ? 128 : 64);
+        const char *name = "Vexa";
+        int width = vx_text_width_font(big, name);
+        int x = wallpaper.width - width - 120;
+        int y = wallpaper.height - vx_font_height(big) - 48;
+        vx_text(&wallpaper, big, x, y, name, text_color, VX_TRANSPARENT);
+        char version[64];
+        struct vx_system_info info;
+        snprintf(version, sizeof(version), "version %s",
+                 vx_system_info(&info) == 0 ? info.version : "?");
+        vx_draw_text(&wallpaper, x + 8, y + vx_font_height(big), version, text_color,
+                     VX_TRANSPARENT);
     }
-    gradient(&wallpaper, choice->top, choice->bottom);
-    /* The name, large, in the bottom right corner (a little lighter than the
-     * gradient's top). */
-    uint32_t text_color = mix(choice->top, 0xffffff, 1, 8);
-    int scale = wallpaper.width >= 1024 ? 8 : 4;
-    const char *name = "Vexa";
-    int width = (int)strlen(name) * FONT_WIDTH * scale;
-    int x = wallpaper.width - width - 48, y = wallpaper.height - FONT_HEIGHT * scale - 40;
-    for (int i = 0; name[i]; i++) {
-        draw_big_char(&wallpaper, x + i * FONT_WIDTH * scale, y, name[i], scale,
-                      text_color);
-    }
-    char version[64];
-    struct vx_system_info info;
-    snprintf(version, sizeof(version), "version %s",
-             vx_system_info(&info) == 0 ? info.version : "?");
-    vx_draw_text(&wallpaper, x + 4, y + FONT_HEIGHT * scale + 4, version, text_color,
-                 VX_TRANSPARENT);
+    lock_screen_changed();
 }
 
-static void draw_title_bar(struct vx_surface *view, int ox, int oy, struct window *w) {
-    int x = ox + w->x, y = oy + w->y - TITLE_HEIGHT, width = w->content.width;
-    vx_fill(view, x, y, width, TITLE_HEIGHT, w == focused ? COLOR_TITLE_FOCUSED : COLOR_TITLE);
+/* The title bar's buttons, right to left: close, maximize, minimize (a
+ * window that can't be resized has close and minimize). */
+static int title_button_at(const struct window *w, int x, int y) {
+    if (w->popup || w->undecorated || y >= w->y || y < w->y - TITLE_HEIGHT) {
+        return -1;
+    }
+    int right = w->x + w->content.width;
+    int button = x >= right - BUTTON_WIDTH ? 0
+                 : x >= right - 2 * BUTTON_WIDTH ? 1
+                 : x >= right - 3 * BUTTON_WIDTH ? 2 : -1;
+    if (!w->resizable && button == 2) {
+        button = -1;
+    }
+    return x < w->x ? -1 : button;
+}
+
+static void draw_line(struct vx_surface *view, int x0, int y0, int x1, int y1, uint32_t color) {
+    int steps = abs(x1 - x0) > abs(y1 - y0) ? abs(x1 - x0) : abs(y1 - y0);
+    for (int i = 0; i <= steps; i++) {
+        int x = x0 + (x1 - x0) * i / (steps ? steps : 1);
+        int y = y0 + (y1 - y0) * i / (steps ? steps : 1);
+        vx_fill(view, x, y, 1, 1, color);
+    }
+}
+
+static void draw_title_bar(struct vx_surface *view, struct window *w, int x, int y) {
+    /* x, y: the content's corner. */
+    int width = w->content.width, top = y - TITLE_HEIGHT;
+    bool on = w == focused;
+    uint32_t bar = on ? COLOR_TITLE_FOCUSED : COLOR_TITLE;
+    uint32_t text = on ? COLOR_TITLE_TEXT : vx_mix(COLOR_TITLE_TEXT, bar, 110);
+    /* The frame and the bar, their top corners round. */
+    fill_rounded(view, (struct rect){x - BORDER, top - BORDER, width + 2 * BORDER,
+                                     TITLE_HEIGHT + 2 * CORNER},
+                 CORNER + 1, COLOR_BORDER);
+    fill_rounded(view, (struct rect){x, top, width, TITLE_HEIGHT + 2 * CORNER}, CORNER, bar);
     int button_count = w->resizable ? 3 : 2;
-    draw_text_fit(view, x + 8, y + 3, width - 16 - button_count * BUTTON_WIDTH, w->title,
-                  COLOR_TITLE_TEXT);
+    /* The title, in the middle of the room the buttons leave. */
+    const struct vx_font *bold = vx_font(VX_FACE_BOLD, 13);
+    int room = width - 16 - button_count * BUTTON_WIDTH;
+    int tw = vx_text_width_font(bold, w->title);
+    int tx = tw < room ? x + 8 + (room - tw) / 2 : x + 8;
+    if (tw <= room) {
+        vx_text(view, bold, tx, top + 3, w->title, text, VX_TRANSPARENT);
+    } else {
+        char shown[80];
+        static const char ellipsis[] = "\xe2\x80\xa6";
+        size_t n = vx_text_fit_bytes(bold, w->title, room - vx_text_width_font(bold, ellipsis));
+        snprintf(shown, sizeof(shown), "%.*s%s", (int)n, w->title, ellipsis);
+        vx_text(view, bold, tx, top + 3, shown, text, VX_TRANSPARENT);
+    }
     /* Close: an x at the right end; then maximize (a box) and minimize (a bar). */
-    int bx = x + width - BUTTON_WIDTH;
-    vx_draw_char(view, bx + 4, y + 3, 'x', COLOR_CLOSE, VX_TRANSPARENT);
+    int hot = w == hot_window ? hot_button : -1;
+    int bx = x + width - BUTTON_WIDTH, cy = top + TITLE_HEIGHT / 2;
+    if (hot == 0) {
+        fill_rounded(view, (struct rect){bx + 2, cy - 8, 16, 16}, 8, COLOR_CLOSE);
+    }
+    uint32_t cross = hot == 0 ? 0xffffff : on ? COLOR_CLOSE : text;
+    for (int t = 0; t < 2; t++) {
+        draw_line(view, bx + 6 + t, cy - 4, bx + 13 + t - 1, cy + 3, cross);
+        draw_line(view, bx + 13 + t - 1, cy - 4, bx + 6 + t, cy + 3, cross);
+    }
     if (w->resizable) {
         bx -= BUTTON_WIDTH;
+        if (hot == 1) {
+            fill_rounded(view, (struct rect){bx + 2, cy - 8, 16, 16}, 8, vx_mix(bar, 0xffffff, 40));
+        }
         int size = w->maximized ? 7 : 9;
-        int bxx = bx + 5, byy = y + 6;
-        vx_fill(view, bxx, byy, size, 2, COLOR_TITLE_TEXT);
-        vx_fill(view, bxx, byy + size - 1, size, 1, COLOR_TITLE_TEXT);
-        vx_fill(view, bxx, byy, 1, size, COLOR_TITLE_TEXT);
-        vx_fill(view, bxx + size - 1, byy, 1, size, COLOR_TITLE_TEXT);
+        int bxx = bx + 5 + (w->maximized ? 1 : 0), byy = cy - 4 + (w->maximized ? 1 : 0);
+        vx_fill(view, bxx, byy, size, 2, text);
+        vx_fill(view, bxx, byy + size - 1, size, 1, text);
+        vx_fill(view, bxx, byy, 1, size, text);
+        vx_fill(view, bxx + size - 1, byy, 1, size, text);
         if (w->maximized) { /* Two boxes: "restore". */
-            vx_fill(view, bxx + 2, byy - 2, size, 1, COLOR_TITLE_TEXT);
-            vx_fill(view, bxx + size + 1, byy - 2, 1, size, COLOR_TITLE_TEXT);
+            vx_fill(view, bxx + 2, byy - 2, size, 1, text);
+            vx_fill(view, bxx + size + 1, byy - 2, 1, size, text);
         }
     }
     bx -= BUTTON_WIDTH;
-    vx_fill(view, bx + 5, y + 14, 9, 2, COLOR_TITLE_TEXT);
+    if (hot == (w->resizable ? 2 : 1)) {
+        fill_rounded(view, (struct rect){bx + 2, cy - 8, 16, 16}, 8, vx_mix(bar, 0xffffff, 40));
+    }
+    vx_fill(view, bx + 5, cy + 3, 9, 2, text);
+}
+
+/* A window, frame and all; (x, y) is where its frame's corner goes. */
+void draw_window_at(struct vx_surface *view, struct window *w, int x, int y) {
+    if (w->popup || w->undecorated) {
+        vx_blit(view, x, y, &w->content, 0, 0, w->content.width, w->content.height);
+        return;
+    }
+    int cx = x + BORDER, cy = y + BORDER + TITLE_HEIGHT;
+    vx_fill(view, x, cy, w->content.width + 2 * BORDER, w->content.height + BORDER, COLOR_BORDER);
+    draw_title_bar(view, w, cx, cy);
+    vx_blit(view, cx, cy, &w->content, 0, 0, w->content.width, w->content.height);
 }
 
 static void draw_panel(struct vx_surface *view, int ox, int oy) {
     vx_fill(view, ox, oy, screen.width, PANEL_HEIGHT - 1, COLOR_PANEL);
     vx_fill(view, ox, oy + PANEL_HEIGHT - 1, screen.width, 1, COLOR_PANEL_LINE);
     /* The Vexa menu's button: a diamond and the name. */
-    vx_fill(view, ox + 3, oy + 3, MENU_BUTTON_WIDTH, PANEL_HEIGHT - 6,
-            menu_open ? COLOR_BUTTON_HOT : COLOR_BUTTON);
+    fill_rounded(view, (struct rect){ox + 3, oy + 3, MENU_BUTTON_WIDTH, PANEL_HEIGHT - 6}, 6,
+                 menu_open ? COLOR_BUTTON_HOT : COLOR_BUTTON);
     for (int i = 0; i < 5; i++) {
         vx_fill(view, ox + 14 - i, oy + 8 + i, 2 * i + 1, 1, COLOR_OUTLINE);
         vx_fill(view, ox + 14 - i, oy + 16 - i, 2 * i + 1, 1, COLOR_OUTLINE);
     }
-    vx_draw_text(view, ox + 26, oy + 5, "Vexa", COLOR_PANEL_TEXT, VX_TRANSPARENT);
+    vx_text(view, vx_font(VX_FACE_BOLD, 13), ox + 26, oy + 5, "Vexa", COLOR_PANEL_TEXT,
+            VX_TRANSPARENT);
 
     struct window *list[MAX_WINDOWS];
     int n = windows_by_id(list);
@@ -675,24 +737,39 @@ static void draw_panel(struct vx_surface *view, int ox, int oy) {
         struct window *w = list[i];
         uint32_t color = w->minimized ? COLOR_BUTTON_OFF
                          : w == focused ? COLOR_BUTTON_HOT : COLOR_BUTTON;
-        vx_fill(view, ox + b.x, oy + b.y, b.width, b.height, color);
-        draw_text_fit(view, ox + b.x + 8, oy + b.y + 2, b.width - 12, w->title,
-                      w->minimized ? COLOR_PANEL_DIM : COLOR_PANEL_TEXT);
+        fill_rounded(view, (struct rect){ox + b.x, oy + b.y, b.width, b.height}, 5, color);
+        if (w == focused && !w->minimized) {
+            vx_fill(view, ox + b.x + 6, oy + b.y + b.height - 2, b.width - 12, 2, COLOR_OUTLINE);
+        }
+        vx_draw_text_fit(view, ox + b.x + 8, oy + b.y + 2, b.width - 14, w->title,
+                         w->minimized ? COLOR_PANEL_DIM : COLOR_PANEL_TEXT, VX_TRANSPARENT);
     }
 
-    /* The clock. */
+    /* Search, and the clock (with a dot for notifications not seen yet). */
+    struct rect s = search_button_rect();
+    if (search_open) {
+        fill_rounded(view, (struct rect){ox + s.x, oy + s.y, s.width, s.height}, 6, COLOR_BUTTON_HOT);
+    }
+    draw_magnifier(view, ox + s.x + 7, oy + s.y + 4, 14, COLOR_PANEL_TEXT);
+    struct rect c = clock_button_rect();
+    if (clock_open) {
+        fill_rounded(view, (struct rect){ox + c.x, oy + c.y, c.width, c.height}, 6, COLOR_BUTTON_HOT);
+    }
     char text[48];
     if (clock_text(text, sizeof(text))) {
-        int width = (int)strlen(text) * FONT_WIDTH;
-        vx_draw_text(view, ox + screen.width - width - 12, oy + 5, text, COLOR_PANEL_TEXT,
-                     VX_TRANSPARENT);
+        vx_draw_text(view, ox + c.x + 8, oy + 5, text, COLOR_PANEL_TEXT, VX_TRANSPARENT);
+    }
+    if (unread_notes) {
+        fill_rounded(view, (struct rect){ox + c.x + c.width - 14, oy + 9, 7, 7}, 4, COLOR_OUTLINE);
     }
 }
 
 static void draw_menu(struct vx_surface *view, int ox, int oy) {
     struct rect r = menu_rect();
-    vx_fill(view, ox + r.x, oy + r.y, r.width, r.height, COLOR_PANEL_LINE);
-    vx_fill(view, ox + r.x + 1, oy + r.y, r.width - 2, r.height - 1, COLOR_MENU);
+    struct rect shifted = {ox + r.x, oy + r.y, r.width, r.height};
+    draw_shadow(view, shifted, 140);
+    fill_rounded(view, shifted, 8, COLOR_MENU);
+    outline_rounded(view, shifted, 8, COLOR_PANEL_LINE);
     int top = r.y + 4;
     for (int i = 0; i < MENU_ITEMS; i++) {
         int h = menu_item_height(i);
@@ -700,7 +777,8 @@ static void draw_menu(struct vx_surface *view, int ox, int oy) {
             vx_fill(view, ox + r.x + 8, oy + top + h / 2, r.width - 16, 1, COLOR_PANEL_LINE);
         } else {
             if (i == menu_hot) {
-                vx_fill(view, ox + r.x + 4, oy + top, r.width - 8, h, COLOR_MENU_HOT);
+                fill_rounded(view, (struct rect){ox + r.x + 4, oy + top, r.width - 8, h}, 5,
+                             COLOR_MENU_HOT);
             }
             int text_x = ox + r.x + 12;
             if (menu_items[i].action == RUN_APP && app_icons[menu_items[i].app]) {
@@ -711,7 +789,7 @@ static void draw_menu(struct vx_surface *view, int ox, int oy) {
             }
             vx_draw_text(view, text_x, oy + top + 4, menu_items[i].label, COLOR_PANEL_TEXT,
                          VX_TRANSPARENT);
-            int keys = (int)strlen(menu_items[i].keys) * FONT_WIDTH;
+            int keys = vx_text_width(menu_items[i].keys);
             vx_draw_text(view, ox + r.x + r.width - keys - 12, oy + top + 4, menu_items[i].keys,
                          COLOR_PANEL_DIM, VX_TRANSPARENT);
         }
@@ -719,106 +797,18 @@ static void draw_menu(struct vx_surface *view, int ox, int oy) {
     }
 }
 
-/* A rectangle's outline, `thickness` pixels wide, inside it. */
-static void draw_outline(struct vx_surface *view, struct rect r, int thickness, uint32_t color) {
-    vx_fill(view, r.x, r.y, r.width, thickness, color);
-    vx_fill(view, r.x, r.y + r.height - thickness, r.width, thickness, color);
-    vx_fill(view, r.x, r.y, thickness, r.height, color);
-    vx_fill(view, r.x + r.width - thickness, r.y, thickness, r.height, color);
-}
-
-/* ---- Desktop icons ---- */
-
-/* The apps with desktop=yes, in the menu's order. */
-static int launcher_apps[MAX_APPS];
-static int launcher_count;
-#define LAUNCHERS (setting_icons ? launcher_count : 0)
-#define LAUNCHER_WIDTH 72
-#define LAUNCHER_HEIGHT 72
-static int selected_launcher = -1;
-
-/* True if `list` ("Terminal,Files") has the app's bundle name. */
-static bool listed(const char *list, const struct vx_app *app) {
-    const char *file = strrchr(app->bundle, '/');
-    file = file ? file + 1 : app->bundle;
-    size_t n = strlen(file) - strlen(VX_APP_EXTENSION);
-    for (const char *p = list; *p;) {
-        size_t m = strcspn(p, ",");
-        if (m == n && !strncmp(p, file, n)) {
-            return true;
-        }
-        p += m + (p[m] == ',');
-    }
-    return false;
-}
-
-/* The apps with desktop icons: those Settings chose, or those that ask. */
-static void find_launchers(void) {
-    launcher_count = 0;
-    for (int i = 0; i < app_count; i++) {
-        if (setting_icon_apps[0] ? listed(setting_icon_apps, &apps[i]) : apps[i].desktop) {
-            launcher_apps[launcher_count++] = i;
-        }
-    }
-}
-
-/* An icon's label: the bundle's name, as a file manager shows it
- * ("Editor" for Editor.vxapp). */
-static void launcher_label(int i, char *out, size_t size) {
-    const char *bundle = apps[launcher_apps[i]].bundle, *slash = strrchr(bundle, '/');
-    snprintf(out, size, "%s", slash ? slash + 1 : bundle);
-    char *dot = strrchr(out, '.');
-    if (dot) {
-        *dot = '\0';
-    }
-}
-
-/* A column along the left edge, left of where windows open. */
-static struct rect launcher_rect(int i) {
-    return (struct rect){4, PANEL_HEIGHT + 12 + i * (LAUNCHER_HEIGHT + 4), LAUNCHER_WIDTH,
-                         LAUNCHER_HEIGHT};
-}
-
-static struct rect launchers_area(void) {
-    return (struct rect){0, PANEL_HEIGHT, LAUNCHER_WIDTH + 8,
-                         12 + LAUNCHERS * (LAUNCHER_HEIGHT + 4)};
-}
-
-static void draw_launchers(struct vx_surface *view, int ox, int oy) {
-    for (int i = 0; i < LAUNCHERS; i++) {
-        struct rect r = launcher_rect(i);
-        if (i == selected_launcher) {
-            vx_fill(view, ox + r.x, oy + r.y, r.width, r.height, COLOR_BUTTON_HOT);
-        }
-        struct vx_image *icon = app_icons[launcher_apps[i]];
-        int icon_x = ox + r.x + (r.width - 48) / 2, icon_y = oy + r.y + 3;
-        if (icon) {
-            vx_blit_alpha(view, icon_x, icon_y, 48, 48, &icon->surface);
-        } else {
-            vx_fill(view, icon_x + 4, icon_y + 4, 40, 40, COLOR_PANEL_LINE);
-        }
-        char label[64];
-        launcher_label(i, label, sizeof(label));
-        int text = (int)strlen(label) * FONT_WIDTH;
-        /* A shadow keeps the label readable on a picture. */
-        vx_draw_text(view, ox + r.x + (r.width - text) / 2 + 1, oy + r.y + 54, label, 0x000000,
-                     VX_TRANSPARENT);
-        vx_draw_text(view, ox + r.x + (r.width - text) / 2, oy + r.y + 53, label, 0xffffff,
-                     VX_TRANSPARENT); /* White on the picture, in either theme. */
-    }
-}
-
-/* ---- The desktop's right-click menu ---- */
+/* ---- The desktop's right-click menu (and the questions it asks) ---- */
 
 enum popup_action {
-    POP_TERMINAL, POP_FILES, POP_SETTINGS, POP_ABOUT, POP_OPEN, POP_SHOW, POP_RESTART,
-    POP_POWER_OFF, POP_NONE
+    POP_TERMINAL, POP_FILES, POP_NEW_FOLDER, POP_SETTINGS, POP_ABOUT, POP_ICON, POP_RESTART,
+    POP_POWER_OFF, POP_LEAVE, POP_NONE
 };
 
-#define MAX_POPUP 8
+#define MAX_POPUP 10
 static struct vx_menu_item popup_items[MAX_POPUP];
 static enum popup_action popup_actions[MAX_POPUP];
-static int popup_count, popup_x, popup_y, popup_hot = -1, popup_launcher = -1;
+static int popup_arguments[MAX_POPUP];
+static int popup_count, popup_x, popup_y, popup_hot = -1, popup_icon = -1;
 static bool popup_open;
 
 static struct rect popup_rect(void) {
@@ -827,50 +817,46 @@ static struct rect popup_rect(void) {
     return (struct rect){popup_x, popup_y, w + 3, h + 3}; /* With its shadow. */
 }
 
-static void popup_add(const char *label, const char *keys, enum popup_action action) {
+static void popup_add(const char *label, const char *keys, enum popup_action action,
+                      int argument) {
     popup_items[popup_count] = (struct vx_menu_item){label, keys, false};
+    popup_arguments[popup_count] = argument;
     popup_actions[popup_count++] = action;
 }
 
-/* On an icon: its app; elsewhere: the desktop's. */
-static void open_popup(int launcher) {
-    popup_count = 0;
-    popup_launcher = launcher;
-    if (launcher >= 0) {
-        popup_add("Open", NULL, POP_OPEN);
-        popup_add("Show in Files", NULL, POP_SHOW);
-    } else {
-        popup_add("New Terminal", "Ctrl+Alt+T", POP_TERMINAL);
-        popup_add("Open Files", "Ctrl+Alt+F", POP_FILES);
-        popup_add(NULL, NULL, POP_NONE);
-        popup_add("Change Wallpaper...", NULL, POP_SETTINGS);
-        popup_add("About Vexa", NULL, POP_ABOUT);
-    }
+static void place_popup(int x, int y) {
     int w, h;
     vx_menu_size(popup_items, popup_count, &w, &h);
-    popup_x = pointer_x + w + 4 > screen.width ? screen.width - w - 4 : pointer_x;
-    popup_y = pointer_y + h + 4 > screen.height ? screen.height - h - 4 : pointer_y;
+    popup_x = x + w + 4 > screen.width ? screen.width - w - 4 : x;
+    popup_y = y + h + 4 > screen.height ? screen.height - h - 4 : y;
     popup_hot = -1;
     popup_open = true;
     add_damage(popup_rect());
-    printf("desktop: menu at %d,%d\n", pointer_x, pointer_y);
 }
 
-static void close_popup(void);
-
-/* Restart and Shut Down ask first, with a menu where the click was. */
-static void ask_power(bool restart) {
-    close_popup();
+/* On an icon: its menu; elsewhere: the desktop's. */
+static void open_popup(int icon) {
     popup_count = 0;
-    popup_launcher = -1;
-    popup_add(restart ? "Restart Now" : "Shut Down Now", NULL, restart ? POP_RESTART : POP_POWER_OFF);
-    popup_add(NULL, NULL, POP_NONE);
-    popup_add("Cancel", NULL, POP_NONE);
-    popup_x = pointer_x;
-    popup_y = pointer_y;
-    popup_hot = -1;
-    popup_open = true;
-    add_damage(popup_rect());
+    popup_icon = icon;
+    if (icon >= 0) {
+        const char *labels[8];
+        int n = icons_menu_items(icon, labels, 8);
+        for (int i = 0; i < n; i++) {
+            if (i == n - 1 && n > 2) {
+                popup_add(NULL, NULL, POP_NONE, 0);
+            }
+            popup_add(labels[i], NULL, POP_ICON, i);
+        }
+    } else {
+        popup_add("New Terminal", "Ctrl+Alt+T", POP_TERMINAL, 0);
+        popup_add("Open Files", "Ctrl+Alt+F", POP_FILES, 0);
+        popup_add("New Folder", NULL, POP_NEW_FOLDER, 0);
+        popup_add(NULL, NULL, POP_NONE, 0);
+        popup_add("Change Wallpaper...", NULL, POP_SETTINGS, 0);
+        popup_add("About Vexa", NULL, POP_ABOUT, 0);
+    }
+    place_popup(pointer_x, pointer_y);
+    printf("desktop: menu at %d,%d\n", pointer_x, pointer_y);
 }
 
 static void close_popup(void) {
@@ -880,19 +866,34 @@ static void close_popup(void) {
     }
 }
 
+/* Restart, Shut Down and leaving the desktop ask first, with a menu. */
+static void ask(enum popup_action action, int x, int y) {
+    close_popup();
+    popup_count = 0;
+    popup_icon = -1;
+    popup_add(action == POP_RESTART ? "Restart Now" : action == POP_POWER_OFF ? "Shut Down Now"
+                                                                            : "Leave the Desktop",
+              NULL, action, 0);
+    popup_add(NULL, NULL, POP_NONE, 0);
+    popup_add("Cancel", NULL, POP_NONE, 0);
+    place_popup(x, y);
+    printf("desktop: asking before %s\n", action == POP_RESTART ? "restarting"
+                                          : action == POP_POWER_OFF ? "turning off" : "leaving");
+}
+
 /* ---- Notifications ---- */
 
 static struct rect note_rect(int i) {
-    return (struct rect){screen.width - NOTE_WIDTH - 12, PANEL_HEIGHT + 12 + i * (NOTE_HEIGHT + 8),
+    return (struct rect){screen.width - NOTE_WIDTH - 12, PANEL_HEIGHT + 12 + i * (NOTE_HEIGHT + 10),
                          NOTE_WIDTH, NOTE_HEIGHT};
 }
 
 static struct rect notes_area(void) {
-    return (struct rect){screen.width - NOTE_WIDTH - 12, PANEL_HEIGHT + 12, NOTE_WIDTH,
-                         MAX_NOTES * (NOTE_HEIGHT + 8)};
+    return (struct rect){screen.width - NOTE_WIDTH - 12 - SHADOW, PANEL_HEIGHT + 12 - SHADOW,
+                         NOTE_WIDTH + 2 * SHADOW, MAX_NOTES * (NOTE_HEIGHT + 10) + 2 * SHADOW};
 }
 
-static void add_note(const char *text) {
+void add_note(const char *text) {
     if (note_count == MAX_NOTES) {
         memmove(notes, notes + 1, (MAX_NOTES - 1) * sizeof(notes[0]));
         note_count--;
@@ -902,6 +903,7 @@ static void add_note(const char *text) {
     note->text[sizeof(note->text) - 1] = '\0';
     note->until = vx_uptime() + setting_note_ms;
     add_damage(notes_area());
+    clock_remember(note->text);
     printf("desktop: notification \"%s\"\n", note->text);
 }
 
@@ -926,56 +928,79 @@ static long expire_notes(void) {
 }
 
 static void draw_notes(struct vx_surface *view, int ox, int oy) {
-    int per_line = (NOTE_WIDTH - 20) / FONT_WIDTH;
     for (int i = 0; i < note_count; i++) {
         struct rect r = note_rect(i);
-        vx_fill(view, ox + r.x, oy + r.y, r.width, r.height, COLOR_MENU);
-        vx_draw_outline(view, ox + r.x, oy + r.y, r.width, r.height, COLOR_OUTLINE);
+        r.x += ox, r.y += oy;
+        draw_shadow(view, r, 140);
+        fill_rounded(view, r, 10, COLOR_MENU);
+        outline_rounded(view, r, 10, COLOR_PANEL_LINE);
+        vx_fill(view, r.x + 10, r.y + 12, 3, r.height - 24, COLOR_OUTLINE);
         /* Two lines: "Title: text" puts the title on the first. */
         char first[128], second[128] = "";
         const char *colon = strstr(notes[i].text, ": ");
-        size_t length = strlen(notes[i].text);
-        if (colon && colon - notes[i].text < per_line) {
-            size_t n = (size_t)(colon - notes[i].text);
-            memcpy(first, notes[i].text, n);
-            first[n] = '\0';
+        if (colon && colon - notes[i].text < 40) {
+            snprintf(first, sizeof(first), "%.*s", (int)(colon - notes[i].text), notes[i].text);
             snprintf(second, sizeof(second), "%s", colon + 2);
-        } else if (length > (size_t)per_line) {
-            memcpy(first, notes[i].text, (size_t)per_line);
-            first[per_line] = '\0';
-            snprintf(second, sizeof(second), "%s", notes[i].text + per_line);
         } else {
-            snprintf(first, sizeof(first), "%s", notes[i].text);
+            /* Too long for one line: the rest on the second. */
+            size_t n = vx_text_fit_bytes(vx_font_ui(), notes[i].text, r.width - 36);
+            snprintf(first, sizeof(first), "%.*s", (int)n, notes[i].text);
+            snprintf(second, sizeof(second), "%s", notes[i].text + n);
         }
-        vx_draw_text_fit(view, ox + r.x + 10, oy + r.y + 5, r.width - 20, first, COLOR_OUTLINE,
-                         VX_TRANSPARENT);
-        vx_draw_text_fit(view, ox + r.x + 10, oy + r.y + 23, r.width - 20, second, COLOR_PANEL_TEXT,
+        vx_text(view, vx_font(VX_FACE_BOLD, 13), r.x + 22, r.y + 9, first, COLOR_PANEL_TEXT,
+                VX_TRANSPARENT);
+        vx_draw_text_fit(view, r.x + 22, r.y + 27, r.width - 34, second, COLOR_PANEL_DIM,
                          VX_TRANSPARENT);
     }
 }
 
 /* ---- Snapping ---- */
 
-/* Where a window dragged to here would go. */
+/* Where a window dragged to here would go: the top edge maximizes, the
+ * sides take half the screen, and the corners a quarter. */
 static enum snap snap_target(void) {
     if (!dragged || !dragged->resizable || !setting_snapping) {
         return SNAP_NONE;
     }
-    return pointer_y <= PANEL_HEIGHT + 1 ? SNAP_TOP
-           : pointer_x <= 1                ? SNAP_LEFT
-           : pointer_x >= screen.width - 2 ? SNAP_RIGHT
-                                           : SNAP_NONE;
+    int corner = 48;
+    bool left = pointer_x <= 1, right = pointer_x >= screen.width - 2;
+    bool top = pointer_y <= PANEL_HEIGHT + 1, bottom = pointer_y >= screen.height - 2;
+    if ((left && pointer_y <= PANEL_HEIGHT + corner) || (top && pointer_x <= corner)) {
+        return SNAP_TOP_LEFT;
+    }
+    if ((right && pointer_y <= PANEL_HEIGHT + corner) || (top && pointer_x >= screen.width - corner)) {
+        return SNAP_TOP_RIGHT;
+    }
+    if ((left && pointer_y >= screen.height - corner) || (bottom && pointer_x <= corner)) {
+        return SNAP_BOTTOM_LEFT;
+    }
+    if ((right && pointer_y >= screen.height - corner) ||
+        (bottom && pointer_x >= screen.width - corner)) {
+        return SNAP_BOTTOM_RIGHT;
+    }
+    return top ? SNAP_TOP : left ? SNAP_LEFT : right ? SNAP_RIGHT : SNAP_NONE;
 }
 
 /* The content rectangle a snapped window gets. */
 static struct rect snap_rect(enum snap where) {
     struct rect area = work_area();
-    if (where == SNAP_LEFT || where == SNAP_RIGHT) {
-        int half = screen.width / 2;
-        area.width = half - 2 * BORDER;
-        area.x = where == SNAP_LEFT ? BORDER : half + BORDER;
+    if (where == SNAP_TOP || where == SNAP_NONE) {
+        return area;
     }
-    return area;
+    int half_w = screen.width / 2;
+    int frame_h = screen.height - PANEL_HEIGHT; /* With the title bars. */
+    int half_h = frame_h / 2;
+    bool left = where == SNAP_LEFT || where == SNAP_TOP_LEFT || where == SNAP_BOTTOM_LEFT;
+    bool quarter = where != SNAP_LEFT && where != SNAP_RIGHT;
+    bool lower = where == SNAP_BOTTOM_LEFT || where == SNAP_BOTTOM_RIGHT;
+    struct rect r;
+    r.x = left ? BORDER : half_w + BORDER;
+    r.width = (left ? half_w : screen.width - half_w) - 2 * BORDER;
+    int frame_top = PANEL_HEIGHT + (lower ? half_h : 0);
+    int frame_height = quarter ? (lower ? frame_h - half_h : half_h) : frame_h;
+    r.y = frame_top + TITLE_HEIGHT + BORDER;
+    r.height = frame_height - TITLE_HEIGHT - 2 * BORDER;
+    return r;
 }
 
 static struct rect snap_damage(enum snap where) {
@@ -983,6 +1008,165 @@ static struct rect snap_damage(enum snap where) {
     return (struct rect){r.x - BORDER - 2, r.y - TITLE_HEIGHT - BORDER - 2,
                          r.width + 2 * BORDER + 4, r.height + TITLE_HEIGHT + 2 * BORDER + 4};
 }
+
+/* ---- Animations ---- */
+
+/* A window closing: a picture of it, fading. */
+#define MAX_GHOSTS 4
+static struct ghost {
+    struct vx_surface picture;
+    struct rect place;
+    long start;
+} ghosts[MAX_GHOSTS];
+static int ghost_count;
+
+/* A surface to draw a window into (for scaling it), kept for next time. */
+static struct vx_surface scratch;
+static size_t scratch_size;
+
+static bool scratch_for(int width, int height) {
+    size_t size = (size_t)width * height * 4;
+    if (size > scratch_size) {
+        if (scratch.pixels) {
+            vx_unmap(scratch.pixels, scratch_size);
+        }
+        scratch.pixels = vx_map(size, VX_MAP_WRITE);
+        scratch_size = scratch.pixels ? size : 0;
+    }
+    scratch.width = scratch.stride = width;
+    scratch.height = height;
+    return scratch.pixels != NULL;
+}
+
+/* 0 to 256, eased out (fast, then slow). */
+static int ease(long elapsed, long duration) {
+    if (elapsed >= duration) {
+        return 256;
+    }
+    long t = elapsed * 256 / duration;
+    long inverse = 256 - t;
+    return (int)(256 - inverse * inverse * inverse / (256 * 256));
+}
+
+static struct rect lerp_rect(struct rect a, struct rect b, int t) {
+    return (struct rect){a.x + (b.x - a.x) * t / 256, a.y + (b.y - a.y) * t / 256,
+                         a.width + (b.width - a.width) * t / 256,
+                         a.height + (b.height - a.height) * t / 256};
+}
+
+static struct rect task_button_of(struct window *w) {
+    struct window *list[MAX_WINDOWS];
+    int n = windows_by_id(list);
+    for (int i = 0; i < n; i++) {
+        if (list[i] == w) {
+            return task_button(i, n);
+        }
+    }
+    return (struct rect){screen.width / 2, 0, 1, 1};
+}
+
+static long animation_length(enum animation a) {
+    return a == ANIM_OPEN ? OPEN_MS : MINIMIZE_MS;
+}
+
+/* Where an animating window is drawn now, and how solid. */
+static struct rect animation_place(struct window *w, int *alpha) {
+    struct rect f = frame_rect(w);
+    int t = ease(now_ms() - w->animation_start, animation_length(w->animation));
+    if (w->animation == ANIM_OPEN) {
+        struct rect small = {f.x + f.width * 4 / 100, f.y + f.height * 4 / 100,
+                             f.width * 92 / 100, f.height * 92 / 100};
+        *alpha = t > 255 ? 255 : t;
+        return lerp_rect(small, f, t);
+    }
+    struct rect button = task_button_of(w);
+    if (w->animation == ANIM_RESTORE) {
+        t = 256 - t;
+    }
+    *alpha = 255 - t * 180 / 256;
+    return lerp_rect(f, button, t);
+}
+
+static void start_animation(struct window *w, enum animation a) {
+    if (!setting_animations || w->popup) {
+        w->animation = ANIM_NONE;
+        return;
+    }
+    w->animation = a;
+    w->animation_start = now_ms();
+    want_frames();
+}
+
+static void animate(void) {
+    long now = now_ms();
+    for (int i = 0; i < window_count; i++) {
+        struct window *w = stack[i];
+        if (w->animation == ANIM_NONE) {
+            continue;
+        }
+        add_damage(window_damage(w));
+        if (w->animation != ANIM_OPEN) {
+            add_damage(task_button_of(w));
+            struct rect f = frame_rect(w), b = task_button_of(w);
+            int x0 = f.x < b.x ? f.x : b.x, y0 = b.y;
+            int x1 = f.x + f.width > b.x + b.width ? f.x + f.width : b.x + b.width;
+            add_damage((struct rect){x0, y0, x1 - x0, f.y + f.height - y0});
+        }
+        if (now - w->animation_start >= animation_length(w->animation)) {
+            w->animation = ANIM_NONE;
+        } else {
+            want_frames();
+        }
+    }
+    for (int i = 0; i < ghost_count; i++) {
+        add_damage(ghosts[i].place);
+        if (now - ghosts[i].start >= CLOSE_MS) {
+            vx_unmap(ghosts[i].picture.pixels,
+                     (size_t)ghosts[i].picture.stride * ghosts[i].picture.height * 4);
+            ghosts[i--] = ghosts[--ghost_count];
+        } else {
+            want_frames();
+        }
+    }
+}
+
+/* A picture of a window that's going, to fade out. */
+static void add_ghost(struct window *w) {
+    if (!setting_animations || w->popup || w->minimized || ghost_count == MAX_GHOSTS) {
+        return;
+    }
+    struct rect f = frame_rect(w);
+    struct ghost *g = &ghosts[ghost_count];
+    g->picture.pixels = vx_map((size_t)f.width * f.height * 4, VX_MAP_WRITE);
+    if (!g->picture.pixels) {
+        return;
+    }
+    g->picture.width = g->picture.stride = f.width;
+    g->picture.height = f.height;
+    /* Behind round corners: what's on the screen there now. */
+    vx_blit(&g->picture, 0, 0, &screen, f.x, f.y, f.width, f.height);
+    draw_window_at(&g->picture, w, 0, 0);
+    g->place = f;
+    g->start = now_ms();
+    ghost_count++;
+    want_frames();
+}
+
+static void draw_animated(struct vx_surface *view, int ox, int oy, struct window *w) {
+    int alpha;
+    struct rect place = animation_place(w, &alpha);
+    struct rect f = frame_rect(w);
+    if (!scratch_for(f.width, f.height)) {
+        return;
+    }
+    /* Behind its round corners: the wallpaper (close enough, briefly). */
+    vx_blit(&scratch, 0, 0, &wallpaper, f.x, f.y, f.width, f.height);
+    draw_window_at(&scratch, w, 0, 0);
+    place.x += ox, place.y += oy;
+    blit_smooth(view, place, &scratch, alpha);
+}
+
+/* ---- Composing the screen ---- */
 
 /* Draws everything that overlaps `area` into the screen buffer. */
 static void compose(struct rect area) {
@@ -1005,50 +1189,75 @@ static void compose(struct rect area) {
     struct vx_surface view = {screen.pixels + (long)area.y * screen.stride + area.x, area.width,
                               area.height, screen.stride};
     int ox = -area.x, oy = -area.y;
-    vx_blit(&view, 0, 0, &wallpaper, area.x, area.y, area.width, area.height);
-    draw_launchers(&view, ox, oy);
-    for (int i = 0; i < window_count; i++) {
-        struct window *w = stack[i];
-        if (w->minimized) {
-            continue;
-        }
-        if (!w->popup && !w->undecorated) {
-            struct rect f = frame_rect(w);
-            vx_fill(&view, ox + f.x, oy + f.y, f.width, f.height, COLOR_BORDER);
-            draw_title_bar(&view, ox, oy, w);
-        }
-        vx_blit(&view, ox + w->x, oy + w->y, &w->content, 0, 0, w->content.width,
-                w->content.height);
-    }
-    if (drag == RESIZING) {
-        struct rect r = {ox + outline.x - BORDER, oy + outline.y - TITLE_HEIGHT - BORDER,
-                         outline.width + 2 * BORDER, outline.height + TITLE_HEIGHT + 2 * BORDER};
-        draw_outline(&view, r, 2, COLOR_OUTLINE);
-    }
-    if (drag == MOVING && snap != SNAP_NONE) {
-        struct rect s = snap_damage(snap);
-        s.x += ox + 2, s.y += oy + 2, s.width -= 4, s.height -= 4;
-        draw_outline(&view, s, 2, COLOR_OUTLINE);
-    }
-    draw_notes(&view, ox, oy);
-    if (area.y < PANEL_HEIGHT) {
-        draw_panel(&view, ox, oy);
-    }
-    if (menu_open) {
-        draw_menu(&view, ox, oy);
-    }
-    if (popup_open) {
-        vx_draw_menu(&view, ox + popup_x, oy + popup_y, popup_items, popup_count, popup_hot);
-    }
-    const char *const *shape = resize_cursor ? resize_shape : cursor_shape;
-    for (int row = 0; row < CURSOR_HEIGHT; row++) {
-        for (int col = 0; shape[row][col]; col++) {
-            char c = shape[row][col];
-            int x = pointer_x + col + ox, y = pointer_y + row + oy;
-            if (c != ' ' && x >= 0 && y >= 0 && x < view.width && y < view.height) {
-                view.pixels[(long)y * view.stride + x] = c == '#' ? 0x000000 : 0xffffff;
+    if (locked || saver_on) {
+        lock_draw(&view, ox, oy);
+    } else {
+        vx_blit(&view, 0, 0, &wallpaper, area.x, area.y, area.width, area.height);
+        icons_draw(&view, ox, oy);
+        for (int i = 0; i < window_count; i++) {
+            struct window *w = stack[i];
+            if (w->animation != ANIM_NONE) {
+                draw_animated(&view, ox, oy, w);
+                continue;
             }
+            if (w->minimized) {
+                continue;
+            }
+            struct rect f = frame_rect(w);
+            if (!w->popup && !w->undecorated) {
+                draw_shadow(&view, (struct rect){f.x + ox, f.y + oy, f.width, f.height},
+                            w == focused ? 200 : 130);
+            }
+            draw_window_at(&view, w, f.x + ox, f.y + oy);
         }
+        for (int i = 0; i < ghost_count; i++) {
+            struct ghost *g = &ghosts[i];
+            long t = now_ms() - g->start;
+            int alpha = t >= CLOSE_MS ? 0 : (int)(255 * (CLOSE_MS - t) / CLOSE_MS);
+            int shrink = (int)(t >= CLOSE_MS ? 4 : 4 * t / CLOSE_MS);
+            struct rect p = {g->place.x + g->place.width * shrink / 200 + ox,
+                             g->place.y + g->place.height * shrink / 200 + oy,
+                             g->place.width * (100 - shrink) / 100,
+                             g->place.height * (100 - shrink) / 100};
+            blit_smooth(&view, p, &g->picture, alpha);
+        }
+        if (drag == RESIZING) {
+            struct rect r = {ox + outline.x - BORDER, oy + outline.y - TITLE_HEIGHT - BORDER,
+                             outline.width + 2 * BORDER, outline.height + TITLE_HEIGHT + 2 * BORDER};
+            vx_draw_outline(&view, r.x, r.y, r.width, r.height, COLOR_OUTLINE);
+            vx_draw_outline(&view, r.x + 1, r.y + 1, r.width - 2, r.height - 2, COLOR_OUTLINE);
+        }
+        if (drag == MOVING && snap != SNAP_NONE) {
+            /* Where it would go: a glassy outline. */
+            struct rect s = snap_damage(snap);
+            s.x += ox + 4, s.y += oy + 4, s.width -= 8, s.height -= 8;
+            blend_rect(&view, s, COLOR_OUTLINE, 70);
+            outline_rounded(&view, s, 10, COLOR_OUTLINE);
+        }
+        draw_notes(&view, ox, oy);
+        if (area.y < PANEL_HEIGHT) {
+            draw_panel(&view, ox, oy);
+        }
+        if (menu_open) {
+            draw_menu(&view, ox, oy);
+        }
+        if (clock_open) {
+            clock_draw(&view, ox, oy);
+        }
+        if (popup_open) {
+            vx_draw_menu(&view, ox + popup_x, oy + popup_y, popup_items, popup_count, popup_hot);
+        }
+        icons_draw_drag(&view, ox, oy);
+        if (switcher_open) {
+            switcher_draw(&view, ox, oy);
+        }
+        if (search_open) {
+            search_draw(&view, ox, oy);
+        }
+    }
+    shot_draw(&view, ox, oy);
+    if (!hide_cursor && !saver_on) {
+        draw_cursor(&view, ox, oy, cursor_shape, pointer_x, pointer_y);
     }
 }
 
@@ -1107,6 +1316,18 @@ static void redraw_damage(void) {
     }
 }
 
+bool capture_screen(struct vx_surface *out) {
+    hide_cursor = true;
+    compose((struct rect){0, 0, screen.width, screen.height});
+    hide_cursor = false;
+    for (int y = 0; y < screen.height && y < out->height; y++) {
+        memcpy(out->pixels + (long)y * out->stride, screen.pixels + (long)y * screen.stride,
+               (size_t)(screen.width < out->width ? screen.width : out->width) * 4);
+    }
+    damage_all();
+    return true;
+}
+
 /* ---- Windows ---- */
 
 static void send_to(int client, struct desktop_message *m) {
@@ -1123,13 +1344,14 @@ static void set_focus(struct window *w) {
     if (focused) {
         struct desktop_message m = {.type = DESKTOP_FOCUS, .window = (uint32_t)focused->id};
         send_to(focused->client, &m);
-        add_damage(frame_rect(focused));
+        add_damage(window_damage(focused));
     }
     focused = w;
     if (w) {
         struct desktop_message m = {.type = DESKTOP_FOCUS, .window = (uint32_t)w->id, .a = 1};
         send_to(w->client, &m);
-        add_damage(frame_rect(w));
+        add_damage(window_damage(w));
+        mru_touch(w);
     }
     add_damage(panel_rect());
 }
@@ -1160,7 +1382,7 @@ static void raise_window(struct window *w) {
     }
     memmove(stack + to + 1, stack + to, (size_t)(window_count - 1 - to) * sizeof(stack[0]));
     stack[to] = w;
-    add_damage(frame_rect(w));
+    add_damage(window_damage(w));
 }
 
 /* Tells the program whether its window is maximized or minimized. */
@@ -1177,11 +1399,12 @@ static void send_moved(struct window *w) {
     send_to(w->client, &m);
 }
 
-static void activate(struct window *w) {
+void activate(struct window *w) {
     if (w->minimized) {
         w->minimized = false;
         send_state(w);
-        add_damage(frame_rect(w));
+        start_animation(w, ANIM_RESTORE);
+        add_damage(window_damage(w));
         add_damage(panel_rect());
     }
     raise_window(w);
@@ -1196,11 +1419,18 @@ static void minimize(struct window *w) {
     }
     w->minimized = true;
     send_state(w);
-    add_damage(frame_rect(w));
+    start_animation(w, ANIM_MINIMIZE);
+    add_damage(window_damage(w));
     add_damage(panel_rect());
     if (focused == w) {
         set_focus(top_window());
     }
+}
+
+void ask_to_close(struct window *w) {
+    struct desktop_message m = {.type = DESKTOP_CLOSE, .window = (uint32_t)w->id};
+    send_to(w->client, &m);
+    printf("desktop: asked window %d to close\n", w->id);
 }
 
 /* Asks the window's program for a new size (it answers with a new buffer). */
@@ -1210,13 +1440,11 @@ static void configure(struct window *w, int width, int height) {
     send_to(w->client, &m);
 }
 
-static void send_state(struct window *w);
-
 static void toggle_maximized(struct window *w) {
     if (!w->resizable) {
         return;
     }
-    add_damage(frame_rect(w));
+    add_damage(window_damage(w));
     if (w->maximized) {
         w->maximized = false;
         w->x = w->restore.x;
@@ -1224,7 +1452,9 @@ static void toggle_maximized(struct window *w) {
         configure(w, w->restore.width, w->restore.height);
     } else {
         w->maximized = true;
-        w->restore = (struct rect){w->x, w->y, w->content.width, w->content.height};
+        if (w->snapped == SNAP_NONE) {
+            w->restore = (struct rect){w->x, w->y, w->content.width, w->content.height};
+        }
         struct rect area = work_area();
         if (w->undecorated) { /* Its own title bar goes where ours would. */
             area.y -= TITLE_HEIGHT;
@@ -1234,10 +1464,59 @@ static void toggle_maximized(struct window *w) {
         w->y = area.y;
         configure(w, area.width, area.height);
     }
-    add_damage(frame_rect(w));
+    w->snapped = SNAP_NONE;
+    add_damage(window_damage(w));
     send_moved(w);
     send_state(w);
     printf("desktop: %s window %d\n", w->maximized ? "maximized" : "restored", w->id);
+}
+
+static const char *const snap_names[] = {
+    "nowhere", "top", "left", "right", "top left", "top right", "bottom left", "bottom right",
+};
+
+/* Puts a window in a half or a quarter of the screen (SNAP_TOP: maximized;
+ * SNAP_NONE: back where it was). */
+static void snap_window(struct window *w, enum snap where) {
+    if (!w->resizable) {
+        return;
+    }
+    if (where == SNAP_TOP) {
+        if (!w->maximized) {
+            toggle_maximized(w);
+        }
+        return;
+    }
+    if (where == SNAP_NONE) {
+        if (w->maximized) {
+            toggle_maximized(w);
+        } else if (w->snapped != SNAP_NONE) {
+            add_damage(window_damage(w));
+            w->snapped = SNAP_NONE;
+            w->x = w->restore.x;
+            w->y = w->restore.y;
+            configure(w, w->restore.width, w->restore.height);
+            send_moved(w);
+            printf("desktop: window %d back where it was\n", w->id);
+        }
+        return;
+    }
+    struct rect r = snap_rect(where);
+    add_damage(window_damage(w));
+    if (!w->maximized && w->snapped == SNAP_NONE) {
+        w->restore = (struct rect){w->x, w->y, w->content.width, w->content.height};
+    }
+    if (w->maximized) {
+        w->maximized = false;
+        send_state(w);
+    }
+    w->snapped = where;
+    w->x = r.x;
+    w->y = r.y;
+    configure(w, r.width, r.height);
+    add_damage(window_damage(w));
+    send_moved(w);
+    printf("desktop: snapped window %d to the %s\n", w->id, snap_names[where]);
 }
 
 static struct window *find_window(int client, uint32_t id) {
@@ -1249,7 +1528,7 @@ static struct window *find_window(int client, uint32_t id) {
     return NULL;
 }
 
-static struct window *window_at(int x, int y) {
+struct window *window_at(int x, int y) {
     if (y < PANEL_HEIGHT) {
         return NULL;
     }
@@ -1261,8 +1540,11 @@ static struct window *window_at(int x, int y) {
     return NULL;
 }
 
+static void update_cursor(void);
+
 static void destroy_window(struct window *w) {
-    add_damage(frame_rect(w));
+    add_ghost(w);
+    add_damage(window_damage(w));
     add_damage(panel_rect());
     int at = 0;
     while (stack[at] != w) {
@@ -1270,6 +1552,7 @@ static void destroy_window(struct window *w) {
     }
     memmove(stack + at, stack + at + 1, (size_t)(window_count - at - 1) * sizeof(stack[0]));
     window_count--;
+    mru_forget(w);
     if (dragged == w) {
         dragged = NULL;
         if (drag == RESIZING) {
@@ -1281,6 +1564,13 @@ static void destroy_window(struct window *w) {
     if (last_click_window == w) {
         last_click_window = NULL;
     }
+    if (grab == w) {
+        grab = NULL;
+    }
+    if (hot_window == w) {
+        hot_window = NULL;
+        hot_button = -1;
+    }
     if (focused == w) {
         focused = NULL;
         set_focus(top_window());
@@ -1289,6 +1579,7 @@ static void destroy_window(struct window *w) {
     vx_close(w->buffer_handle);
     printf("desktop: closed window %d \"%s\"\n", w->id, w->title);
     free(w);
+    update_cursor();
 }
 
 /* Maps a program's buffer file. False if it isn't one. */
@@ -1344,7 +1635,10 @@ static void create_window(int client, struct desktop_message *m) {
         }
         stack[window_count++] = w;
         raise_window(w);
-        add_damage(frame_rect(w));
+        if (!w->popup) {
+            start_animation(w, ANIM_OPEN);
+        }
+        add_damage(window_damage(w));
         add_damage(panel_rect());
         if (!w->popup) {
             set_focus(w);
@@ -1367,13 +1661,13 @@ static void replace_buffer(int client, struct window *w, struct desktop_message 
     void *pixels;
     size_t size;
     if (w && map_buffer(m->text, m->a, m->b, &handle, &pixels, &size)) {
-        add_damage(frame_rect(w));
+        add_damage(window_damage(w));
         vx_unmap(w->content.pixels, w->mapped_size);
         vx_close(w->buffer_handle);
         w->content = (struct vx_surface){pixels, m->a, m->b, m->a};
         w->buffer_handle = handle;
         w->mapped_size = size;
-        add_damage(frame_rect(w));
+        add_damage(window_damage(w));
         reply.a = m->a;
         reply.b = m->b;
         printf("desktop: window %d is now %dx%d\n", w->id, m->a, m->b);
@@ -1381,23 +1675,45 @@ static void replace_buffer(int client, struct window *w, struct desktop_message 
     send_to(client, &reply);
 }
 
-static struct rect outline_damage(void);
+static struct rect outline_damage(void) {
+    return (struct rect){outline.x - BORDER - 2, outline.y - TITLE_HEIGHT - BORDER - 2,
+                         outline.width + 2 * BORDER + 4,
+                         outline.height + TITLE_HEIGHT + 2 * BORDER + 4};
+}
 
-/* Starts dragging a window by the pointer. A maximized one first goes back
- * to its size from before, under the pointer. */
+/* Starts dragging a window by the pointer. A maximized or snapped one first
+ * goes back to its size from before, under the pointer. */
 static void start_move(struct window *w) {
-    if (w->maximized) {
+    if (w->maximized || w->snapped != SNAP_NONE) {
         int offset_y = pointer_y - w->y;
-        toggle_maximized(w);
-        add_damage(frame_rect(w));
+        add_damage(window_damage(w));
+        if (w->maximized) {
+            toggle_maximized(w);
+        } else {
+            w->snapped = SNAP_NONE;
+            configure(w, w->restore.width, w->restore.height);
+        }
         w->x = pointer_x - w->restore.width / 2;
         w->y = pointer_y - offset_y;
-        add_damage(frame_rect(w));
+        add_damage(window_damage(w));
     }
     drag = MOVING;
     dragged = w;
     drag_dx = pointer_x - w->x;
     drag_dy = pointer_y - w->y;
+}
+
+static void start_resize(struct window *w, bool left, bool right, bool bottom) {
+    drag = RESIZING;
+    dragged = w;
+    resize_left = left;
+    resize_right = right && !left;
+    resize_bottom = bottom;
+    drag_dx = left ? w->x - pointer_x : w->x + w->content.width - pointer_x;
+    drag_dy = w->y + w->content.height - pointer_y;
+    drag_right = w->x + w->content.width;
+    outline = (struct rect){w->x, w->y, w->content.width, w->content.height};
+    add_damage(outline_damage());
 }
 
 /* What a program asks of its window, as of a window manager. */
@@ -1421,20 +1737,15 @@ static void window_request(struct window *w, int request, int argument) {
         /* The program saw a press on its own title bar: drag from here, as
          * long as the button is down. */
         if ((buttons & 1) && drag == IDLE) {
+            grab = NULL;
             start_move(w);
             printf("desktop: window %d moves itself\n", w->id);
         }
         break;
     case DESKTOP_WM_RESIZE:
         if ((buttons & 1) && drag == IDLE && w->resizable) {
-            drag = RESIZING;
-            dragged = w;
-            resize_right = argument & 1;
-            resize_bottom = argument & 2;
-            drag_dx = w->x + w->content.width - pointer_x;
-            drag_dy = w->y + w->content.height - pointer_y;
-            outline = (struct rect){w->x, w->y, w->content.width, w->content.height};
-            add_damage(outline_damage());
+            grab = NULL;
+            start_resize(w, argument & 4, argument & 1, argument & 2);
         }
         break;
     }
@@ -1448,6 +1759,33 @@ static void drop_client(int client) {
     }
     vx_close(clients[client].handle);
     clients[client].handle = -1;
+}
+
+void drop_on_window(struct window *w, const char *list, bool copy) {
+    struct desktop_message m = {.type = DESKTOP_DROP, .window = (uint32_t)w->id,
+                                .a = pointer_x - w->x, .b = pointer_y - w->y, .c = copy};
+    snprintf(m.text, sizeof(m.text), "%s", list);
+    send_to(w->client, &m);
+    activate(w);
+    printf("desktop: dropped files on window %d\n", w->id);
+}
+
+/* Files dragged out of a window and let go: into the window under the
+ * pointer, or onto the desktop. */
+static void dragged_out(struct window *from, struct desktop_message *m) {
+    m->text[sizeof(m->text) - 1] = '\0';
+    if (strncmp(m->text, "/tmp/.drag-", 11) != 0) {
+        return;
+    }
+    struct window *to = window_at(pointer_x, pointer_y);
+    if (to && to != from && !to->popup) {
+        drop_on_window(to, m->text, m->a);
+    } else if (!to && pointer_y >= PANEL_HEIGHT) {
+        printf("desktop: files dropped on the desktop\n");
+        icons_drop(m->text, m->a, pointer_x, pointer_y);
+    } else {
+        vx_remove(m->text);
+    }
 }
 
 static bool apply_display(void);
@@ -1493,11 +1831,11 @@ static void client_message(int client) {
         break;
     case DESKTOP_MOVE:
         if (w && (w->x != m.a || w->y != m.b)) {
-            add_damage(frame_rect(w));
+            add_damage(window_damage(w));
             w->x = m.a;
             w->y = w->popup || m.b >= PANEL_HEIGHT + TITLE_HEIGHT + BORDER
                        ? m.b : PANEL_HEIGHT + TITLE_HEIGHT + BORDER;
-            add_damage(frame_rect(w));
+            add_damage(window_damage(w));
             if (w->y != m.b) {
                 send_moved(w);
             }
@@ -1508,9 +1846,23 @@ static void client_message(int client) {
             window_request(w, m.a, m.b);
         }
         break;
+    case DESKTOP_CURSOR:
+        if (w && m.a >= 0 && m.a < VX_CURSOR_COUNT) {
+            w->cursor = m.a;
+            update_cursor();
+        }
+        break;
+    case DESKTOP_DRAG:
+        if (w) {
+            dragged_out(w, &m);
+        }
+        break;
     case DESKTOP_NOTIFY:
         m.text[sizeof(m.text) - 1] = '\0';
         add_note(m.text);
+        break;
+    case DESKTOP_LOCK:
+        lock_now();
         break;
     case DESKTOP_RELOAD: {
         /* The wallpaper is made again only if it changed (a big picture
@@ -1527,7 +1879,7 @@ static void client_message(int client) {
             /* Something on the screen at once: reading a big picture takes a while. */
             gradient(&wallpaper, 0x202028, 0x08080c);
             fit_windows();
-            add_damage((struct rect){0, 0, screen.width, screen.height});
+            damage_all();
             redraw_damage();
         }
         if (resized || strcmp(before, after)) {
@@ -1537,7 +1889,7 @@ static void client_message(int client) {
         set_menu(false);
         close_popup();
         build_menu();
-        find_launchers();
+        icons_load();
         /* Every program reads the theme again, and draws itself. */
         for (int i = 0; i < MAX_CLIENTS; i++) {
             if (clients[i].handle >= 0) {
@@ -1545,7 +1897,7 @@ static void client_message(int client) {
                 send_to(i, &theme);
             }
         }
-        add_damage((struct rect){0, 0, screen.width, screen.height});
+        damage_all();
         printf("desktop: settings reloaded (%s, %s)\n", vx_theme.dark ? "dark" : "light",
                vx_settings_get(&config, "accent", "purple"));
         break;
@@ -1607,7 +1959,7 @@ static void reap_children(void) {
     }
 }
 
-static void run_app(int i) {
+void run_app(int i) {
     int process = vx_app_open(&apps[i], NULL);
     if (process < 0) {
         printf("desktop: can't start %s: %s\n", apps[i].name, vx_strerror(process));
@@ -1628,15 +1980,46 @@ static int app_named(const char *stem) {
     return -1;
 }
 
-static void run_named(const char *stem, const char *file) {
+void run_named(const char *stem, const char *argument) {
     int i = app_named(stem);
     if (i < 0) {
         printf("desktop: no %s app\n", stem);
         return;
     }
-    int process = vx_app_open(&apps[i], file);
+    int process = vx_app_open(&apps[i], argument);
     if (process >= 0) {
         add_child(process);
+    }
+}
+
+void open_path(const char *path) {
+    struct vx_stat st;
+    size_t length = strlen(path);
+    bool bundle = length > 6 && !strcmp(path + length - 6, VX_APP_EXTENSION);
+    if (bundle) {
+        struct vx_app app;
+        if (vx_app_load(path, &app) == 0) {
+            int process = vx_app_open(&app, NULL);
+            if (process >= 0) {
+                add_child(process);
+            }
+        }
+        return;
+    }
+    if (vx_stat(path, &st) == 0 && st.type == VX_TYPE_DIRECTORY) {
+        run_named("Files", path);
+        return;
+    }
+    struct vx_app app;
+    if (vx_app_for_file(path, &app) == 0) {
+        int process = vx_app_open(&app, path);
+        if (process >= 0) {
+            add_child(process);
+        }
+    } else {
+        char note[200];
+        snprintf(note, sizeof(note), "No app opens %s", strrchr(path, '/') ? strrchr(path, '/') + 1 : path);
+        add_note(note);
     }
 }
 
@@ -1644,20 +2027,17 @@ static void run_popup_item(int index) {
     switch (popup_actions[index]) {
     case POP_TERMINAL: run_named("Terminal", NULL); break;
     case POP_FILES: run_named("Files", NULL); break;
-    case POP_SETTINGS: run_named("Settings", NULL); break;
+    case POP_NEW_FOLDER: icons_new_folder(); break;
+    case POP_SETTINGS: run_named("Settings", "Wallpaper"); break;
     case POP_ABOUT: run_named("About", NULL); break;
-    case POP_OPEN:
-        if (popup_launcher >= 0 && popup_launcher < LAUNCHERS) {
-            run_app(launcher_apps[popup_launcher]);
-        }
-        break;
-    case POP_SHOW: run_named("Files", VX_APPS_DIR); break;
+    case POP_ICON: icons_menu(popup_icon, popup_arguments[index]); break;
     case POP_RESTART:
     case POP_POWER_OFF:
         printf("desktop: %s\n", popup_actions[index] == POP_RESTART ? "restarting" : "turning off");
         fflush(stdout);
         vx_power(popup_actions[index] == POP_RESTART ? VX_POWER_RESTART : VX_POWER_OFF);
         break;
+    case POP_LEAVE: quit = true; break;
     case POP_NONE: break;
     }
 }
@@ -1705,30 +2085,21 @@ static void check_apps(void) {
     }
     close_popup();
     set_menu(false);
-    add_damage(launchers_area());
     build_menu();
-    find_launchers();
-    selected_launcher = -1;
-    add_damage(launchers_area());
+    icons_load();
     printf("desktop: apps changed: %d apps\n", app_count);
 }
 
 static void run_menu_item(int index) {
     struct menu_item *item = &menu_items[index];
-    if (item->action == LEAVE) {
-        quit = true;
-        return;
-    }
-    if (item->action == RESTART || item->action == POWER_OFF) {
-        ask_power(item->action == RESTART);
-        return;
-    }
-    if (item->action == RUN_APP) {
-        run_app(item->app);
-        return;
-    }
-    if (item->action != RUN_LINUX_APP) {
-        return;
+    switch (item->action) {
+    case LEAVE: ask(POP_LEAVE, 31, PANEL_HEIGHT + 4); return;
+    case RESTART: ask(POP_RESTART, pointer_x, pointer_y); return;
+    case POWER_OFF: ask(POP_POWER_OFF, pointer_x, pointer_y); return;
+    case LOCK: lock_now(); return;
+    case RUN_APP: run_app(item->app); return;
+    case RUN_LINUX_APP: break;
+    case SEPARATOR: return;
     }
     const char *argv[MAX_ARGS + 1] = {"/linux/usr/bin/xrun"};
     for (int i = 0; i < item->arg_count; i++) {
@@ -1737,11 +2108,12 @@ static void run_menu_item(int index) {
     launch_argv(argv, item->arg_count + 1);
 }
 
-/* ---- Input ---- */
-
-/* What a key types, by key code (Linux's, 0 to 86): a US keyboard, and
- * the other layouts' differences from it. Only ASCII can be typed here (the
- * font has nothing else); X programs get the whole layout from XKB. */
+/* ---- The keyboard: layouts ----
+ *
+ * What a key types, by key code (Linux's, 0 to 86): a US keyboard, and the
+ * other layouts' differences from it, in Unicode. Some keys are "dead": an
+ * accent that goes on the next letter (^ then e: ê). X programs get the
+ * whole layout from XKB instead. */
 #define KEYS 87
 static const char keymap[KEYS] = "\0\x1b" "1234567890-=\b\tqwertyuiop[]\n\0asdfghjkl;'`\0\\zxcvbnm,./\0*\0 "
                                  "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\\";
@@ -1749,38 +2121,45 @@ static const char keymap_shift[KEYS] =
     "\0\x1b" "!@#$%^&*()_+\b\tQWERTYUIOP{}\n\0ASDFGHJKL:\"~\0|ZXCVBNM<>?\0*\0 "
     "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0|";
 
+/* Dead keys, in Unicode's private area. */
+enum { DEAD_GRAVE = 0xe000, DEAD_ACUTE, DEAD_CIRCUMFLEX, DEAD_DIAERESIS, DEAD_TILDE };
+
 struct key_change {
     unsigned char key;
-    char normal, shifted, altgr; /* 0: nothing (a letter the font doesn't have). */
+    uint16_t normal, shifted, altgr; /* 0: nothing. */
 };
 
 static const struct key_change layout_gb[] = {
-    {3, '2', '"', 0}, {4, '3', 0, 0}, {40, '\'', '@', 0}, {41, '`', 0, '|'}, {43, '#', '~', 0},
-    {86, '\\', '|', 0}, {0, 0, 0, 0},
+    {3, '2', '"', 0}, {4, '3', 0xa3, 0}, {5, '4', '$', 0x20ac}, {40, '\'', '@', 0},
+    {41, '`', 0xac, 0xa6}, {43, '#', '~', 0}, {86, '\\', '|', 0}, {0, 0, 0, 0},
 };
 static const struct key_change layout_de[] = {
-    {3, '2', '"', 0},   {4, '3', 0, 0},     {7, '6', '&', 0},    {8, '7', '/', '{'},
-    {9, '8', '(', '['}, {10, '9', ')', ']'}, {11, '0', '=', '}'}, {12, 0, '?', '\\'},
-    {13, 0, '`', 0},    {16, 'q', 'Q', '@'}, {21, 'z', 'Z', 0},   {26, 0, 0, 0},
-    {27, '+', '*', '~'}, {39, 0, 0, 0},     {40, 0, 0, 0},       {41, '^', 0, 0},
-    {43, '#', '\'', 0}, {44, 'y', 'Y', 0},  {51, ',', ';', 0},   {52, '.', ':', 0},
-    {53, '-', '_', 0},  {86, '<', '>', '|'}, {0, 0, 0, 0},
+    {3, '2', '"', 0xb2}, {4, '3', 0xa7, 0xb3}, {7, '6', '&', 0}, {8, '7', '/', '{'},
+    {9, '8', '(', '['}, {10, '9', ')', ']'}, {11, '0', '=', '}'}, {12, 0xdf, '?', '\\'},
+    {13, DEAD_ACUTE, DEAD_GRAVE, 0}, {16, 'q', 'Q', '@'}, {18, 'e', 'E', 0x20ac},
+    {21, 'z', 'Z', 0}, {26, 0xfc, 0xdc, 0}, {27, '+', '*', '~'}, {39, 0xf6, 0xd6, 0},
+    {40, 0xe4, 0xc4, 0}, {41, DEAD_CIRCUMFLEX, 0xb0, 0}, {43, '#', '\'', 0}, {44, 'y', 'Y', 0},
+    {50, 'm', 'M', 0xb5}, {51, ',', ';', 0}, {52, '.', ':', 0}, {53, '-', '_', 0},
+    {86, '<', '>', '|'}, {0, 0, 0, 0},
 };
 static const struct key_change layout_fr[] = {
-    {2, '&', '1', 0},   {3, 0, '2', '~'},   {4, '"', '3', '#'},  {5, '\'', '4', '{'},
-    {6, '(', '5', '['}, {7, '-', '6', '|'}, {8, 0, '7', '`'},    {9, '_', '8', '\\'},
-    {10, 0, '9', '^'},  {11, 0, '0', '@'},  {12, ')', 0, ']'},   {13, '=', '+', '}'},
-    {16, 'a', 'A', 0},  {17, 'z', 'Z', 0},  {26, '^', 0, 0},     {27, '$', 0, 0},
-    {30, 'q', 'Q', 0},  {39, 'm', 'M', 0},  {40, 0, '%', 0},     {41, 0, 0, 0},
-    {43, '*', 0, 0},    {44, 'w', 'W', 0},  {50, ',', '?', 0},   {51, ';', '.', 0},
-    {52, ':', '/', 0},  {53, '!', 0, 0},    {86, '<', '>', 0},   {0, 0, 0, 0},
+    {2, '&', '1', 0}, {3, 0xe9, '2', '~'}, {4, '"', '3', '#'}, {5, '\'', '4', '{'},
+    {6, '(', '5', '['}, {7, '-', '6', '|'}, {8, 0xe8, '7', '`'}, {9, '_', '8', '\\'},
+    {10, 0xe7, '9', '^'}, {11, 0xe0, '0', '@'}, {12, ')', 0xb0, ']'}, {13, '=', '+', '}'},
+    {16, 'a', 'A', 0}, {17, 'z', 'Z', 0}, {18, 'e', 'E', 0x20ac},
+    {26, DEAD_CIRCUMFLEX, DEAD_DIAERESIS, 0}, {27, '$', 0xa3, 0xa4}, {30, 'q', 'Q', 0},
+    {39, 'm', 'M', 0}, {40, 0xf9, '%', 0}, {41, 0xb2, 0, 0}, {43, '*', 0xb5, 0},
+    {44, 'w', 'W', 0}, {50, ',', '?', 0}, {51, ';', '.', 0}, {52, ':', '/', 0},
+    {53, '!', 0xa7, 0}, {86, '<', '>', 0}, {0, 0, 0, 0},
 };
 static const struct key_change layout_es[] = {
-    {3, '2', '"', '@'}, {4, '3', 0, '#'},   {7, '6', '&', 0},    {8, '7', '/', 0},
-    {9, '8', '(', 0},   {10, '9', ')', 0},  {11, '0', '=', 0},   {12, '\'', '?', 0},
-    {13, 0, 0, 0},      {26, '`', '^', '['}, {27, '+', '*', ']'}, {39, 0, 0, 0},
-    {40, 0, 0, '{'},    {41, 0, 0, '\\'},   {43, 0, 0, '}'},     {51, ',', ';', 0},
-    {52, '.', ':', 0},  {53, '-', '_', 0},  {86, '<', '>', 0},   {0, 0, 0, 0},
+    {2, '1', '!', '|'}, {3, '2', '"', '@'}, {4, '3', 0xb7, '#'}, {5, '4', '$', '~'},
+    {6, '5', '%', 0x20ac}, {7, '6', '&', 0xac}, {8, '7', '/', 0}, {9, '8', '(', 0},
+    {10, '9', ')', 0}, {11, '0', '=', 0}, {12, '\'', '?', 0}, {13, 0xa1, 0xbf, 0},
+    {18, 'e', 'E', 0x20ac}, {26, DEAD_GRAVE, DEAD_CIRCUMFLEX, '['}, {27, '+', '*', ']'},
+    {39, 0xf1, 0xd1, 0}, {40, DEAD_ACUTE, DEAD_DIAERESIS, '{'}, {41, 0xba, 0xaa, '\\'},
+    {43, 0xe7, 0xc7, '}'}, {51, ',', ';', 0}, {52, '.', ':', 0}, {53, '-', '_', 0},
+    {86, '<', '>', 0}, {0, 0, 0, 0},
 };
 static const struct key_change layout_dvorak[] = {
     {12, '[', '{', 0}, {13, ']', '}', 0}, {16, '\'', '"', 0}, {17, ',', '<', 0},
@@ -1802,10 +2181,8 @@ static const struct {
     {"es", layout_es}, {"dvorak", layout_dvorak},
 };
 
-static bool altgr;
-
 /* What a key types in the chosen layout (without Ctrl and Caps Lock). */
-static char layout_char(int key, bool shifted, bool with_altgr) {
+static uint32_t layout_char(int key, bool shifted, bool with_altgr) {
     if (key < 0 || key >= KEYS) {
         return 0;
     }
@@ -1822,32 +2199,138 @@ static char layout_char(int key, bool shifted, bool with_altgr) {
     if (with_altgr) {
         return 0;
     }
-    return shifted ? keymap_shift[key] : keymap[key];
+    return (unsigned char)(shifted ? keymap_shift[key] : keymap[key]);
 }
+
+/* An accent and a letter: one character (or 0 if they don't go together). */
+static uint32_t compose_dead(uint32_t dead, uint32_t c) {
+    static const char letters[] = "aeiouyAEIOUYn" "N";
+    static const uint16_t made[5][14] = {
+        /* grave */ {0xe0, 0xe8, 0xec, 0xf2, 0xf9, 0, 0xc0, 0xc8, 0xcc, 0xd2, 0xd9, 0, 0, 0},
+        /* acute */ {0xe1, 0xe9, 0xed, 0xf3, 0xfa, 0xfd, 0xc1, 0xc9, 0xcd, 0xd3, 0xda, 0xdd, 0, 0},
+        /* circumflex */ {0xe2, 0xea, 0xee, 0xf4, 0xfb, 0, 0xc2, 0xca, 0xce, 0xd4, 0xdb, 0, 0, 0},
+        /* diaeresis */ {0xe4, 0xeb, 0xef, 0xf6, 0xfc, 0xff, 0xc4, 0xcb, 0xcf, 0xd6, 0xdc, 0, 0, 0},
+        /* tilde */ {0xe3, 0, 0, 0xf5, 0, 0, 0xc3, 0, 0, 0xd5, 0, 0, 0xf1, 0xd1},
+    };
+    const char *at = c < 128 && c ? strchr(letters, (int)c) : NULL;
+    return at ? made[dead - DEAD_GRAVE][at - letters] : 0;
+}
+
+static uint32_t accent_alone(uint32_t dead) {
+    static const uint16_t alone[5] = {'`', 0xb4, '^', 0xa8, '~'};
+    return alone[dead - DEAD_GRAVE];
+}
+
+static uint32_t pending_dead; /* A dead key waiting for its letter. */
 
 static int character_of(int key) {
-    char c = layout_char(key, shift, altgr);
-    if (caps_lock && ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'))) {
-        c ^= 0x20;
+    uint32_t c = layout_char(key, shift, altgr);
+    if (caps_lock) {
+        if ((c >= 'a' && c <= 'z') || (c >= 0xe0 && c <= 0xfe && c != 0xf7)) {
+            c -= 0x20;
+        } else if ((c >= 'A' && c <= 'Z') || (c >= 0xc0 && c <= 0xde && c != 0xd7)) {
+            c += 0x20;
+        }
     }
-    if (ctrl && ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'))) {
-        c &= 0x1f;
+    if (ctrl && !altgr && c < 128 && ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'))) {
+        return (int)(c & 0x1f);
     }
-    return (unsigned char)c;
+    if (c >= DEAD_GRAVE && c <= DEAD_TILDE) {
+        if (pending_dead) { /* Twice: the accent itself. */
+            uint32_t accent = accent_alone(pending_dead);
+            pending_dead = 0;
+            return (int)accent;
+        }
+        pending_dead = c;
+        return 0;
+    }
+    if (pending_dead && c) {
+        uint32_t dead = pending_dead;
+        pending_dead = 0;
+        if (c == ' ') {
+            return (int)accent_alone(dead);
+        }
+        uint32_t made = compose_dead(dead, c);
+        return (int)(made ? made : c);
+    }
+    return (int)c;
 }
 
-/* Alt+Tab: the window opened after the focused one (round the list). */
-static void next_window(void) {
-    struct window *list[MAX_WINDOWS];
-    int n = windows_by_id(list);
-    if (n == 0) {
+/* ---- The keyboard: shortcuts ---- */
+
+/* Super+Left/Right/Up/Down: halves, then quarters (Left then Up: the top
+ * left quarter), maximized, back. */
+static void super_arrow(int key) {
+    struct window *w = focused;
+    if (!w || !w->resizable) {
         return;
     }
-    int at = 0;
-    while (at < n && list[at] != focused) {
-        at++;
+    enum snap s = w->maximized ? SNAP_TOP : w->snapped;
+    enum snap next = s;
+    switch (key) {
+    case VX_KEY_LEFT:
+        next = s == SNAP_RIGHT ? SNAP_NONE : s == SNAP_TOP_RIGHT ? SNAP_TOP_LEFT
+               : s == SNAP_BOTTOM_RIGHT ? SNAP_BOTTOM_LEFT : SNAP_LEFT;
+        break;
+    case VX_KEY_RIGHT:
+        next = s == SNAP_LEFT ? SNAP_NONE : s == SNAP_TOP_LEFT ? SNAP_TOP_RIGHT
+               : s == SNAP_BOTTOM_LEFT ? SNAP_BOTTOM_RIGHT : SNAP_RIGHT;
+        break;
+    case VX_KEY_UP:
+        next = s == SNAP_LEFT ? SNAP_TOP_LEFT : s == SNAP_RIGHT ? SNAP_TOP_RIGHT
+               : s == SNAP_BOTTOM_LEFT ? SNAP_LEFT : s == SNAP_BOTTOM_RIGHT ? SNAP_RIGHT
+               : SNAP_TOP;
+        break;
+    case VX_KEY_DOWN:
+        if (s == SNAP_NONE) {
+            minimize(w);
+            return;
+        }
+        next = s == SNAP_LEFT ? SNAP_BOTTOM_LEFT : s == SNAP_RIGHT ? SNAP_BOTTOM_RIGHT
+               : s == SNAP_TOP_LEFT ? SNAP_LEFT : s == SNAP_TOP_RIGHT ? SNAP_RIGHT : SNAP_NONE;
+        break;
     }
-    activate(list[at < n ? (at + 1) % n : 0]);
+    if (next != s) {
+        snap_window(w, next);
+    }
+}
+
+/* Super+D: everything minimized (the desktop), and again: back. */
+static struct window *shown_before[MAX_WINDOWS];
+static int shown_before_count;
+
+static void show_desktop(void) {
+    int visible = 0;
+    for (int i = 0; i < window_count; i++) {
+        visible += !stack[i]->minimized && !stack[i]->popup;
+    }
+    if (visible) {
+        shown_before_count = 0;
+        for (int i = 0; i < window_count; i++) {
+            if (!stack[i]->minimized && !stack[i]->popup) {
+                shown_before[shown_before_count++] = stack[i];
+            }
+        }
+        for (int i = 0; i < shown_before_count; i++) {
+            minimize(shown_before[i]);
+        }
+        printf("desktop: showing the desktop\n");
+        return;
+    }
+    for (int i = 0; i < shown_before_count; i++) {
+        for (int k = 0; k < window_count; k++) {
+            if (stack[k] == shown_before[i]) {
+                activate(stack[k]);
+            }
+        }
+    }
+    shown_before_count = 0;
+}
+
+static void close_overlays(void) {
+    set_menu(false);
+    close_popup();
+    clock_close();
 }
 
 static void key_event(int key, int value) {
@@ -1860,34 +2343,116 @@ static void key_event(int key, int value) {
     case VX_KEY_LEFTCTRL:
     case VX_KEY_RIGHTCTRL: ctrl = down; break;
     case VX_KEY_LEFTALT: alt = down; break;
-    case VX_KEY_RIGHTALT: alt = altgr = down; break;
+    case VX_KEY_RIGHTALT: altgr = down; break; /* AltGr: the third level, not Alt. */
+    case VX_KEY_LEFTMETA:
+    case 126: super_key = down; break;
     case VX_KEY_CAPSLOCK:
         if (value == 1) {
             caps_lock = !caps_lock;
         }
         break;
     }
+    if (!lock_input()) {
+        return;
+    }
+    if (locked) {
+        lock_key(key, value, down ? character_of(key) : 0);
+        return;
+    }
+    if (key == 99 && value == 1) { /* PrintScreen */
+        screenshot(alt ? SHOT_WINDOW : shift ? SHOT_AREA : SHOT_SCREEN);
+        return;
+    }
+    if (shot_selecting) {
+        if (key == VX_KEY_ESC && value == 1) {
+            shot_cancel();
+        }
+        return;
+    }
+    if (switcher_open) {
+        if (key == VX_KEY_LEFTALT && !down) {
+            switcher_finish(true);
+        } else if (key == VX_KEY_TAB && down) {
+            switcher_step(shift);
+        } else if (key == VX_KEY_ESC && down) {
+            switcher_finish(false);
+        }
+        return;
+    }
+    if (alt && !ctrl && key == VX_KEY_TAB && down) {
+        switcher_start(shift);
+        return;
+    }
+    if (search_open) {
+        search_key(key, value, down ? character_of(key) : 0);
+        return;
+    }
+    if ((ctrl || super_key) && key == VX_KEY_SPACE && value == 1) {
+        close_overlays();
+        search_show();
+        return;
+    }
+    if (super_key && down) {
+        int letter = (int)layout_char(key, false, false);
+        if (key == VX_KEY_LEFT || key == VX_KEY_RIGHT || key == VX_KEY_UP || key == VX_KEY_DOWN) {
+            super_arrow(key);
+            return;
+        }
+        if (letter == 'l' && value == 1) {
+            lock_now();
+            return;
+        }
+        if (letter == 'd' && value == 1) {
+            show_desktop();
+            return;
+        }
+    }
+    if (alt && !ctrl && key == 62 && value == 1) { /* F4 */
+        if (focused) {
+            ask_to_close(focused);
+        }
+        return;
+    }
     if (ctrl && alt && value == 1) {
+        int letter = (int)layout_char(key, false, false);
         /* Apps' shortcuts ("Ctrl+Alt+T"). */
         for (int i = 0; i < app_count; i++) {
             const char *s = apps[i].shortcut;
-            if (!strncmp(s, "Ctrl+Alt+", 9) && s[9] && !s[10] &&
-                layout_char(key, false, false) == (s[9] | 0x20)) {
+            if (!strncmp(s, "Ctrl+Alt+", 9) && s[9] && !s[10] && letter == (s[9] | 0x20)) {
                 run_app(i);
                 return;
             }
         }
-        if (layout_char(key, false, false) == 'q') {
-            quit = true;
+        if (letter == 'q') {
+            ask(POP_LEAVE, screen.width / 2 - 90, screen.height / 3);
+            return;
+        }
+        if (letter == 'l') {
+            lock_now();
             return;
         }
     }
-    if (alt && !ctrl && key == 15 && value != 0) { /* Tab */
-        next_window();
+    if (popup_open && value && (key == VX_KEY_UP || key == VX_KEY_DOWN || key == VX_KEY_ENTER)) {
+        /* The menu by keyboard: Up and Down choose, Enter runs (a question's
+         * first answer, if nothing was chosen). */
+        if (key == VX_KEY_ENTER) {
+            int item = popup_hot >= 0 ? popup_hot : 0;
+            close_popup();
+            printf("desktop: menu item \"%s\"\n", popup_items[item].label);
+            run_popup_item(item);
+            return;
+        }
+        int step = key == VX_KEY_DOWN ? 1 : popup_count - 1;
+        int hot = popup_hot < 0 ? (key == VX_KEY_DOWN ? popup_count - 1 : 0) : popup_hot;
+        do {
+            hot = (hot + step) % popup_count;
+        } while (!popup_items[hot].label);
+        popup_hot = hot;
+        add_damage(popup_rect());
         return;
     }
-    if (menu_open && key == 1 && value == 1) { /* Escape */
-        set_menu(false);
+    if (key == VX_KEY_ESC && value == 1 && (menu_open || popup_open || clock_open)) {
+        close_overlays();
         return;
     }
     if (focused) {
@@ -1897,6 +2462,8 @@ static void key_event(int key, int value) {
     }
 }
 
+/* ---- The pointer ---- */
+
 static void send_pointer(struct window *w, int wheel) {
     struct desktop_message m = {.type = DESKTOP_POINTER, .window = (uint32_t)w->id,
                                 .a = pointer_x - w->x, .b = pointer_y - w->y, .c = buttons,
@@ -1905,29 +2472,84 @@ static void send_pointer(struct window *w, int wheel) {
 }
 
 /* Which edges of a resizable window the pointer is on (for resizing). */
-static bool on_edges(struct window *w, int x, int y, bool *right, bool *bottom) {
-    if (!w->resizable || w->maximized) {
+static bool on_edges(struct window *w, int x, int y, bool *left, bool *right, bool *bottom) {
+    if (!w->resizable || w->maximized || w->popup || w->undecorated) {
         return false;
     }
     struct rect f = frame_rect(w);
-    *right = x >= f.x + f.width - 3;
-    *bottom = y >= f.y + f.height - 3;
-    return *right || *bottom;
+    if (y < f.y + TITLE_HEIGHT / 2) {
+        return false; /* The title bar is for moving. */
+    }
+    *left = x < f.x + EDGE;
+    *right = x >= f.x + f.width - EDGE;
+    *bottom = y >= f.y + f.height - EDGE;
+    return *left || *right || *bottom;
 }
 
-static struct rect outline_damage(void) {
-    return (struct rect){outline.x - BORDER - 2, outline.y - TITLE_HEIGHT - BORDER - 2,
-                         outline.width + 2 * BORDER + 4,
-                         outline.height + TITLE_HEIGHT + 2 * BORDER + 4};
+static int edge_cursor(bool left, bool right, bool bottom) {
+    return bottom && right ? CURSOR_RESIZE_NWSE : bottom && left ? CURSOR_RESIZE_NESW
+           : bottom ? CURSOR_RESIZE_NS : CURSOR_RESIZE_EW;
+}
+
+static void set_cursor(int shape) {
+    if (shape != cursor_shape) {
+        add_damage(cursor_rect(cursor_shape, pointer_x, pointer_y));
+        cursor_shape = shape;
+        add_damage(cursor_rect(cursor_shape, pointer_x, pointer_y));
+    }
+}
+
+static void update_cursor(void) {
+    if (shot_selecting) {
+        set_cursor(VX_CURSOR_CROSS);
+        return;
+    }
+    if (locked || saver_on || search_open || switcher_open) {
+        set_cursor(VX_CURSOR_ARROW);
+        return;
+    }
+    if (drag == RESIZING) {
+        set_cursor(edge_cursor(resize_left, resize_right, resize_bottom));
+        return;
+    }
+    if (drag == MOVING) {
+        set_cursor(VX_CURSOR_ARROW);
+        return;
+    }
+    if (grab) {
+        set_cursor(grab->cursor);
+        return;
+    }
+    struct window *w = menu_open || popup_open || clock_open ? NULL
+                                                            : window_at(pointer_x, pointer_y);
+    bool left, right, bottom;
+    if (w && on_edges(w, pointer_x, pointer_y, &left, &right, &bottom)) {
+        set_cursor(edge_cursor(left, right, bottom));
+    } else if (w && pointer_y >= w->y && pointer_x >= w->x && pointer_x < w->x + w->content.width &&
+               pointer_y < w->y + w->content.height) {
+        set_cursor(w->cursor);
+    } else {
+        set_cursor(VX_CURSOR_ARROW);
+    }
 }
 
 /* A click on the panel. */
 static void panel_click(void) {
     if (pointer_x < MENU_BUTTON_WIDTH + 4) {
+        clock_close();
         set_menu(!menu_open);
         return;
     }
     set_menu(false);
+    if (inside(clock_button_rect(), pointer_x, pointer_y)) {
+        clock_toggle();
+        return;
+    }
+    clock_close();
+    if (inside(search_button_rect(), pointer_x, pointer_y)) {
+        search_show();
+        return;
+    }
     struct window *list[MAX_WINDOWS];
     int n = windows_by_id(list);
     for (int i = 0; i < n; i++) {
@@ -1944,20 +2566,12 @@ static void panel_click(void) {
 
 /* A click on a window's title bar: its buttons, or the start of a move. */
 static void title_click(struct window *w) {
-    int right = w->x + w->content.width;
-    int button = pointer_x >= right - BUTTON_WIDTH ? 0
-                 : pointer_x >= right - 2 * BUTTON_WIDTH ? 1
-                 : pointer_x >= right - 3 * BUTTON_WIDTH ? 2 : -1;
-    if (!w->resizable && button == 2) {
-        button = -1;
-    }
+    int button = title_button_at(w, pointer_x, pointer_y);
     if (button == 0) {
-        struct desktop_message m = {.type = DESKTOP_CLOSE, .window = (uint32_t)w->id};
-        send_to(w->client, &m);
-        printf("desktop: asked window %d to close\n", w->id);
+        ask_to_close(w);
         return;
     }
-    if ((button == 1 && w->resizable) || (button == 2 && w->resizable)) {
+    if (w->resizable && (button == 1 || button == 2)) {
         if (button == 1) {
             toggle_maximized(w);
         } else {
@@ -1985,14 +2599,69 @@ static void title_click(struct window *w) {
     start_move(w);
 }
 
+static void end_drag(void) {
+    struct window *d = dragged;
+    if (drag == MOVING && d && snap != SNAP_NONE) {
+        /* Snapped: maximized, a half or a quarter of the screen. */
+        add_damage(snap_damage(snap));
+        enum snap where = snap;
+        snap = SNAP_NONE;
+        snap_window(d, where);
+    } else if (drag == MOVING && d) {
+        send_moved(d);
+        printf("desktop: moved window %d to %d,%d\n", d->id, d->x, d->y);
+    } else if (drag == RESIZING && d) {
+        add_damage(outline_damage());
+        if (outline.width != d->content.width || outline.height != d->content.height) {
+            configure(d, outline.width, outline.height);
+        }
+        if (outline.x != d->x) {
+            add_damage(window_damage(d));
+            d->x = outline.x;
+            send_moved(d);
+        }
+        d->snapped = SNAP_NONE;
+    }
+    drag = IDLE;
+    dragged = NULL;
+}
+
 static void button_event(int bit, bool down) {
     int before = buttons;
     buttons = down ? buttons | bit : buttons & ~bit;
+    if (!lock_input()) {
+        return;
+    }
+    if (locked) {
+        lock_button(down && bit == 1);
+        return;
+    }
     bool left_down = bit == 1 && down && !(before & 1);
+    bool right_down = bit == 2 && down && !(before & 2);
     if (left_down) {
         printf("desktop: left button at %d,%d\n", pointer_x, pointer_y);
     }
-    bool right_down = bit == 2 && down && !(before & 2);
+    if (shot_selecting) {
+        if (bit == 1) {
+            shot_button(down);
+        } else if (right_down) {
+            shot_cancel();
+        }
+        update_cursor();
+        return;
+    }
+    if (switcher_open) {
+        if (left_down) {
+            switcher_click();
+        }
+        return;
+    }
+    if (search_open) {
+        if (left_down || right_down) {
+            search_button(true);
+        }
+        return;
+    }
     if ((left_down || right_down) && popup_open) {
         /* A click on an item runs it; anywhere else it just closes the menu. */
         int item = vx_menu_item_at(popup_items, popup_count, popup_x, popup_y, pointer_x, pointer_y);
@@ -2003,19 +2672,19 @@ static void button_event(int bit, bool down) {
         }
         return;
     }
+    if ((left_down || right_down) && clock_open) {
+        if (inside(clock_rect(), pointer_x, pointer_y)) {
+            clock_button(true);
+            return;
+        }
+        clock_close();
+        if (inside(clock_button_rect(), pointer_x, pointer_y)) {
+            return; /* Its own button: closed, not opened again. */
+        }
+    }
     if (right_down && pointer_y >= PANEL_HEIGHT && !window_at(pointer_x, pointer_y)) {
         set_menu(false);
-        int hit = -1;
-        for (int i = 0; i < LAUNCHERS; i++) {
-            if (inside(launcher_rect(i), pointer_x, pointer_y)) {
-                hit = i;
-            }
-        }
-        if (hit != selected_launcher) {
-            selected_launcher = hit;
-            add_damage(launchers_area());
-        }
-        open_popup(hit);
+        open_popup(icons_at(pointer_x, pointer_y));
         return;
     }
     if (left_down && menu_open && pointer_y >= PANEL_HEIGHT) {
@@ -2035,81 +2704,46 @@ static void button_event(int bit, bool down) {
     }
     struct window *w = window_at(pointer_x, pointer_y);
     if (left_down && !w) {
-        /* The desktop: its icons are selected, and started by a double click. */
-        int hit = -1;
-        for (int i = 0; i < LAUNCHERS; i++) {
-            if (inside(launcher_rect(i), pointer_x, pointer_y)) {
-                hit = i;
-            }
-        }
-        long now = vx_uptime();
-        if (hit >= 0 && hit == selected_launcher && now - last_click_ms < DOUBLE_CLICK_MS &&
-            last_click_window == NULL) {
-            char label[64];
-            launcher_label(hit, label, sizeof(label));
-            printf("desktop: starting %s\n", label);
-            run_app(launcher_apps[hit]);
-        }
-        if (hit != selected_launcher) {
-            selected_launcher = hit;
-            add_damage(launchers_area());
-        }
-        last_click_ms = now;
-        last_click_window = NULL;
+        desktop_press = true;
+        icons_button(1, true, DOUBLE_CLICK_MS);
+        return;
+    }
+    if (bit == 1 && !down && desktop_press) {
+        desktop_press = false;
+        icons_button(1, false, DOUBLE_CLICK_MS);
+        update_cursor();
         return;
     }
     if (left_down && w) {
         activate(w);
-        bool right, bottom;
-        if (on_edges(w, pointer_x, pointer_y, &right, &bottom)) {
-            drag = RESIZING;
-            dragged = w;
-            resize_right = right;
-            resize_bottom = bottom;
-            drag_dx = w->x + w->content.width - pointer_x;
-            drag_dy = w->y + w->content.height - pointer_y;
-            outline = (struct rect){w->x, w->y, w->content.width, w->content.height};
-            add_damage(outline_damage());
+        bool left, right, bottom;
+        if (on_edges(w, pointer_x, pointer_y, &left, &right, &bottom)) {
+            start_resize(w, left, right, bottom);
+            update_cursor();
             return;
         }
         if (pointer_y < w->y && !w->popup && !w->undecorated) {
             title_click(w);
+            update_cursor();
             return;
         }
     }
     if (bit == 1 && !down && drag != IDLE) {
-        struct window *d = dragged;
-        if (drag == MOVING && d && snap != SNAP_NONE) {
-            /* Snapped: maximized, or half of the screen. */
-            add_damage(snap_damage(snap));
-            if (snap == SNAP_TOP) {
-                d->maximized = false;
-                toggle_maximized(d);
-            } else {
-                struct rect r = snap_rect(snap);
-                add_damage(frame_rect(d));
-                d->restore = (struct rect){d->x, d->y, d->content.width, d->content.height};
-                d->x = r.x;
-                d->y = r.y;
-                d->maximized = false;
-                configure(d, r.width, r.height);
-                add_damage(frame_rect(d));
-                send_moved(d);
-                printf("desktop: snapped window %d to the %s\n", d->id,
-                       snap == SNAP_LEFT ? "left" : "right");
-            }
-            snap = SNAP_NONE;
-        } else if (drag == MOVING && d) {
-            send_moved(d);
-            printf("desktop: moved window %d to %d,%d\n", d->id, d->x, d->y);
-        } else if (drag == RESIZING && d) {
-            add_damage(outline_damage());
-            if (outline.width != d->content.width || outline.height != d->content.height) {
-                configure(d, outline.width, outline.height);
-            }
+        end_drag();
+        update_cursor();
+        return;
+    }
+    /* The window the pointer is in (or the one a button went down in). */
+    if (down && !(before & 7) && w && drag == IDLE && pointer_y >= w->y &&
+        pointer_x < w->x + w->content.width && pointer_y < w->y + w->content.height) {
+        grab = w;
+    }
+    if (grab) {
+        send_pointer(grab, 0);
+        if (!buttons) {
+            grab = NULL;
+            update_cursor();
         }
-        drag = IDLE;
-        dragged = NULL;
         return;
     }
     if (w && drag == IDLE && pointer_y >= w->y && pointer_x < w->x + w->content.width &&
@@ -2119,21 +2753,42 @@ static void button_event(int bit, bool down) {
 }
 
 static void pointer_moved(int dx, int dy, int wheel) {
+    if ((dx || dy || wheel) && !lock_input()) {
+        return;
+    }
+    if (locked) {
+        return;
+    }
     if (dx || dy) {
-        add_damage(cursor_rect());
+        add_damage(cursor_rect(cursor_shape, pointer_x, pointer_y));
         pointer_x += dx;
         pointer_y += dy;
         pointer_x = pointer_x < 0 ? 0 : pointer_x >= screen.width ? screen.width - 1 : pointer_x;
         pointer_y = pointer_y < 0 ? 0 : pointer_y >= screen.height ? screen.height - 1 : pointer_y;
+        add_damage(cursor_rect(cursor_shape, pointer_x, pointer_y));
+        if (shot_selecting) {
+            shot_pointer();
+            update_cursor();
+            return;
+        }
+        if (search_open) {
+            search_pointer();
+        }
+        if (clock_open) {
+            clock_pointer();
+        }
+        if (desktop_press) {
+            icons_pointer();
+        }
         if (drag == MOVING && dragged) {
-            add_damage(frame_rect(dragged));
+            add_damage(window_damage(dragged));
             dragged->x = pointer_x - drag_dx;
             dragged->y = pointer_y - drag_dy;
             int top = dragged->undecorated ? PANEL_HEIGHT : PANEL_HEIGHT + TITLE_HEIGHT + BORDER;
             if (dragged->y < top) {
                 dragged->y = top; /* Keep the title bar out from under the panel. */
             }
-            add_damage(frame_rect(dragged));
+            add_damage(window_damage(dragged));
             enum snap target = snap_target();
             if (target != snap) {
                 if (snap != SNAP_NONE) {
@@ -2146,7 +2801,12 @@ static void pointer_moved(int dx, int dy, int wheel) {
             }
         } else if (drag == RESIZING && dragged) {
             add_damage(outline_damage());
-            if (resize_right) {
+            if (resize_left) {
+                int x = pointer_x + drag_dx;
+                x = drag_right - x < MIN_WIDTH ? drag_right - MIN_WIDTH : x;
+                outline.x = x;
+                outline.width = drag_right - x;
+            } else if (resize_right) {
                 outline.width = pointer_x + drag_dx - outline.x;
                 outline.width = outline.width < MIN_WIDTH ? MIN_WIDTH : outline.width;
             }
@@ -2156,13 +2816,6 @@ static void pointer_moved(int dx, int dy, int wheel) {
             }
             add_damage(outline_damage());
         }
-        /* The resize arrows over a resizable window's edges. */
-        struct window *under = window_at(pointer_x, pointer_y);
-        bool right, bottom;
-        bool edge = drag == RESIZING ||
-                    (drag == IDLE && under && on_edges(under, pointer_x, pointer_y, &right,
-                                                       &bottom));
-        resize_cursor = edge;
         if (menu_open) {
             int hot = menu_item_at(pointer_x, pointer_y);
             if (hot != menu_hot) {
@@ -2178,10 +2831,33 @@ static void pointer_moved(int dx, int dy, int wheel) {
                 add_damage(popup_rect());
             }
         }
-        add_damage(cursor_rect());
-        if (drag != IDLE) {
+        /* The title bar's buttons light up under the pointer. */
+        struct window *under = drag == IDLE && !grab ? window_at(pointer_x, pointer_y) : NULL;
+        int button = under ? title_button_at(under, pointer_x, pointer_y) : -1;
+        if (button < 0) {
+            under = NULL;
+        }
+        if (under != hot_window || button != hot_button) {
+            if (hot_window) {
+                add_damage(frame_rect(hot_window));
+            }
+            hot_window = under;
+            hot_button = button;
+            if (hot_window) {
+                add_damage(frame_rect(hot_window));
+            }
+        }
+        update_cursor();
+        if (drag != IDLE || desktop_press) {
             return;
         }
+    }
+    if (search_open || switcher_open || shot_selecting) {
+        return;
+    }
+    if (grab) {
+        send_pointer(grab, wheel);
+        return;
     }
     struct window *w = window_at(pointer_x, pointer_y);
     if (w && pointer_y >= w->y && pointer_x < w->x + w->content.width &&
@@ -2291,8 +2967,8 @@ static bool apply_display(void) {
     return old_w != screen.width || old_h != screen.height;
 }
 
-/* After the screen's size changed: windows back on it, maximized ones as
- * big as it now is. */
+/* After the screen's size changed: windows back on it, maximized and
+ * snapped ones as big as it now is. */
 static void fit_windows(void) {
     struct rect area = work_area();
     for (int i = 0; i < window_count; i++) {
@@ -2301,6 +2977,14 @@ static void fit_windows(void) {
             w->x = area.x;
             w->y = area.y;
             configure(w, area.width, area.height);
+            send_moved(w);
+            continue;
+        }
+        if (w->snapped != SNAP_NONE) {
+            struct rect r = snap_rect(w->snapped);
+            w->x = r.x;
+            w->y = r.y;
+            configure(w, r.width, r.height);
             send_moved(w);
             continue;
         }
@@ -2313,6 +2997,7 @@ static void fit_windows(void) {
     }
     pointer_x = pointer_x >= screen.width ? screen.width - 1 : pointer_x;
     pointer_y = pointer_y >= screen.height ? screen.height - 1 : pointer_y;
+    lock_screen_changed();
 }
 
 /* How a held key repeats. */
@@ -2334,10 +3019,10 @@ static int open_input(unsigned capability) {
             return -1;
         }
         struct vx_input_info info;
-        int grab = 1;
+        int grab_it = 1;
         if (vx_control(handle, VX_INPUT_INFO, &info, sizeof(info)) == 0 &&
             (info.capabilities & capability) &&
-            vx_control(handle, VX_INPUT_GRAB, &grab, sizeof(grab)) == 0) {
+            vx_control(handle, VX_INPUT_GRAB, &grab_it, sizeof(grab_it)) == 0) {
             return handle;
         }
         vx_close(handle);
@@ -2374,9 +3059,15 @@ static bool setup(void) {
         fprintf(stderr, "desktop: out of memory\n");
         return false;
     }
+    /* The folders the desktop uses (vinit makes them; a desktop started
+     * another way still has them). */
+    vx_mkdir(HOME);
+    vx_mkdir(DESKTOP_FOLDER);
+    vx_mkdir(PICTURES_FOLDER);
+    vx_mkdir(TRASH_FOLDER);
     make_wallpaper();
     build_menu();
-    find_launchers();
+    icons_load();
     keyboard = open_input(VX_INPUT_KEYS);
     mouse = open_input(VX_INPUT_POINTER);
     apply_key_repeat();
@@ -2400,8 +3091,22 @@ static bool setup(void) {
     }
     pointer_x = screen.width / 2;
     pointer_y = screen.height / 2;
-    add_damage((struct rect){0, 0, screen.width, screen.height});
+    damage_all();
     return true;
+}
+
+static bool listed_app(const char *list, const struct vx_app *app) {
+    const char *file = strrchr(app->bundle, '/');
+    file = file ? file + 1 : app->bundle;
+    size_t n = strlen(file) - strlen(VX_APP_EXTENSION);
+    for (const char *p = list; *p;) {
+        size_t m = strcspn(p, ",");
+        if (m == n && !strncmp(p, file, n)) {
+            return true;
+        }
+        p += m + (p[m] == ',');
+    }
+    return false;
 }
 
 int main(int argc, char **argv) {
@@ -2420,7 +3125,7 @@ int main(int argc, char **argv) {
     }
     const char *startup = vx_settings_get(&config, "startup_apps", "");
     for (int i = 0; i < app_count && startup[0]; i++) {
-        if (listed(startup, &apps[i])) {
+        if (listed_app(startup, &apps[i])) {
             printf("desktop: starting %s (at startup)\n", apps[i].name);
             run_app(i);
         }
@@ -2431,8 +3136,16 @@ int main(int argc, char **argv) {
         if (tick != shown_minute) { /* The clock. */
             shown_minute = tick;
             add_damage(panel_rect());
+            if (clock_open) {
+                add_damage(clock_rect());
+            }
         }
+        frames_wanted = false;
+        animate();
+        shot_tick();
+        lock_tick();
         check_apps(); /* (At most every two seconds.) */
+        icons_check();
         redraw_damage();
         fflush(stdout);
         struct vx_poll polls[3 + MAX_CLIENTS];
@@ -2457,6 +3170,11 @@ int main(int argc, char **argv) {
         long wait = expire_notes();
         long most = setting_clock_seconds ? 250 : 500;
         wait = wait < 0 || wait > most ? most : wait + 1;
+        long lock_wait = lock_wait_ms();
+        wait = lock_wait < wait ? lock_wait : wait;
+        if (frames_wanted) {
+            wait = 16; /* About 60 frames a second. */
+        }
         if (vx_poll(polls, (size_t)count, wait) <= 0) {
             expire_notes();
             reap_children();
