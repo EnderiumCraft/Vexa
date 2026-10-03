@@ -134,7 +134,8 @@ CURL_URL := https://archive.ubuntu.com/ubuntu/pool/main/c/curl/curl_$(CURL_VERSI
 CURL_SHA256 := 05fc17ff25b793a437a0906e0484b82172a9f4de02be5ed447e0cab8c3475add
 CURL_TARBALL := third_party/curl-$(CURL_VERSION).tar.gz
 CURL_BUILD := $(BUILD)/curl-$(CURL_VERSION)
-CURL := $(CURL_BUILD)/src/curl
+CURL_ROOT := $(BUILD)/curl-root
+CURL := $(CURL_ROOT)/usr/bin/curl
 
 # ALSA's library and aplay/speaker-test, for sound in Linux programs (over
 # the kernel's ALSA interface, personality/linux/sound.c).
@@ -195,7 +196,7 @@ MY_DISK := $(BUILD)/my-disk.img
 USER_OBJS := $(LIBVEXA_OBJS) \
 	$(patsubst %,$(BUILD)/%.o,$(wildcard $(addsuffix /*.c,$(addprefix userland/,$(PROGRAMS)))))
 
-.PHONY: all openssl curl mesa alsa kernel programs iso run run-disk run-nographic test test-disks clean distclean \
+.PHONY: all openssl curl mesa alsa linux-tarballs kernel programs iso run run-disk run-nographic test test-disks clean distclean \
 	busybox busybox-source bash coreutils python x11 test-native test-quick native-iso \
 	test-bios test-uefi test-safe test-native-boot
 
@@ -409,6 +410,7 @@ $(OPENSSL): $(OPENSSL_TARBALL) | $(BUILD)/linux-headers
 		> $(OPENSSL_BUILD)/install.log 2>&1
 	# (Its pkg-config files, for building curl and Python, point at the copy here.)
 	sed -i 's|^prefix=.*|prefix=$(abspath $(OPENSSL_ROOT))/usr|' $(OPENSSL_ROOT)/usr/lib/pkgconfig/*.pc
+	install -D -m 644 $(OPENSSL_BUILD)/apps/openssl.cnf $(OPENSSL_ROOT)/etc/ssl/openssl.cnf
 	touch $@
 
 openssl: $(OPENSSL)
@@ -427,6 +429,7 @@ $(CURL): $(CURL_TARBALL) $(OPENSSL) $(ZLIB) | $(BUILD)/linux-headers
 		--without-libpsl --without-brotli --without-zstd --without-libidn2 \
 		--without-nghttp2 --disable-ldap --disable-manual > configure.log
 	$(MAKE) -C $(CURL_BUILD) -j$$(nproc) > $(CURL_BUILD)/build.log 2>&1
+	install -D $(CURL_BUILD)/src/curl $@
 
 curl: $(CURL)
 
@@ -458,6 +461,8 @@ $(ALSA): $(ALSA_LIB_TARBALL) $(ALSA_UTILS_TARBALL) | $(BUILD)/linux-headers
 		--with-udev-rules-dir=/tmp > configure.log
 	$(MAKE) -C $(BUILD)/alsa-utils-$(ALSA_UTILS_VERSION)/aplay > /dev/null
 	$(MAKE) -C $(BUILD)/alsa-utils-$(ALSA_UTILS_VERSION)/speaker-test > /dev/null
+	install -D $(BUILD)/alsa-utils-$(ALSA_UTILS_VERSION)/aplay/aplay \
+		$(BUILD)/alsa-utils-$(ALSA_UTILS_VERSION)/speaker-test/speaker-test -t $(ALSA_ROOT)/usr/bin
 	touch $@
 
 alsa: $(ALSA)
@@ -491,6 +496,10 @@ $(PYTHON): $(PYTHON_TARBALL) $(ZLIB) $(LIBFFI) $(OPENSSL) tools/prune-python.sh 
 	touch $@
 
 python: $(PYTHON)
+
+# The sources of the Linux programs built above (for CI, which keeps their builds).
+linux-tarballs: $(ZLIB_TARBALL) $(LIBFFI_TARBALL) $(OPENSSL_TARBALL) $(CURL_TARBALL) \
+	$(ALSA_LIB_TARBALL) $(ALSA_UTILS_TARBALL) $(PYTHON_TARBALL)
 
 # ---- /linux ----
 
@@ -546,7 +555,7 @@ $(LINUX_ROOT)/.done: $(BUSYBOX) $(BASH) $(COREUTILS) $(PYTHON) $(X11) $(MUSL_LIB
 	mkdir -p $(LINUX_ROOT)/etc/ssl/certs
 	cp tools/linux-files/ca-certificates.crt $(LINUX_ROOT)/etc/ssl/certs/
 	ln -sf certs/ca-certificates.crt $(LINUX_ROOT)/etc/ssl/cert.pem
-	cp $(OPENSSL_BUILD)/apps/openssl.cnf $(LINUX_ROOT)/etc/ssl/
+	cp $(OPENSSL_ROOT)/etc/ssl/openssl.cnf $(LINUX_ROOT)/etc/ssl/
 	# OpenGL (tools/build-mesa.sh): Mesa's libraries, LLVM, LLVM's C++ runtime.
 	cp -a $(MESA_ROOT)/usr/lib/libc++.so.1* $(MESA_ROOT)/usr/lib/libc++abi.so.1* \
 		$(MESA_ROOT)/usr/lib/libunwind.so.1* $(MESA_ROOT)/usr/lib/libLLVM*.so* \
@@ -560,8 +569,7 @@ $(LINUX_ROOT)/.done: $(BUSYBOX) $(BASH) $(COREUTILS) $(PYTHON) $(X11) $(MUSL_LIB
 	cp -a $(ALSA_ROOT)/usr/lib/libasound.so.2* $(LINUX_ROOT)/usr/lib/
 	cp -a $(ALSA_ROOT)/usr/share/alsa $(LINUX_ROOT)/usr/share/
 	cp tools/linux-files/asound.conf $(LINUX_ROOT)/etc/asound.conf
-	install -s $(BUILD)/alsa-utils-$(ALSA_UTILS_VERSION)/aplay/aplay \
-		$(BUILD)/alsa-utils-$(ALSA_UTILS_VERSION)/speaker-test/speaker-test $(LINUX_ROOT)/usr/bin/
+	install -s $(ALSA_ROOT)/usr/bin/aplay $(ALSA_ROOT)/usr/bin/speaker-test $(LINUX_ROOT)/usr/bin/
 	ln -sf aplay $(LINUX_ROOT)/usr/bin/arecord
 	touch $@
 

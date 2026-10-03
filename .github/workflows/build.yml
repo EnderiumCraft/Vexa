@@ -76,6 +76,39 @@ jobs:
             "third_party/mesa-${{ steps.mesa-versions.outputs.mesa }}.tar.gz"
           touch build/mesa-root/.done
 
+      # The Linux programs built from source with their libraries (Python,
+      # OpenSSL, curl, ALSA): kept until their part of the Makefile changes.
+      - name: Work out the key of the Linux programs' build
+        id: linux-libs
+        run: |
+          key=$( { sed -n '/^# zlib (for Python/,/^# X: the libraries/p' Makefile
+                   sed -n '/^\$(ZLIB_TARBALL):/,/^python: /p' Makefile
+                   cat tools/prune-python.sh tools/musl-cc-wrapper.sh; } | sha256sum | cut -c1-20)
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the Linux programs' build
+        id: linux-libs-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            build/zlib
+            build/libffi
+            build/openssl-root
+            build/curl-root
+            build/alsa-root
+            build/python-root
+          key: linux-libs-${{ steps.linux-libs.outputs.key }}
+
+      - name: Mark the restored Linux programs' build as up to date
+        if: steps.linux-libs-cache.outputs.cache-hit == 'true'
+        run: |
+          # Their sources (releases carry some of them), older than the builds.
+          make linux-tarballs
+          touch -d '2000-01-01' third_party/*.tar.*
+          touch build/zlib/lib/libz.a build/libffi/lib/libffi.a
+          touch build/openssl-root/.done
+          touch build/curl-root/usr/bin/curl build/alsa-root/.done build/python-root/.done
+
       - name: Build ISO (with BusyBox, bash, coreutils, Python and X, built from source)
         run: make && make busybox-source
 
