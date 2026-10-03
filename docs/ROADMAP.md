@@ -101,9 +101,10 @@ registers survive being interrupted.
 - [x] CDs: ATAPI drives on AHCI and ISO 9660 with Rock Ridge; the Linux programs and
       libraries are read from the boot CD instead of living in memory (0.14.0)
 - [x] USB storage (0.27.0)
+- [x] Installing on a disk and starting from it: the Installer app and `install`
+      (GPT, FAT32 ESP, ext2 root, Limine for BIOS and UEFI), `root=UUID=` (0.28.0)
 - [ ] Moved to later phases: ext4, a journal or
-      another crash-safe file system, finer-grained VFS locking, running `vinit` from a
-      disk as the root file system
+      another crash-safe file system, finer-grained VFS locking
 
 **Milestone:** boot from a disk image and read files from it. Reached: disks are
 mounted under `/mnt`, and `run /mnt/vda1/hello-world` runs a program from one. `make test`
@@ -172,7 +173,8 @@ Linux track:
 
 ## Phase 7: Networking
 
-- [x] virtio-net driver (QEMU), with MSI-X interrupts (0.11.0); Intel e1000 still to come
+- [x] virtio-net driver (QEMU), with MSI-X interrupts (0.11.0); wired cards on real PCs:
+      Intel e1000 and e1000e, Realtek RTL8139 and RTL8111/8168 (0.28.0). Wi-Fi later
 - [x] TCP/IP stack: Ethernet, ARP, IPv4, ICMP, UDP, TCP; DHCP client; loopback (0.11.0).
       IPv6, IP fragments, window scaling and congestion control come later
 - [x] Native socket API in the core (`vx_socket`, `vx_send`, `vx_poll`...); the Linux

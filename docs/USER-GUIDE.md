@@ -5,6 +5,7 @@ and its apps, and the Linux programs that come with it. For building Vexa and
 writing programs for it, see the [developer guide](DEVELOPER-GUIDE.md).
 
 - [Starting Vexa](#starting-vexa)
+- [Installing Vexa on a disk](#installing-vexa-on-a-disk)
 - [The shell](#the-shell)
 - [Commands](#commands)
 - [Files and folders](#files-and-folders)
@@ -57,6 +58,38 @@ Then `vinit`, the first program, shows a welcome message and starts the shell:
 ```
 vexa:/>
 ```
+
+## Installing Vexa on a disk
+
+From the CD (or a USB stick made from the ISO), Vexa can put itself on a disk, so the
+computer starts it from there, without the CD, and keeps what you change: files,
+settings, installed apps. **Everything on that disk is erased.**
+
+- In the desktop: **Install Vexa** (in the Vexa menu, or search for it). Choose the
+  disk, choose whether the Linux programs (bash, Python, X, GTK...: about 190 MB) come
+  along, confirm, and wait; then take the CD out and restart.
+- At the shell: `install --list` lists the disks it can use, and `install vda` installs
+  on one (`--no-linux` leaves the Linux programs out; `--yes` doesn't ask first).
+
+The disk gets a GPT partition table with two partitions: a 128 MiB FAT32 one with the
+kernel and the boot menu (Limine, which starts with BIOS and UEFI firmware alike), and
+the rest, ext2, for the system and your files, mounted at `/`. The boot menu has the
+same entries as the CD's; they find the system by its file system's UUID
+(`root=UUID=...`), so it doesn't matter which disk it is to the firmware. The disk needs
+at least 512 MiB (1 GiB with the Linux programs).
+
+In QEMU:
+
+```sh
+truncate -s 2G vexa-disk.img
+qemu-system-x86_64 -M q35 -m 2G -cdrom vexa.iso -drive file=vexa-disk.img,if=virtio,format=raw
+# install, then, without the CD:
+qemu-system-x86_64 -M q35 -m 2G -drive file=vexa-disk.img,if=virtio,format=raw
+```
+
+Started from the disk, `/tmp` and `/run` are still emptied at each start (they're in
+memory), and there's no `/cdrom`. ext2 has no journal: turning the computer off
+without shutting down can leave the file system needing a check (`e2fsck`, on Linux).
 
 ## The shell
 
@@ -335,6 +368,12 @@ every second; a click on a column sorts by it. Below, CPU and memory over the la
 minute. Select a process and **Quit** asks it to stop (SIGTERM; Delete does the same),
 **Force Quit** stops it (SIGKILL).
 
+### Install Vexa
+
+Puts Vexa on a disk (see [Installing Vexa on a disk](#installing-vexa-on-a-disk)): the
+disks, the Linux programs or not, a last warning that the disk will be erased, and the
+install's steps as it goes. It only installs when Vexa was started from the CD.
+
 ### Device Manager
 
 Every device Vexa found and which driver has it: processors, the display, disks and
@@ -580,6 +619,13 @@ X programs get a D-Bus session bus, started with the X server (`xrun` sets
 `dbus-send` and `dbus-monitor` are there to look at it.
 
 ## Network
+
+Vexa drives these wired network cards: virtio-net (QEMU's and other virtual
+machines'), **Intel** PRO/1000 cards (e1000 and e1000e: 82540 to 82574, and the I217,
+I218 and I219 built into many PCs' boards) and **Realtek** RTL8139 and RTL8111/8168
+(also very common on boards). The cards are `eth0`, `eth1`... in the order they're
+found; `net` and Device Manager list them. Wi-Fi isn't supported yet. In QEMU,
+`-device e1000,netdev=n0`, `e1000e` and `rtl8139` try the other drivers.
 
 With a network card (QEMU's `virtio-net-pci`), Vexa gets an address by DHCP when it
 starts. In QEMU's user-mode network: Vexa is 10.0.2.15, the router (and your machine)

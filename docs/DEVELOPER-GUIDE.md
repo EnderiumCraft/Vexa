@@ -75,14 +75,16 @@ also boots on real PCs from a USB stick or CD, with BIOS or UEFI.
 
 ## Testing
 
-`make test` is the main test. It boots the ISO in QEMU four ways, **at once**:
+`make test` is the main test. It boots the ISO in QEMU four ways, **at once**, and
+installs it on a disk:
 
 | Target | Machine |
 | --- | --- |
 | `test-bios` | BIOS, 1 CPU, 512 MiB, with virtio, SATA and NVMe test disks |
-| `test-uefi` | UEFI (OVMF), 4 CPUs, 6 GiB, `-cpu max` (AVX, SMEP, SMAP), and USB (`--usb`) |
-| `test-safe` | the safe mode boot (no ACPI, the legacy PIC and PIT) |
+| `test-uefi` | UEFI (OVMF), 4 CPUs, 6 GiB, `-cpu max` (AVX, SMEP, SMAP), USB (`--usb`), and an Intel e1000e card |
+| `test-safe` | the safe mode boot (no ACPI, the legacy PIC and PIT), with an Intel e1000 card |
 | `test-native-boot` | a kernel built with `LINUX_COMPAT=0` |
+| `test-install` | `tools/install-test.sh`: the Installer app puts Vexa on an empty disk (`--install`); `e2fsck` checks it; then the disk starts without the CD, with BIOS and with UEFI (`--installed`), and a file written at the first start is read at the second |
 
 Each boot is driven by `tools/qemu-smoke-test.py`: it types commands on QEMU's virtual
 keyboard, moves and clicks the virtual mouse, and waits for the expected text in the
@@ -111,6 +113,9 @@ run. At the end of the desktop checks, Device Manager watches a stick come and g
 the desktop's notifications say so, and a USB tablet moves the pointer.
 In this mode each check looks only at what came after the step before it, since earlier
 checks were skipped.
+
+**Network cards**: `--nic` picks QEMU's card (`virtio-net-pci` by default; `e1000`,
+`e1000e`, `rtl8139`), and the network checks run over it.
 
 **The test list.** `TYPED_COMMANDS`, `LINUX_COMMANDS` and `DISK_COMMANDS` in
 `tools/qemu-smoke-test.py` are lists of `(command, expected text, seconds[, count])`:

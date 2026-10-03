@@ -162,7 +162,8 @@ file descriptors onto the same table.
 Files live in one tree managed by the **VFS** (`core/vfs.c`). File systems plug in
 underneath it:
 
-- `tmpfs`: in memory; the root file system, filled from `initramfs.tar` at boot
+- `tmpfs`: in memory; the root file system, filled from `initramfs.tar` at boot (or,
+  started from an installed disk, only `/tmp` and `/run`)
 - `devfs`: `/dev`, with `null`, `zero`, `console` and every disk and partition
 - `ext2`: disks, mounted at `/mnt/<disk>`
 - `iso9660`: CDs (read-only, with Rock Ridge names, permissions and links), mounted at
@@ -176,6 +177,19 @@ Disks sit behind the block layer (`core/block.c`), which caches them in 4 KiB ch
 reads partition tables, and calls the drivers (`dev/virtio_blk.c`, `dev/ahci.c`,
 `dev/nvme.c`). AHCI drives CD/DVD drives too, through ATAPI (SCSI commands in a
 PACKET command), as `cd0`... with 2048-byte sectors.
+
+**Root on a disk.** With `root=UUID=<uuid>` (or `root=vda2`) on the kernel's command
+line, `init.c` looks for that ext2 file system among the disks (`storage_find_root`)
+and mounts it at `/` instead of unpacking the initramfs, which then isn't needed. That's
+how an installed system starts: `/bin/install` (`userland/install/`) writes a GPT
+partition table, a FAT32 ESP and an ext2 file system with its own code (no Linux tools),
+copies the running system into it, puts the kernel, Limine and a `limine.conf` with
+`root=UUID=` on the ESP, and runs Limine's own `limine bios-install` (built for Vexa
+from `limine/limine.c`, as `/bin/limine`) for BIOS booting; UEFI firmware finds
+`EFI/BOOT/BOOTX64.EFI` by itself. The disk is asked about itself and told to read its
+partition table again through controls on its `/dev` node (`VX_BLOCK_INFO`,
+`VX_BLOCK_RESCAN`); a rescan mounts the new partitions. The Installer app runs
+`/bin/install` and reads its steps (`step:`, `progress:`, `error:` lines) from a pipe.
 
 ## Graphics and input today
 
@@ -319,8 +333,11 @@ PACKET command), as `cd0`... with 2048-byte sectors.
 
 ## Networking today
 
-`net/` is Vexa's own TCP/IP stack; `dev/virtio_net.c` is the one network card driver so
-far.
+`net/` is Vexa's own TCP/IP stack. The network card drivers: `dev/virtio_net.c`,
+`dev/e1000.c` (Intel e1000 and e1000e: legacy descriptor rings, MSI where the card has
+it) and `dev/realtek.c` (RTL8139, with its single receive ring buffer, and
+RTL8111/8168, with descriptor rings). Each registers with `net_register` under the next
+`ethN` name.
 
 - **One lock and one thread.** All protocol state is under `net_lock`, a sleeping
   mutex. A card's interrupt only wakes the network thread, which takes received frames
