@@ -608,13 +608,22 @@ def sound_frequency(path, start=44):
     end = start + (len(data) - start) // (2 * channels) * 2 * channels
     samples = struct.unpack("<%dh" % ((end - start) // 2), data[start:end])
     left = samples[::channels]
-    loud = [i for i, v in enumerate(left) if abs(v) > 3000]
-    if len(loud) < rate // 10:
+    # The pitch of each loud 50 ms piece, and the middle one of those: a
+    # moment of silence (a slow machine falling behind) or the end of an
+    # earlier sound recorded late doesn't change it.
+    size = rate // 20
+    pitches = []
+    for at in range(0, len(left) - size + 1, size):
+        piece = left[at:at + size]
+        if sum(abs(v) for v in piece) / size < 3000:
+            continue
+        crossings = [i for i in range(size - 1) if (piece[i] < 0) != (piece[i + 1] < 0)]
+        if len(crossings) > 2:  # Half periods between the first crossing and the last.
+            pitches.append((len(crossings) - 1) / 2 / ((crossings[-1] - crossings[0]) / rate))
+    if len(pitches) < 2:
         return 0, 0, end
-    part = left[loud[0]:loud[-1] + 1]
-    crossings = sum(1 for a, b in zip(part, part[1:]) if (a < 0) != (b < 0))
-    seconds = len(part) / rate
-    return crossings / 2 / seconds, seconds, end
+    pitches.sort()
+    return pitches[len(pitches) // 2], len(pitches) / 20, end
 
 
 def main():
