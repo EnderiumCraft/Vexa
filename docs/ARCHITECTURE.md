@@ -175,8 +175,10 @@ underneath it:
 
 Disks sit behind the block layer (`core/block.c`), which caches them in 4 KiB chunks,
 reads partition tables, and calls the drivers (`dev/virtio_blk.c`, `dev/ahci.c`,
-`dev/nvme.c`). AHCI drives CD/DVD drives too, through ATAPI (SCSI commands in a
-PACKET command), as `cd0`... with 2048-byte sectors.
+`dev/nvme.c`, `dev/ata.c`). AHCI drives CD/DVD drives too, through ATAPI (SCSI commands
+in a PACKET command), as `cd0`... with 2048-byte sectors; so does `ata.c`, the IDE driver
+(PIIX and other controllers in IDE mode: disks `hda`... and CDs, by PIO), which
+VirtualBox gives a new machine's CD drive.
 
 **Root on a disk.** With `root=UUID=<uuid>` (or `root=vda2`) on the kernel's command
 line, `init.c` looks for that ext2 file system among the disks (`storage_find_root`)

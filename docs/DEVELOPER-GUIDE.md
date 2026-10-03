@@ -83,7 +83,7 @@ installs it on a disk:
 | `test-bios` | BIOS, 1 CPU, 512 MiB, with virtio, SATA and NVMe test disks |
 | `test-uefi` | UEFI (OVMF), 4 CPUs, 6 GiB, `-cpu max` (AVX, SMEP, SMAP), USB (`--usb`), and an Intel e1000e card |
 | `test-safe` | the safe mode boot (no ACPI, the legacy PIC and PIT), with an Intel e1000 card |
-| `test-native-boot` | a kernel built with `LINUX_COMPAT=0` |
+| `test-native-boot` | a kernel built with `LINUX_COMPAT=0`, on QEMU's `pc` machine (i440FX: the CD on IDE, as in VirtualBox), with OHCI USB |
 | `test-install` | `tools/install-test.sh`: the Installer app puts Vexa on an empty disk (`--install`); `e2fsck` checks it; then the disk starts without the CD, with BIOS and with UEFI (`--installed`), and a file written at the first start is read at the second |
 
 Each boot is driven by `tools/qemu-smoke-test.py`: it types commands on QEMU's virtual

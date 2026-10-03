@@ -5,9 +5,10 @@
  * drives (master and slave): disks (hda, hdb...) and CD/DVD drives (cd0...,
  * through ATAPI: SCSI commands in a PACKET command).
  *
- * Data moves by PIO (16 bits at a time through the data register), and the
- * driver waits by checking the status register, without interrupts: simple,
- * and fast enough for a CD or a small disk. The controller's own DMA engine
+ * Data moves by PIO (16 bits at a time through the data register). A channel
+ * at the old fixed ports has its old fixed interrupt (IRQ 14 or 15), which
+ * the waiting thread sleeps until; one in native mode (a PCI interrupt, which
+ * Vexa doesn't route) is checked on instead. The controller's own DMA engine
  * (bus mastering) is left alone.
  */
 #include <vexa/arch.h>
@@ -64,7 +65,11 @@
 struct channel {
     uint16_t command, control;
     struct mutex lock; /* (Its two drives share it.) */
+    bool interrupts;
+    struct wait_queue queue; /* Woken by its interrupt. */
 };
+
+static struct channel *legacy_channels[2]; /* On IRQ 14 and 15. */
 
 struct drive {
     struct block_device block; /* (First: the block layer's pointer is the drive's.) */
@@ -94,10 +99,33 @@ static void settle(struct channel *c) {
     }
 }
 
+struct wait {
+    struct channel *channel;
+    bool drq;
+};
+
+static bool ready(void *arg) {
+    struct wait *w = arg;
+    uint8_t status = inb((uint16_t)(w->channel->control + REG_ALT_STATUS));
+    return !(status & STATUS_BUSY) &&
+           (!w->drq || (status & (STATUS_DRQ | STATUS_ERROR | STATUS_FAULT)));
+}
+
 /* Waits for BUSY to clear (and, with `drq`, for DRQ or an error). Returns
  * the status, or 0xff on a timeout. */
 static uint8_t wait_ready(struct channel *c, bool drq, uint32_t timeout_ms) {
     uint64_t deadline = timer_ms() + timeout_ms;
+    if (c->interrupts) {
+        struct wait w = {c, drq};
+        /* (A short check first: it's often done already.) */
+        for (int spins = 0; spins < 100; spins++) {
+            if (ready(&w)) {
+                return status_of(c);
+            }
+        }
+        wait_queue_wait_timeout(&c->queue, ready, &w, timeout_ms, false);
+        return ready(&w) ? status_of(c) : 0xff;
+    }
     for (int spins = 0;; spins++) {
         uint8_t status = status_of(c);
         if (!(status & STATUS_BUSY) &&
@@ -359,11 +387,29 @@ static void add_drive(struct channel *c, bool slave, struct device *controller) 
         d->block.description = "IDE disk";
     }
     drives[drive_count++] = d;
-    kprintf("[ata] %s: %s (%s), %s channel %s, polling\n", d->block.name,
+    kprintf("[ata] %s: %s (%s), %s channel %s\n", d->block.name,
             atapi ? "CD/DVD drive" : "disk", model[0] ? model : "no name",
             c->command == 0x1f0 ? "primary" : c->command == 0x170 ? "secondary" : "native",
             slave ? "slave" : "master");
     block_register(&d->block);
+}
+
+static void channel_interrupt(int which) {
+    struct channel *c = legacy_channels[which];
+    if (c) {
+        inb((uint16_t)(c->command + REG_STATUS)); /* (Acknowledges it.) */
+        wait_queue_wake_all(&c->queue);
+    }
+}
+
+static void primary_interrupt(struct interrupt_frame *frame) {
+    (void)frame;
+    channel_interrupt(0);
+}
+
+static void secondary_interrupt(struct interrupt_frame *frame) {
+    (void)frame;
+    channel_interrupt(1);
 }
 
 static void add_channel(uint16_t command, uint16_t control, struct device *controller) {
@@ -374,9 +420,23 @@ static void add_channel(uint16_t command, uint16_t control, struct device *contr
     c->command = command;
     c->control = control;
     c->lock = (struct mutex)MUTEX_INIT;
+    c->queue = (struct wait_queue)WAIT_QUEUE_INIT;
+    /* Finding the drives without interrupts (some raise one for nothing). */
     outb((uint16_t)(c->control + REG_CONTROL), CONTROL_NO_INTERRUPTS);
+    int before = drive_count;
     add_drive(c, false, controller);
     add_drive(c, true, controller);
+    if (drive_count == before) {
+        return;
+    }
+    int which = command == 0x1f0 ? 0 : command == 0x170 ? 1 : -1;
+    if (which >= 0 && !legacy_channels[which]) {
+        legacy_channels[which] = c;
+        isa_irq_enable(which ? 15 : 14, which ? secondary_interrupt : primary_interrupt);
+        inb((uint16_t)(c->command + REG_STATUS));
+        c->interrupts = true;
+        outb((uint16_t)(c->control + REG_CONTROL), 0);
+    }
 }
 
 static void probe(struct pci_device *pci) {
@@ -396,7 +456,7 @@ static void probe(struct pci_device *pci) {
         }
         add_channel(command, control, pci->node);
     }
-    device_set_details(pci->node, "IDE, PIO, polled");
+    device_set_details(pci->node, "IDE, PIO");
 }
 
 void ata_init(void) {

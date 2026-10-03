@@ -675,7 +675,9 @@ virtio disk's first partition), `/mnt/sda1` (SATA), `/mnt/nvme0n1` (NVMe), `/mnt
 (a CD). The boot CD is also `/cdrom`. `sys disks` lists the disks and partitions, and
 `sys mount` what's mounted. Files shows them in its sidebar, under Disks.
 
-It drives virtio-blk, AHCI (SATA disks and CD/DVD drives) and NVMe, reads GPT and MBR
+It drives virtio-blk, AHCI (SATA disks and CD/DVD drives), NVMe and IDE (older PCs'
+disks and CD drives as `hda`, `hdb`... and `cd0`, and VirtualBox's CD drive as it comes),
+reads GPT and MBR
 partition tables, reads and writes **ext2**, and reads CDs (ISO 9660 with Rock Ridge).
 ext4 disks are refused (their extra features aren't supported yet). ext2 has no journal:
 turning the machine off in the middle of writing can leave a disk that needs `e2fsck`

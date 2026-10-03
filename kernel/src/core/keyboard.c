@@ -123,6 +123,7 @@ void keyboard_key(struct input_device *device, uint16_t keycode, int value) {
         if (value == 1 && !is_modifier) {
             device->repeat_key = keycode;
             device->repeat_at = timer_ms() + repeat_delay_ms;
+            device->held_seen = timer_ms();
         } else if (value == 0 && device->repeat_key == keycode) {
             device->repeat_key = 0;
         }
@@ -143,12 +144,19 @@ static void repeat_thread(void *unused) {
         for (int i = 0; input_device_at(i); i++) {
             struct input_device *device = input_device_at(i);
             uint16_t key = device->repeat_key;
+            if (device->held_reports && now > device->held_seen + 300) {
+                continue; /* Not heard from since: the key may be up already. */
+            }
             if (device->soft_repeat && device->connected && key && now >= device->repeat_at) {
                 device->repeat_at = now + 1000 / repeat_rate;
                 keyboard_key(device, key, 2);
             }
         }
     }
+}
+
+void keyboard_still_held(struct input_device *device) {
+    device->held_seen = timer_ms();
 }
 
 void keyboard_soft_repeat(struct input_device *device) {

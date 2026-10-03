@@ -36,6 +36,11 @@ struct input_device {
     bool soft_repeat;
     uint16_t repeat_key;
     uint64_t repeat_at;
+    /* Keyboards that say again what's held every so often (USB ones, told
+     * to with SET_IDLE): a key repeats only while that keeps coming, so a
+     * release that arrives late (the system busy) doesn't add a repeat. */
+    bool held_reports;
+    uint64_t held_seen;
 };
 
 /* Adds the device and its /dev/input/eventN. The first two are "all
@@ -60,6 +65,8 @@ struct input_device *input_all_pointers(void);
 void keyboard_key(struct input_device *device, uint16_t keycode, int value);
 /* For keyboards that don't repeat held keys themselves: repeats from the kernel. */
 void keyboard_soft_repeat(struct input_device *device);
+/* The keyboard said again which keys are held (see held_reports). */
+void keyboard_still_held(struct input_device *device);
 /* How held keys repeat, on every keyboard. */
 int keyboard_set_repeat(const struct vx_key_repeat *repeat);
 /* Queues an event for every reader (drivers call it, also from interrupts).

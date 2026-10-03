@@ -108,7 +108,7 @@ runs X programs such as `xterm` in windows of their own on it. The kernel:
 - keeps a tree of every device and its driver, which Device Manager (an app) and
   `devices` (a command) show
 - drives disks through virtio-blk (virtual machines), AHCI (SATA disks and CD/DVD
-  drives) and NVMe, reads GPT and MBR partition tables, reads and writes ext2 file
+  drives), NVMe and IDE (older PCs, and VirtualBox's CD drive), reads GPT and MBR partition tables, reads and writes ext2 file
   systems, and reads CDs (ISO 9660 with Rock Ridge): the Linux programs and libraries
   are read from the boot CD when they're used, not loaded into memory at boot
 - has symbolic links, `#!` scripts, and `/proc` (in Linux's format, so `ps` and `top`

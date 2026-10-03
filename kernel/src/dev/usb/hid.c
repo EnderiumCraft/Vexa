@@ -207,6 +207,7 @@ static void keyboard_report(void *arg, const uint8_t *data, int length) {
         }
     }
     memcpy(hid->last, data, 8);
+    keyboard_still_held(hid->input);
 }
 
 static int32_t scaled(const struct field *f, int32_t value) {
@@ -337,7 +338,13 @@ static bool hid_probe(struct usb_interface *interface) {
             return false;
         }
     }
-    usb_control(usb, request, REQ_SET_IDLE, 0, interface->number, NULL, 0); /* Only changes. */
+    /* Keyboards: their report again every 100 ms while keys are held (so key
+     * repeat knows they still are); pointers: only changes. */
+    bool held_reports = keyboard && usb_control(usb, request, REQ_SET_IDLE, 25 << 8,
+                                                interface->number, NULL, 0) >= 0;
+    if (!keyboard) {
+        usb_control(usb, request, REQ_SET_IDLE, 0, interface->number, NULL, 0);
+    }
 
     uint32_t capabilities = keyboard ? VX_INPUT_KEYS
                             : hid->x.absolute ? VX_INPUT_POINTER | VX_INPUT_ABSOLUTE
@@ -355,6 +362,7 @@ static bool hid_probe(struct usb_interface *interface) {
     input->parent = usb->node;
     if (keyboard) {
         input->set_repeat = NULL;
+        input->held_reports = held_reports;
         keyboard_soft_repeat(input);
     }
     hid->input = input;
