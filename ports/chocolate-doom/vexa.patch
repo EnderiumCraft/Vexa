@@ -42,6 +42,24 @@ index 8722bb0..7bf00a1 100644
  int             show_diskicon = 1;
  
  
+diff --git a/src/i_system.c b/src/i_system.c
+index dba3590..1990983 100644
+--- a/src/i_system.c
++++ b/src/i_system.c
+@@ -331,7 +331,13 @@ void I_Error (const char *error, ...)
+     // Pop up a GUI dialog box to show the error message, if the
+     // game was not run from the console (and the user will
+     // therefore be unable to otherwise see the message).
++#ifdef __vexa__
++    // (On Vexa, a program's output is often only in the serial log, even
++    // when it looks like a console: always show the message.)
++    if (exit_gui_popup)
++#else
+     if (exit_gui_popup && !I_ConsoleStdout())
++#endif
+     {
+         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR,
+                                  PACKAGE_STRING, msgbuf, NULL);
 diff --git a/src/i_video.c b/src/i_video.c
 index 9d9c8cc..6183954 100644
 --- a/src/i_video.c

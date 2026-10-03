@@ -378,3 +378,8 @@ void block_register(struct block_device *device) {
         scan_mbr(device);
     }
 }
+
+int block_new_cd_number(void) {
+    static int next;
+    return __atomic_fetch_add(&next, 1, __ATOMIC_RELAXED);
+}

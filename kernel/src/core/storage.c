@@ -8,6 +8,7 @@
 void virtio_blk_init(void);                     /* dev/virtio_blk.c */
 void ahci_init(void);                           /* dev/ahci.c */
 void nvme_init(void);                           /* dev/nvme.c */
+void ata_init(void);                            /* dev/ata.c */
 bool ext2_probe(struct block_device *device);   /* fs/ext2.c */
 bool iso9660_probe(struct block_device *device); /* fs/iso9660.c */
 
@@ -80,6 +81,7 @@ void storage_probe(void) {
     virtio_blk_init();
     ahci_init();
     nvme_init();
+    ata_init();
 }
 
 /* An ext2 file system's UUID ("8-4-4-4-12" hex digits) and name. */

@@ -43,6 +43,8 @@ int block_rescan(struct block_device *disk);
  * tree entry (the storage code calls it after mounting). */
 void block_update_details(struct block_device *disk);
 struct block_device *block_first(void); /* Iterate with ->next. */
+/* The next CD/DVD drive's number (cd0, cd1...), whichever driver has it. */
+int block_new_cd_number(void);
 uint64_t block_size_bytes(struct block_device *device);
 
 /* Byte-granular access through the block cache. Writes go straight through

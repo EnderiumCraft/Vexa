@@ -1,7 +1,8 @@
 #!/bin/sh
 # Installs Vexa on an empty disk image with the Installer app (from the CD),
 # checks the new file system, and starts from the disk, without the CD, with
-# BIOS and then UEFI firmware (the second time, what the first wrote is there).
+# BIOS and then UEFI firmware (the second time, what the first wrote is there,
+# from an IDE disk).
 set -e
 dir=$(mktemp -d /tmp/vexa-install-XXXXXX)
 trap 'rm -rf "$dir"' EXIT
@@ -15,4 +16,5 @@ if command -v e2fsck > /dev/null; then
     rm -f "$dir/root.img"
 fi
 tools/qemu-smoke-test.py --memory 1G --installed "$disk"
-tools/qemu-smoke-test.py --memory 1G --installed "$disk" --uefi --boot 2
+# (The second time on an older PC's IDE: QEMU's i440FX machine.)
+tools/qemu-smoke-test.py --memory 1G --installed "$disk" --uefi --boot 2 --machine pc --disk-bus ide

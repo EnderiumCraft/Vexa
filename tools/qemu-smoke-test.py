@@ -298,10 +298,15 @@ TYPED_COMMANDS = ([
     ("@sendkey ret", None, 3),
     ("@sendkey alt-f4", "desktop: asked window", 10),
     ("@sendkey y", 'desktop: closed window', 30),
-    # Its first demo, played as fast as it goes (without drawing it).
+    # Its first demo, played as fast as it goes (without drawing it, or sound:
+    # the SDL demo's chime is listened for later).
     ("@sendkey ctrl-alt-t", "term: tab 1 of 1", 20, 4),
-    ("@type chocolate-doom -timedemo demo1 -nodraw > /dev/console 2> /dev/console",
+    ("@type chocolate-doom -timedemo demo1 -nodraw -nosound -nogui > /dev/console 2> /dev/console",
      "gametics in", 600),
+    # An error (no such WAD) shows in a window (SDL's message box), which
+    # Enter closes.
+    ("@type chocolate-doom -iwad missing.wad", '"Chocolate Doom 3.1.0" (460x', 60),
+    ("@sendkey ret", "desktop: closed window", 20),
     ("@type exit", None, 5),
     ("@sendkey ctrl-alt-q", "desktop: asking before leaving", 20),
     ("@sendkey ret", "desktop: back to the console", 20),
@@ -827,6 +832,11 @@ def main():
                         help="install Vexa on this (empty) disk image, from the desktop")
     parser.add_argument("--installed", metavar="DISK",
                         help="start from this disk image, with Vexa installed on it (no CD)")
+    parser.add_argument("--machine", default="q35", choices=["q35", "pc"],
+                        help="QEMU's machine: q35 (SATA, AHCI) or pc (i440FX: IDE, as in "
+                             "VirtualBox's default setup)")
+    parser.add_argument("--disk-bus", default="virtio", choices=["virtio", "ide"],
+                        help="with --install or --installed: how that disk is attached")
     parser.add_argument("--boot", type=int, default=1,
                         help="with --installed: which time it is that the disk starts")
     parser.add_argument("--safe-mode", action="store_true",
@@ -839,7 +849,7 @@ def main():
     mon_path = os.path.join(tmp, "monitor.sock")
     open(log_path, "w").close()
     command = [
-        "qemu-system-x86_64", "-M", "q35", "-m", args.memory, "-smp", str(args.smp),
+        "qemu-system-x86_64", "-M", args.machine, "-m", args.memory, "-smp", str(args.smp),
         *(["-boot", "c"] if args.no_cd or args.installed else ["-cdrom", args.iso, "-boot", "d"]),
         "-serial", "file:" + log_path, "-display", "none",
         "-no-reboot", "-monitor", "unix:" + mon_path + ",server,nowait",
@@ -860,7 +870,7 @@ def main():
     commands = list(TYPED_COMMANDS)
     if args.install or args.installed:
         commands = list(INSTALL_COMMANDS if args.install else INSTALLED_COMMANDS)
-        command += ["-drive", f"file={args.install or args.installed},if=virtio,format=raw"]
+        command += ["-drive", f"file={args.install or args.installed},if={args.disk_bus},format=raw"]
         args.no_linux = True
     if not args.no_linux:
         at = next(i for i, c in enumerate(commands) if c[0] == "ps")

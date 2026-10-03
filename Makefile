@@ -860,7 +860,7 @@ test-install: $(ISO)
 	tools/install-test.sh
 
 test-native-boot:
-	tools/qemu-smoke-test.py --no-linux --iso $(BUILD)/native/vexa.iso --usb ohci
+	tools/qemu-smoke-test.py --no-linux --iso $(BUILD)/native/vexa.iso --usb ohci --machine pc
 test-native: native-iso
 	$(MAKE) --no-print-directory test-native-boot
 

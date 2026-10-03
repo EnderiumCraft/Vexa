@@ -97,7 +97,7 @@ struct ahci_port {
 
 #define MAX_PORTS 32
 static struct ahci_port *ports[MAX_PORTS];
-static int port_count, disk_count, cd_count;
+static int port_count, disk_count;
 static volatile uint32_t *interrupt_hbas[4];
 static int interrupt_hba_count;
 
@@ -293,7 +293,7 @@ static void setup_port(volatile uint32_t *hba, int number, bool interrupts) {
             port_count--;
             return;
         }
-        ksnprintf(port->block.name, sizeof(port->block.name), "cd%d", cd_count++);
+        ksnprintf(port->block.name, sizeof(port->block.name), "cd%d", block_new_cd_number());
         port->block.sector_count = (uint64_t)last + 1;
         port->block.sector_size = CD_SECTOR;
         port->block.read = cd_read;

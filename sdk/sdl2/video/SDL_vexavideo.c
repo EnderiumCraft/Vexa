@@ -23,9 +23,11 @@
 #include "../../events/SDL_dropevents_c.h"
 #include "../../events/scancodes_linux.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <vexa/abi.h>
 #include <vexa/desktop.h>
 #include <vexa/gui.h>
 
@@ -456,6 +458,8 @@ static void VEXA_DeleteDevice(SDL_VideoDevice *device)
     SDL_free(device);
 }
 
+static int VEXA_DeviceShowMessageBox(_THIS, const SDL_MessageBoxData *data, int *buttonid);
+
 static SDL_VideoDevice *VEXA_CreateDevice(void)
 {
     SDL_VideoDevice *device = (SDL_VideoDevice *)SDL_calloc(1, sizeof(SDL_VideoDevice));
@@ -476,14 +480,147 @@ static SDL_VideoDevice *VEXA_CreateDevice(void)
     device->SetClipboardText = VEXA_SetClipboardText;
     device->GetClipboardText = VEXA_GetClipboardText;
     device->HasClipboardText = VEXA_HasClipboardText;
+    device->ShowMessageBox = VEXA_DeviceShowMessageBox;
     device->free = VEXA_DeleteDevice;
     return device;
+}
+
+/* SDL_ShowMessageBox: a small window of its own, with the message (wrapped)
+ * and the buttons; Enter and Escape choose the buttons marked for them. */
+
+#define BOX_WIDTH 460
+#define BOX_BUTTON_WIDTH 96
+#define BOX_LINES 16
+
+static int wrap_message(const char *message, char lines[BOX_LINES][128], int width)
+{
+    int count = 0;
+    const char *p = message ? message : "";
+    while (*p && count < BOX_LINES) {
+        char line[128];
+        int length = 0, last_space = -1;
+        while (p[length] && p[length] != '\n' && length < 127) {
+            line[length] = p[length];
+            line[length + 1] = '\0';
+            if (p[length] == ' ') {
+                last_space = length;
+            }
+            if (vx_text_width(line) > width && last_space > 0) {
+                length = last_space;
+                break;
+            }
+            length++;
+        }
+        SDL_memcpy(lines[count], p, (size_t)length);
+        lines[count][length] = '\0';
+        count++;
+        p += length;
+        if (*p == ' ' || *p == '\n') {
+            p++;
+        }
+    }
+    return count;
+}
+
+static int VEXA_ShowMessageBox(const SDL_MessageBoxData *data, int *buttonid)
+{
+    char lines[BOX_LINES][128];
+    int count = wrap_message(data->message, lines, BOX_WIDTH - 40);
+    int buttons = data->numbuttons > 0 ? data->numbuttons : 0;
+    int height = 24 + count * VX_LINE_HEIGHT + 24 + 30 + 16;
+    int hot = -1, held = 0;
+    struct vx_window *box;
+    struct vx_gui_event e;
+
+    printf("SDL message box: %s: %s\n", data->title ? data->title : "",
+           data->message ? data->message : "");
+    fflush(stdout);
+    *buttonid = -1;
+    box = vx_window_create(data->title ? data->title : "", BOX_WIDTH, height);
+    if (!box) {
+        return SDL_SetError("Vexa: no desktop to show a message on");
+    }
+    for (;;) {
+        struct vx_surface *s = &box->surface;
+        int i, x, by = height - 46;
+        vx_fill(s, 0, 0, s->width, s->height, VX_COLOR_WINDOW);
+        if (data->flags & SDL_MESSAGEBOX_ERROR) {
+            vx_fill(s, 0, 0, 6, s->height, 0xd9534f);
+        } else if (data->flags & SDL_MESSAGEBOX_WARNING) {
+            vx_fill(s, 0, 0, 6, s->height, 0xf0ad4e);
+        }
+        for (i = 0; i < count; i++) {
+            vx_draw_text(s, 22, 20 + i * VX_LINE_HEIGHT, lines[i], VX_COLOR_TEXT, VX_TRANSPARENT);
+        }
+        /* The buttons, right to left as SDL lists them by default. */
+        for (i = 0, x = BOX_WIDTH - 20 - BOX_BUTTON_WIDTH; i < buttons; i++) {
+            vx_draw_button(s, x, by, BOX_BUTTON_WIDTH, 30, data->buttons[i].text, hot == i);
+            x -= BOX_BUTTON_WIDTH + 10;
+        }
+        vx_window_present(box, 0, 0, s->width, s->height);
+        if (vx_gui_wait(&e, -1) <= 0) {
+            break;
+        }
+        if (e.window != box->id) {
+            continue; /* (The program's other windows wait.) */
+        }
+        if (e.type == VX_GUI_CLOSE) {
+            for (i = 0; i < buttons; i++) {
+                if (data->buttons[i].flags & SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT) {
+                    *buttonid = data->buttons[i].buttonid;
+                }
+            }
+            break;
+        }
+        if (e.type == VX_GUI_KEY && e.value && (e.key == VX_KEY_ENTER || e.key == VX_KEY_ESC)) {
+            Uint32 flag = e.key == VX_KEY_ENTER ? SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT
+                                                : SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT;
+            SDL_bool found = SDL_FALSE;
+            for (i = 0; i < buttons; i++) {
+                if (data->buttons[i].flags & flag) {
+                    *buttonid = data->buttons[i].buttonid;
+                    found = SDL_TRUE;
+                }
+            }
+            if (found || buttons <= 1) {
+                if (!found && buttons == 1) {
+                    *buttonid = data->buttons[0].buttonid;
+                }
+                break;
+            }
+        }
+        if (e.type == VX_GUI_POINTER) {
+            SDL_bool click = (e.buttons & 1) && !(held & 1);
+            held = e.buttons;
+            hot = -1;
+            if (e.y >= by && e.y < by + 30) {
+                for (i = 0, x = BOX_WIDTH - 20 - BOX_BUTTON_WIDTH; i < buttons; i++) {
+                    if (e.x >= x && e.x < x + BOX_BUTTON_WIDTH) {
+                        hot = i;
+                    }
+                    x -= BOX_BUTTON_WIDTH + 10;
+                }
+            }
+            if (click && hot >= 0) {
+                *buttonid = data->buttons[hot].buttonid;
+                break;
+            }
+        }
+    }
+    vx_window_destroy(box);
+    return 0;
+}
+
+static int VEXA_DeviceShowMessageBox(_THIS, const SDL_MessageBoxData *data, int *buttonid)
+{
+    (void)_this;
+    return VEXA_ShowMessageBox(data, buttonid);
 }
 
 VideoBootStrap VEXA_bootstrap = {
     VEXA_DRIVER_NAME, "Windows on the Vexa desktop",
     VEXA_CreateDevice,
-    NULL /* no ShowMessageBox implementation */
+    VEXA_ShowMessageBox
 };
 
 #endif /* SDL_VIDEO_DRIVER_VEXA */
