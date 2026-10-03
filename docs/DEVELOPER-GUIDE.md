@@ -405,8 +405,9 @@ To add a system call: give it a number in `abi/vexa/abi.h`, handle it in
 ## Continuous integration and releases
 
 `.github/workflows/build.yml` runs on every push: it installs the tools, restores the
-cached X and GTK build (keyed on its sources and scripts), builds the ISO, runs
-`make test` (with KVM), and publishes the result:
+cached X and GTK build and the OpenGL build (keyed on their sources and scripts), builds
+the ISO, publishes it as the **Nightly** (untested, from the newest commit only), runs
+`make test` (with KVM), and if the tests pass publishes:
 
 - **Latest build**, replaced on every push
 - a **versioned release** (`vX.Y.Z`) whenever `VEXA_VERSION` in

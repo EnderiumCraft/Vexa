@@ -179,11 +179,13 @@ full plan from here to Firefox.
 
 ## Download
 
-Every push to the default branch is built and boot-tested by GitHub Actions, then
+Every push to the default branch is built and boot-tested by GitHub Actions, and
 published on the [Releases page](https://github.com/EnderiumCraft/Vexa/releases):
 
+- **[Nightly](https://github.com/EnderiumCraft/Vexa/releases/tag/nightly)**: the newest
+  ISO as soon as it's built, before the tests (it may not work), replaced on every push
 - **[Latest build](https://github.com/EnderiumCraft/Vexa/releases/tag/latest-build)**:
-  the newest ISO, replaced on every push
+  the newest ISO that passed the tests, replaced on every push
 - **Versioned releases** (`v0.1.1`, ...): created whenever `VEXA_VERSION` in
   `kernel/include/vexa/version.h` changes, and kept permanently
 
