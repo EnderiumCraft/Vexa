@@ -304,6 +304,25 @@ int vfs_mount(const char *fs, struct block_device *device, const char *source, c
     return 0;
 }
 
+void vfs_detach(const char *source) {
+    vfs_lock();
+    for (struct mount **link = &mounts; *link;) {
+        struct mount *mount = *link;
+        if (mount != root_mount && strcmp(mount->source, source) == 0) {
+            *link = mount->next;
+            if (mount->mountpoint) {
+                mount->mountpoint->mounted_here = NULL;
+                vnode_put(mount->mountpoint);
+                mount->mountpoint = NULL;
+            }
+            /* (The mount itself stays: open files' vnodes point at it.) */
+        } else {
+            link = &mount->next;
+        }
+    }
+    vfs_unlock();
+}
+
 /* ---- Operations by path ---- */
 
 static void file_destroy(struct object *object) {

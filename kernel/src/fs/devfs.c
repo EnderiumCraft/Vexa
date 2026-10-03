@@ -13,7 +13,7 @@
  * drivers add the rest as they find devices (disks and partitions, input
  * devices under /dev/input, the display...). */
 
-#define MAX_DEVICES 64
+#define MAX_DEVICES 192
 
 struct device_node {
     struct vnode vnode;
@@ -325,6 +325,19 @@ static void add_or_defer(const char *path, uint32_t type, const struct vnode_ops
 
 void devfs_add_block_device(struct block_device *device) {
     add_or_defer(device->name, VX_TYPE_BLOCK_DEVICE, &block_ops, device, NULL);
+}
+
+void devfs_remove_block_device(struct block_device *device) {
+    vfs_lock();
+    int kept = 0;
+    for (int i = 0; i < device_count; i++) {
+        if (devices[i]->block != device) {
+            devices[kept++] = devices[i];
+        }
+        /* (A removed node stays allocated: its vnode may still be in use.) */
+    }
+    device_count = kept;
+    vfs_unlock();
 }
 
 void devfs_add(const char *path, const struct vnode_ops *ops, void *data) {

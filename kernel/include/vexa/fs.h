@@ -10,6 +10,8 @@ void fs_init(void);
 
 /* devfs: adds /dev/<name> for a block device. */
 void devfs_add_block_device(struct block_device *device);
+/* ...and takes it away again (an unplugged disk). */
+void devfs_remove_block_device(struct block_device *device);
 /* devfs: adds a character device at /dev/<path> (e.g. "input/event0"),
  * making directories as needed. `data` is the driver's, for devfs_data(). */
 struct vnode_ops;

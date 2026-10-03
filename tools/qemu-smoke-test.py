@@ -441,6 +441,23 @@ USB_COMMANDS = [
     ("devices usb", "QEMU USB Keyboard  [usb-hid]", 10),
     ("devices -l usb", "port 1 of a hub", 10),
     ("devices keyboard", "PS/2 keyboard", 10),
+    # A USB stick plugged in while Vexa runs: mounted at /mnt/usb0, read and
+    # written; pulled out (its file system goes), and plugged in again.
+    ("@drive_add 0 if=none,id=stick,file=@STICK@,format=raw", None, 5),
+    ("@device_add usb-storage,bus=xhci.0,drive=stick,id=stick", "mounted usb0 at /mnt/usb0", 30),
+    ("cat /mnt/usb0/hello.txt", "Hello from a USB stick!", 10, 2),
+    ("echo written over usb > /mnt/usb0/note.txt", None, 10),
+    ("devices -l disk", "usb0 at /mnt/usb0", 10),
+    ("@device_del stick", "usb0 is gone", 20),
+    ("ls /mnt/usb0", "vexa:/> ", 10),
+    ("df", "cd0", 10),
+    ("@drive_add 0 if=none,id=stick2,file=@STICK@,format=raw", None, 5),
+    ("@device_add usb-storage,bus=xhci.0,drive=stick2,id=stick2", "mounted usb0 at /mnt/usb0", 30, 2),
+    ("cat /mnt/usb0/note.txt", "written over usb\r\n", 10),
+    # A second keyboard, plugged in and out.
+    ("@device_add usb-kbd,bus=xhci.0,id=kbd2", "usb-hid] QEMU USB Keyboard: keyboard", 20, 2),
+    ("@device_del kbd2", "QEMU USB Keyboard unplugged", 20),
+    ("echo still typing", "still typing\r\n", 10),
 ]
 
 # On the test disks (so only with --disks): apps built with the SDK (make
@@ -735,9 +752,20 @@ def main():
             kept.append(c)
     commands = kept
 
+    stick = os.path.join(tmp, "usb-stick.img")
+    if args.usb:
+        # A USB stick for the hot-plug checks: an ext2 file system with a file.
+        files = os.path.join(tmp, "usb-stick")
+        os.mkdir(files)
+        with open(os.path.join(files, "hello.txt"), "w") as f:
+            f.write("Hello from a USB stick!\n")
+        subprocess.run(["mke2fs", "-q", "-t", "ext2", "-d", files, stick, "16M"], check=True,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        disks.append((stick, 0))
+
     def fill(text):
         return (text.replace("@URL@", url).replace("@HTTPS@", https_url).replace("@SHA1@", sha1)
-                if text else text)
+                .replace("@STICK@", stick) if text else text)
     commands = [(fill(c), fill(e), *rest) for c, e, *rest in commands]
     if args.uefi:
         command += ["-bios", OVMF]

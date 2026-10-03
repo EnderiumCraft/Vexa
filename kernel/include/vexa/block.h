@@ -25,12 +25,17 @@ struct block_device {
     const char *description;
     struct device *controller;
     struct device *node;
+    bool gone;                   /* Unplugged: transfers fail (block_unregister). */
     struct block_device *next;
 };
 
 /* Adds a disk: finds its partitions (GPT or MBR) and makes /dev entries. */
 void block_register(struct block_device *device);
 struct block_device *block_find(const char *name);
+/* A disk was unplugged: its file systems are detached from the tree, its
+ * /dev entries and cached data go, and reading or writing it fails from now
+ * on (the structures stay, for files still open on it). */
+void block_unregister(struct block_device *disk);
 /* Shows a disk's size and where its file systems are mounted in its device
  * tree entry (the storage code calls it after mounting). */
 void block_update_details(struct block_device *disk);

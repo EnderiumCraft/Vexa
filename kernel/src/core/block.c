@@ -112,6 +112,9 @@ static int transfer(struct block_device *device, uint64_t offset, void *buffer, 
         return -VX_EINVAL;
     }
     struct block_device *disk = whole_disk(device, &offset);
+    if (disk->gone) {
+        return -VX_EIO;
+    }
     if (write && !disk->write) {
         return -VX_EROFS;
     }
@@ -276,6 +279,31 @@ static void scan_mbr(struct block_device *disk) {
             add_partition(disk, i + 1, first, first + count - 1);
         }
     }
+}
+
+void block_unregister(struct block_device *disk) {
+    kprintf("[block] %s is gone\n", disk->name);
+    mutex_lock(&cache_lock);
+    disk->gone = true;
+    for (int i = 0; i < CACHE_ENTRIES; i++) {
+        if (cache[i].device == disk) {
+            cache[i].device = NULL;
+        }
+    }
+    mutex_unlock(&cache_lock);
+    /* The disk and its partitions: out of the list, /dev and the tree. */
+    for (struct block_device **link = &devices; *link;) {
+        struct block_device *d = *link;
+        if (d == disk || d->parent == disk) {
+            *link = d->next;
+            vfs_detach(d->name);
+            devfs_remove_block_device(d);
+        } else {
+            link = &d->next;
+        }
+    }
+    device_remove(disk->node);
+    disk->node = NULL;
 }
 
 void block_update_details(struct block_device *disk) {

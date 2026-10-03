@@ -122,6 +122,9 @@ void vfs_unlock(void);
  * the root). */
 int vfs_mount(const char *fs, struct block_device *device, const char *source, const char *path);
 struct mount *vfs_mounts(void); /* The list of mounts (read with vfs_lock held). */
+/* Takes the file systems mounted from `source` (an unplugged disk) out of
+ * the tree. Their files still open keep working until they touch the disk. */
+void vfs_detach(const char *source);
 
 /* Operations by path. Paths are (pointer, length) pairs. */
 int vfs_open(const char *path, size_t length, uint32_t flags, struct file **out);

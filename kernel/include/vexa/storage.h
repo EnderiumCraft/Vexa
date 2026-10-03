@@ -4,5 +4,8 @@
 /* Finds storage controllers and disks, and mounts the file systems on them.
  * Runs in the init thread (it may wait for devices). */
 void storage_init(void);
+/* Mounts a disk found later (a USB stick) and its partitions. */
+struct block_device;
+void storage_mount_disk(struct block_device *disk);
 
 #endif
