@@ -218,7 +218,7 @@ static void trim(char *text) {
     }
 }
 
-static bool storage_probe(struct usb_interface *interface) {
+static bool usb_storage_probe(struct usb_interface *interface) {
     if (interface->interface_class != USB_CLASS_STORAGE || interface->subclass != 6 ||
         interface->protocol != 0x50) {
         return false; /* Only SCSI over bulk-only transport (what sticks are). */
@@ -286,7 +286,7 @@ static bool storage_probe(struct usb_interface *interface) {
     return true;
 }
 
-static void storage_disconnect(struct usb_interface *interface) {
+static void usb_storage_disconnect(struct usb_interface *interface) {
     struct storage *s = interface->driver_data;
     if (!s) {
         return;
@@ -300,6 +300,6 @@ static void storage_disconnect(struct usb_interface *interface) {
 
 const struct usb_driver usb_storage_driver = {
     .name = "usb-storage",
-    .probe = storage_probe,
-    .disconnect = storage_disconnect,
+    .probe = usb_storage_probe,
+    .disconnect = usb_storage_disconnect,
 };

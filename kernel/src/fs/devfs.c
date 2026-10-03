@@ -4,6 +4,7 @@
 #include <vexa/mm.h>
 #include <vexa/process.h>
 #include <vexa/random.h>
+#include <vexa/storage.h>
 #include <vexa/string.h>
 #include <vexa/pty.h>
 #include <vexa/tty.h>
@@ -129,7 +130,47 @@ struct tty *vfs_terminal(struct file *file) {
 bool vfs_is_terminal(struct file *file) {
     return vfs_terminal(file) != NULL;
 }
-static const struct vnode_ops block_ops = {.read = block_node_read, .write = block_node_write};
+static int block_node_control(struct file *file, uint32_t request, void *arg, size_t size) {
+    struct block_device *device = ((struct device_node *)file->vnode)->block;
+    switch (request) {
+    case VX_BLOCK_INFO: {
+        if (size < sizeof(struct vx_block_info)) {
+            return -VX_EINVAL;
+        }
+        struct vx_block_info *info = arg;
+        memset(info, 0, sizeof(*info));
+        info->size = block_size_bytes(device);
+        info->sector_size = device->sector_size;
+        info->first_sector = device->first_sector;
+        if (device->parent) { /* (Its number: what follows the disk's name.) */
+            const char *p = device->name + strlen(device->parent->name);
+            p += *p == 'p';
+            for (; *p >= '0' && *p <= '9'; p++) {
+                info->partition = info->partition * 10 + (unsigned)(*p - '0');
+            }
+        }
+        return 0;
+    }
+    case VX_BLOCK_RESCAN: {
+        if (device->parent) {
+            return -VX_EINVAL;
+        }
+        int error = block_rescan(device);
+        if (!error) {
+            storage_mount_disk(device);
+        }
+        return error;
+    }
+    default:
+        return -VX_ENOTTY;
+    }
+}
+
+static const struct vnode_ops block_ops = {
+    .read = block_node_read,
+    .write = block_node_write,
+    .control = block_node_control,
+};
 
 /* /dev/fd, /dev/stdin...: symbolic links into /proc/self/fd, as on Linux. */
 static const char *const link_targets[][2] = {

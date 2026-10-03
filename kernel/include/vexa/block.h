@@ -36,6 +36,9 @@ struct block_device *block_find(const char *name);
  * /dev entries and cached data go, and reading or writing it fails from now
  * on (the structures stay, for files still open on it). */
 void block_unregister(struct block_device *disk);
+/* Reads a disk's partition table again (after it was rewritten): its old
+ * partitions go, the new ones come. -VX_EBUSY if any of it is mounted. */
+int block_rescan(struct block_device *disk);
 /* Shows a disk's size and where its file systems are mounted in its device
  * tree entry (the storage code calls it after mounting). */
 void block_update_details(struct block_device *disk);

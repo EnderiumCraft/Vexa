@@ -6,10 +6,15 @@
 /* Kernel command line options, set in limine.conf (`cmdline:`). Recognized:
  *   acpi=off   ignore the ACPI tables
  *   noapic     use the legacy 8259 PIC and PIT instead of the APICs
- *   nosmp      use only the first CPU */
+ *   nosmp      use only the first CPU
+ *   root=UUID=<uuid>, root=<disk>   the root file system: an ext2 file system
+ *              (an installed Vexa), instead of the initramfs in memory */
 void cmdline_init(const char *cmdline);
 const char *cmdline_get(void);
 /* True if `option` appears as a whole space-separated word. */
 bool cmdline_has(const char *option);
+/* The value of `key=value` (copied into `out`); false if it isn't there. */
+#include <stddef.h>
+bool cmdline_value(const char *key, char *out, size_t size);
 
 #endif

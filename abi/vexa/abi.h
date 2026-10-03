@@ -408,6 +408,21 @@ struct vx_display_info {
     unsigned int size;          /* Bytes to map. */
 };
 
+/* ---- Disks: /dev/vda, /dev/sda1... ----
+ * Reading and writing them reads and writes the disk (or partition) itself.
+ * A whole disk also answers VX_BLOCK_RESCAN: its partition table is read
+ * again (after it was rewritten) and what's on it mounted; -VX_EBUSY while
+ * any of it is mounted. */
+#define VX_BLOCK_INFO 0x4201   /* struct vx_block_info (out) */
+#define VX_BLOCK_RESCAN 0x4202 /* no argument */
+
+struct vx_block_info {
+    unsigned long long size;  /* Bytes. */
+    unsigned int sector_size;
+    unsigned int partition;   /* 0 for a whole disk, else its number. */
+    unsigned long long first_sector; /* A partition's, on its disk. */
+};
+
 /* ---- Sound: /dev/audio0 ----
  * Write 16-bit signed little-endian samples (interleaved when stereo) and
  * they play; a write waits while the device's buffer is full. vx_control

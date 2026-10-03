@@ -308,6 +308,18 @@ def device_manager():
     return im
 
 
+def installer():
+    """A disk, with an arrow going into it."""
+    im = gradient_tile((150, 160, 255), (80, 90, 210))
+    d = ImageDraw.Draw(im)
+    white = (255, 255, 255, 255)
+    box(d, 10, 28, 38, 38, 3, (35, 40, 70, 255))
+    d.ellipse([31 * S, 32 * S, 34 * S, 35 * S], fill=(120, 230, 140, 255))
+    d.rectangle([21 * S, 8 * S, 27 * S, 18 * S], fill=white)
+    d.polygon([(15 * S, 17 * S), (33 * S, 17 * S), (24 * S, 26 * S)], fill=white)
+    return im
+
+
 def help_book():
     im = gradient_tile((80, 170, 255), (30, 100, 210))
     d = ImageDraw.Draw(im)
@@ -350,6 +362,7 @@ ICONS = {
     "Settings": settings, "About": about, "XTerm": xterm,
     "Monitor": activity, "Calculator": calculator, "Calendar": calendar,
     "Notes": notes, "Paint": paint, "Help": help_book, "DeviceManager": device_manager,
+    "Installer": installer,
 }
 
 if __name__ == "__main__":

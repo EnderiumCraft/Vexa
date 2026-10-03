@@ -704,6 +704,53 @@ def sound_frequency(path, start=44):
     return pitches[len(pitches) // 2], len(pitches) / 20, end
 
 
+# Installing (--install DISK): the Installer app puts Vexa on an empty disk
+# (without the Linux programs, to be quick), from the desktop; then the
+# install program itself would refuse a disk that's in use.
+INSTALL_COMMANDS = [
+    ("install --list", "vda", 10),
+    ("desktop", 'desktop: window 1 "Terminal"', 30),
+    ("@sendkey ctrl-spc", "desktop: search", 10),
+    ("@type Install Vexa", "installer: 1 disk", 20),
+    ("@sendkey down", None, 2),
+    ("@sendkey spc", None, 2),
+    ("@sendkey ret", None, 2),
+    ("@sendkey ret", "installer: installing on vda (no Linux)", 10),
+    ("@sendkey shift", "installer: copying the system to vda2", 120),
+    ("@sendkey shift", "installer: done", 300),
+    ("@sendkey alt-f4", "desktop: asked window", 10),
+    ("@sendkey ctrl-alt-q", "desktop: asking before leaving", 20),
+    ("@sendkey ret", "desktop: back to the console", 20),
+    ("@sendkey ctrl-u", None, 2),
+    ("install --yes vda", "error: vda is in use", 10),
+]
+
+# Starting from that disk (--installed DISK, no CD): the root file system is
+# on it, and what's written there is still there the next time (--boot 2).
+INSTALLED_COMMANDS = [
+    ("cat /etc/installed", "installed on vda", 10),
+    ("df", "ext2", 10),
+    ("ls /cdrom", "ls: /cdrom: ", 10),
+    # (@BOOT@: this boot's number. The first one's line shows the next boot
+    # kept it.)
+    ("echo boot @BOOT@ >> /home/note.txt", None, 10),
+    ("cat /home/note.txt", "boot 1", 10),
+    ("desktop", 'desktop: window 1 "Terminal"', 30),
+    ("@sendkey ctrl-alt-q", "desktop: asking before leaving", 20),
+    ("@sendkey ret", "desktop: back to the console", 20),
+]
+
+
+def insert_before_leaving_desktop(commands, extra):
+    """Puts `extra` before the desktop section's Ctrl+Alt+Q (the X section has
+    one too), if there is a desktop section."""
+    desktop = next((i for i, c in enumerate(commands) if c[0] == "#desktop"), None)
+    at = next((i for i, c in enumerate(commands)
+               if desktop is not None and i > desktop and c[0] == "@sendkey ctrl-alt-q"), None)
+    if at is not None:
+        commands[at:at] = extra
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--screenshot", help="save a PNG of the screen at the end")
@@ -716,6 +763,8 @@ def main():
     parser.add_argument("--iso", default="build/vexa.iso", help="ISO image to boot")
     parser.add_argument("--only", help="run only these sections (comma-separated: "
                         "shell, network, usb, desktop, linux, x, linux-net, disks)")
+    parser.add_argument("--no-cd", action="store_true",
+                        help="boot from the first disk (an installed Vexa), without the CD")
     parser.add_argument("--nic", default="virtio-net-pci",
                         help="QEMU's network card: virtio-net-pci, e1000, e1000e, rtl8139")
     parser.add_argument("--usb", action="store_true",
@@ -725,6 +774,12 @@ def main():
                         help="QEMU's accelerator: KVM when /dev/kvm can be opened (auto)")
     parser.add_argument("--no-linux", action="store_true",
                         help="skip the Linux subsystem checks (a LINUX_COMPAT=0 kernel)")
+    parser.add_argument("--install", metavar="DISK",
+                        help="install Vexa on this (empty) disk image, from the desktop")
+    parser.add_argument("--installed", metavar="DISK",
+                        help="start from this disk image, with Vexa installed on it (no CD)")
+    parser.add_argument("--boot", type=int, default=1,
+                        help="with --installed: which time it is that the disk starts")
     parser.add_argument("--safe-mode", action="store_true",
                         help="expect a safe mode boot (use with the ISO from "
                              "`make build/vexa-safe-mode-test.iso`)")
@@ -736,7 +791,8 @@ def main():
     open(log_path, "w").close()
     command = [
         "qemu-system-x86_64", "-M", "q35", "-m", args.memory, "-smp", str(args.smp),
-        "-cdrom", args.iso, "-boot", "d", "-serial", "file:" + log_path, "-display", "none",
+        *(["-boot", "c"] if args.no_cd or args.installed else ["-cdrom", args.iso, "-boot", "d"]),
+        "-serial", "file:" + log_path, "-display", "none",
         "-no-reboot", "-monitor", "unix:" + mon_path + ",server,nowait",
         # A network card behind QEMU's user-mode NAT: DHCP gives 10.0.2.15,
         # and 10.0.2.2 is this machine. (With -nic instead of -device, QEMU's
@@ -753,16 +809,17 @@ def main():
     url, sha1 = start_web_server(www)
     https_url = start_https_server(www)
     commands = list(TYPED_COMMANDS)
+    if args.install or args.installed:
+        commands = list(INSTALL_COMMANDS if args.install else INSTALLED_COMMANDS)
+        command += ["-drive", f"file={args.install or args.installed},if=virtio,format=raw"]
+        args.no_linux = True
     if not args.no_linux:
         at = next(i for i, c in enumerate(commands) if c[0] == "ps")
         commands[at:at] = LINUX_COMMANDS
     if args.usb:
-        at = next(i for i, c in enumerate(commands) if c[0] == "#network")
+        at = next((i for i, c in enumerate(commands) if c[0] == "#network"), len(commands))
         commands[at:at] = USB_COMMANDS
-        desktop = next(i for i, c in enumerate(commands) if c[0] == "#desktop")
-        at = next(i for i, c in enumerate(commands)
-                  if i > desktop and c[0] == "@sendkey ctrl-alt-q")
-        commands[at:at] = USB_DESKTOP_COMMANDS
+        insert_before_leaving_desktop(commands, USB_DESKTOP_COMMANDS)
     if args.disks:
         for name, qemu_args, offset in TEST_DISKS:
             copy = os.path.join(tmp, name)
@@ -770,11 +827,7 @@ def main():
             command += [a.format(copy) for a in qemu_args]
             disks.append((copy, offset))
         commands[-1:-1] = DISK_COMMANDS
-        # (Before the desktop section's Ctrl+Alt+Q: the X section has one too.)
-        desktop = next(i for i, c in enumerate(commands) if c[0] == "#desktop")
-        at = next(i for i, c in enumerate(commands)
-                  if i > desktop and c[0] == "@sendkey ctrl-alt-q")
-        commands[at:at] = SDK_APP_COMMANDS
+        insert_before_leaving_desktop(commands, SDK_APP_COMMANDS)
     # Sections: ("#name",) markers; --only keeps some of them.
     only = set(args.only.split(",")) if args.only else None
     kept, section = [], "shell"
@@ -798,7 +851,7 @@ def main():
 
     def fill(text):
         return (text.replace("@URL@", url).replace("@HTTPS@", https_url).replace("@SHA1@", sha1)
-                .replace("@STICK@", stick) if text else text)
+                .replace("@STICK@", stick).replace("@BOOT@", str(args.boot)) if text else text)
     commands = [(fill(c), fill(e), *rest) for c, e, *rest in commands]
     if args.uefi:
         command += ["-bios", OVMF]

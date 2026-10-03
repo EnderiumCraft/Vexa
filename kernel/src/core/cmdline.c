@@ -19,6 +19,28 @@ const char *cmdline_get(void) {
     return kernel_cmdline;
 }
 
+bool cmdline_value(const char *key, char *out, size_t size) {
+    size_t length = strlen(key);
+    const char *p = kernel_cmdline;
+    while (*p) {
+        while (*p == ' ') {
+            p++;
+        }
+        const char *word = p;
+        while (*p && *p != ' ') {
+            p++;
+        }
+        if ((size_t)(p - word) > length && memcmp(word, key, length) == 0 && word[length] == '=') {
+            size_t n = (size_t)(p - word) - length - 1;
+            n = n < size - 1 ? n : size - 1;
+            memcpy(out, word + length + 1, n);
+            out[n] = '\0';
+            return true;
+        }
+    }
+    return false;
+}
+
 bool cmdline_has(const char *option) {
     size_t length = strlen(option);
     const char *p = kernel_cmdline;

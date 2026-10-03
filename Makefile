@@ -206,7 +206,7 @@ MY_DISK := $(BUILD)/my-disk.img
 USER_OBJS := $(LIBVEXA_OBJS) \
 	$(patsubst %,$(BUILD)/%.o,$(wildcard $(addsuffix /*.c,$(addprefix userland/,$(PROGRAMS)))))
 
-.PHONY: all openssl curl mesa alsa linux-tarballs kernel programs iso run run-disk run-nographic test test-disks clean distclean \
+.PHONY: all openssl curl mesa alsa linux-tarballs kernel programs iso run run-disk run-nographic test test-install test-disks clean distclean \
 	busybox busybox-source bash coreutils python x11 test-native test-quick native-iso \
 	test-bios test-uefi test-safe test-native-boot sdk sdk-test
 
@@ -229,6 +229,9 @@ $(KERNEL): $(OBJS) kernel/linker.ld
 $(BUILD)/libvexa/%.o: libvexa/src/%
 	@mkdir -p $(dir $@)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+# Limine's own tool, built for Vexa (the installer runs it), needs Limine first.
+$(BUILD)/userland/limine/main.c.o: | limine/limine
 
 $(BUILD)/userland/%.c.o: userland/%.c
 	@mkdir -p $(dir $@)
@@ -764,7 +767,7 @@ run-nographic: $(ISO)
 TEST_JOBS ?= 4
 test: $(ISO) $(SAFE_ISO) $(TEST_DISKS) native-iso
 	$(MAKE) --no-print-directory --output-sync=target -j$(TEST_JOBS) \
-		test-bios test-uefi test-safe test-native-boot
+		test-bios test-uefi test-safe test-native-boot test-install
 
 test-bios:
 	tools/qemu-smoke-test.py --disks $(BUILD)/disks
@@ -777,6 +780,10 @@ test-safe:
 # Vexa must work without the Linux subsystem: build and boot a kernel without it.
 native-iso:
 	$(MAKE) BUILD=$(BUILD)/native LINUX_COMPAT=0 iso
+# Installing on a disk (the Installer app), then starting from it.
+test-install: $(ISO)
+	tools/install-test.sh
+
 test-native-boot:
 	tools/qemu-smoke-test.py --no-linux --iso $(BUILD)/native/vexa.iso
 test-native: native-iso

@@ -111,6 +111,9 @@ static int transfer(struct block_device *device, uint64_t offset, void *buffer, 
     if (offset > block_size_bytes(device) || size > block_size_bytes(device) - offset) {
         return -VX_EINVAL;
     }
+    if (device->gone) {
+        return -VX_EIO;
+    }
     struct block_device *disk = whole_disk(device, &offset);
     if (disk->gone) {
         return -VX_EIO;
@@ -279,6 +282,44 @@ static void scan_mbr(struct block_device *disk) {
             add_partition(disk, i + 1, first, first + count - 1);
         }
     }
+}
+
+static bool mounted(struct block_device *device) {
+    bool found = false;
+    vfs_lock();
+    for (struct mount *m = vfs_mounts(); m && !found; m = m->next) {
+        found = strcmp(m->source, device->name) == 0;
+    }
+    vfs_unlock();
+    return found;
+}
+
+int block_rescan(struct block_device *disk) {
+    if (disk->parent) {
+        return -VX_EINVAL;
+    }
+    for (struct block_device *d = devices; d; d = d->next) {
+        if ((d == disk || d->parent == disk) && mounted(d)) {
+            return -VX_EBUSY;
+        }
+    }
+    /* The old partitions go (their structures stay: a /dev entry may be open). */
+    for (struct block_device **link = &devices; *link;) {
+        struct block_device *d = *link;
+        if (d->parent == disk) {
+            *link = d->next;
+            devfs_remove_block_device(d);
+            d->gone = true;
+        } else {
+            link = &d->next;
+        }
+    }
+    if (!scan_gpt(disk)) {
+        scan_mbr(disk);
+    }
+    kprintf("[block] %s: partition table read again\n", disk->name);
+    block_update_details(disk);
+    return 0;
 }
 
 void block_unregister(struct block_device *disk) {

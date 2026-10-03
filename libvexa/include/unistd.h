@@ -52,6 +52,7 @@ ssize_t readlink(const char *path, char *buffer, size_t size);
 int ftruncate(int fd, off_t size);
 int truncate(const char *path, off_t size);
 int fsync(int fd);
+void sync(void);
 unsigned sleep(unsigned seconds);
 int usleep(useconds_t us);
 pid_t getpid(void);

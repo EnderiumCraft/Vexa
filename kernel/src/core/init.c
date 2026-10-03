@@ -13,6 +13,7 @@
 #include <vexa/net.h>
 #include <vexa/monitor.h>
 #include <vexa/sched.h>
+#include <vexa/block.h>
 #include <vexa/storage.h>
 #include <vexa/string.h>
 #include <vexa/usb.h>
@@ -79,13 +80,29 @@ static bool start_vinit(void) {
 void init_thread(void *unused) {
     (void)unused;
     fs_init();
-    must(vfs_mount("tmpfs", NULL, "tmpfs", "/"), "mounting the root file system");
-
-    const struct boot_module *initramfs = module_find("initramfs.tar");
-    if (initramfs) {
-        initramfs_unpack(initramfs->data, initramfs->size);
-    } else {
-        kprintf("[init] no initramfs.tar from the bootloader; the root file system is empty\n");
+    /* The root file system: an installed Vexa's disk (root=), or the initramfs
+     * unpacked into memory. */
+    char root_spec[64];
+    if (cmdline_value("root", root_spec, sizeof(root_spec))) {
+        storage_probe();
+        struct block_device *root = storage_find_root(root_spec);
+        int error = root ? vfs_mount("ext2", root, root->name, "/") : -VX_ENOENT;
+        if (!error) {
+            storage_root_on_disk = true;
+            kprintf("[init] the root file system is %s\n", root->name);
+        } else {
+            kprintf("[init] can't use %s as the root file system: %s\n", root_spec,
+                    vfs_error_name(error));
+        }
+    }
+    if (!storage_root_on_disk) {
+        must(vfs_mount("tmpfs", NULL, "tmpfs", "/"), "mounting the root file system");
+        const struct boot_module *initramfs = module_find("initramfs.tar");
+        if (initramfs) {
+            initramfs_unpack(initramfs->data, initramfs->size);
+        } else {
+            kprintf("[init] no initramfs.tar from the bootloader; the root file system is empty\n");
+        }
     }
     vfs_mkdir("/dev", 4);
     must(vfs_mount("devfs", NULL, "devfs", "/dev"), "mounting /dev");
@@ -96,6 +113,12 @@ void init_thread(void *unused) {
     vfs_mkdir("/tmp", 4);
     vfs_chmod("/tmp", 4, 01777);
     vfs_mkdir("/run", 4);
+    if (storage_root_on_disk) {
+        /* What's made fresh at each boot stays in memory. */
+        must(vfs_mount("tmpfs", NULL, "tmpfs", "/tmp"), "mounting /tmp");
+        must(vfs_mount("tmpfs", NULL, "tmpfs", "/run"), "mounting /run");
+        vfs_chmod("/tmp", 4, 01777);
+    }
     vfs_mkdir("/run/shm", 8);
     vfs_chmod("/run/shm", 8, 01777);
 

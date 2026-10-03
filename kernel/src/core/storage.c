@@ -14,7 +14,22 @@ bool iso9660_probe(struct block_device *device); /* fs/iso9660.c */
 /* Mounts an ext2 file system or a CD at /mnt/<device>, e.g. /mnt/vda1 or
  * /mnt/cd0. The first CD with Vexa's Linux files on it (the boot CD,
  * normally) is also /cdrom: /linux/usr and the like point there. */
+bool storage_root_on_disk;
+
+static bool already_mounted(struct block_device *device) {
+    bool found = false;
+    vfs_lock();
+    for (struct mount *m = vfs_mounts(); m && !found; m = m->next) {
+        found = strcmp(m->source, device->name) == 0;
+    }
+    vfs_unlock();
+    return found;
+}
+
 static void mount_one(struct block_device *device) {
+    if (already_mounted(device)) {
+        return; /* (The root file system, say.) */
+    }
     const char *fs = ext2_probe(device) ? "ext2" : iso9660_probe(device) ? "iso9660" : NULL;
     if (!fs) {
         return;
@@ -33,7 +48,7 @@ static void mount_one(struct block_device *device) {
     struct vx_stat stat;
     char linux_dir[40];
     ksnprintf(linux_dir, sizeof(linux_dir), "%s/linux", path);
-    if (fs[0] == 'i' && vfs_stat("/cdrom", 6, &stat) != 0 &&
+    if (fs[0] == 'i' && !storage_root_on_disk && vfs_stat("/cdrom", 6, &stat) != 0 &&
         vfs_stat(linux_dir, strlen(linux_dir), &stat) == 0) {
         vfs_symlink(path, "/cdrom", 6);
         kprintf("[storage] /cdrom is %s\n", path);
@@ -54,10 +69,59 @@ static void mount_disks(void) {
     }
 }
 
-void storage_init(void) {
+static bool probed;
+
+void storage_probe(void) {
+    if (probed) {
+        return;
+    }
+    probed = true;
     pci_init();
     virtio_blk_init();
     ahci_init();
     nvme_init();
+}
+
+/* An ext2 file system's UUID ("8-4-4-4-12" hex digits) and name. */
+static bool hex_uuid(const char *text, uint8_t out[16]) {
+    int n = 0;
+    for (const char *p = text; *p && n < 32; p++) {
+        int digit = *p >= '0' && *p <= '9'   ? *p - '0'
+                    : *p >= 'a' && *p <= 'f' ? *p - 'a' + 10
+                    : *p >= 'A' && *p <= 'F' ? *p - 'A' + 10
+                                             : -1;
+        if (*p == '-') {
+            continue;
+        }
+        if (digit < 0) {
+            return false;
+        }
+        out[n / 2] = (uint8_t)(n % 2 ? out[n / 2] | digit : digit << 4);
+        n++;
+    }
+    return n == 32;
+}
+
+struct block_device *storage_find_root(const char *spec) {
+    uint8_t uuid[16];
+    bool by_uuid = strncmp(spec, "UUID=", 5) == 0 && hex_uuid(spec + 5, uuid);
+    for (struct block_device *device = block_first(); device; device = device->next) {
+        if (!by_uuid) {
+            if (strcmp(device->name, spec) == 0) {
+                return device;
+            }
+            continue;
+        }
+        uint8_t super[128];
+        if (block_read_bytes(device, 1024, super, sizeof(super)) == 0 &&
+            super[56] == 0x53 && super[57] == 0xef && memcmp(super + 104, uuid, 16) == 0) {
+            return device;
+        }
+    }
+    return NULL;
+}
+
+void storage_init(void) {
+    storage_probe();
     mount_disks();
 }

@@ -162,6 +162,10 @@ int truncate(const char *path, off_t size) {
     return (int)__vx_errno_result(error);
 }
 
+/* (Vexa writes go straight to the disk: there's nothing waiting to be written.) */
+void sync(void) {
+}
+
 int fsync(int fd) {
     (void)fd;
     return 0;

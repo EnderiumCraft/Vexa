@@ -125,6 +125,11 @@ bool vx_settings_disk(char *out, size_t size) {
     struct vx_mount_info mounts[16];
     long n = vx_mounts(mounts, 16);
     for (long i = 0; i < n && i < 16; i++) {
+        if (!strcmp(mounts[i].path, "/") && !strcmp(mounts[i].type, "ext2")) {
+            return false; /* An installed Vexa: /etc and /home are on disk already. */
+        }
+    }
+    for (long i = 0; i < n && i < 16; i++) {
         if (!strcmp(mounts[i].type, "ext2") && !mounts[i].read_only) {
             copy_text(out, size, mounts[i].path);
             return true;
