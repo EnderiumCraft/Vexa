@@ -100,11 +100,19 @@ int fcntl(int fd, int command, ...) {
     switch (command) {
     case F_GETFD:
     case F_SETFD:
-    case F_SETFL:
         return 0;
+    case F_SETFL: {
+        va_list args;
+        va_start(args, command);
+        int flags = va_arg(args, int);
+        va_end(args);
+        __vx_set_nonblocking(fd, flags & O_NONBLOCK);
+        return 0;
+    }
     case F_GETFL: {
         struct vx_stat st;
-        return vx_handle_stat(fd, &st) ? (errno = EBADF, -1) : O_RDWR;
+        return vx_handle_stat(fd, &st) ? (errno = EBADF, -1)
+                                       : O_RDWR | (__vx_nonblocking(fd) ? O_NONBLOCK : 0);
     }
     default:
         errno = EINVAL;
@@ -113,10 +121,18 @@ int fcntl(int fd, int command, ...) {
 }
 
 ssize_t read(int fd, void *buffer, size_t size) {
+    if (__vx_nonblocking(fd) && __vx_is_socket(fd)) {
+        struct vx_message m = {.data = buffer, .size = size, .flags = VX_MSG_DONTWAIT};
+        return __vx_errno_result(vx_receive(fd, &m));
+    }
     return __vx_errno_result(vx_read(fd, buffer, size));
 }
 
 ssize_t write(int fd, const void *buffer, size_t size) {
+    if (__vx_nonblocking(fd) && __vx_is_socket(fd)) {
+        struct vx_message m = {.data = (void *)buffer, .size = size, .flags = VX_MSG_DONTWAIT};
+        return __vx_errno_result(vx_send(fd, &m));
+    }
     return __vx_errno_result(vx_write(fd, buffer, size));
 }
 
@@ -141,6 +157,7 @@ ssize_t pwrite(int fd, const void *buffer, size_t size, off_t offset) {
 }
 
 int close(int fd) {
+    __vx_forget_fd(fd);
     return (int)__vx_errno_result(vx_close(fd));
 }
 

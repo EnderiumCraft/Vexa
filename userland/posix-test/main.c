@@ -2,14 +2,18 @@
  * printf and scanf with floats, libm, strings and numbers, stdio files
  * (seeking, ungetc, getline), directories, stat, time, setjmp, pthreads
  * (mutexes, condition variables, keys, once, per-thread errno), semaphores,
- * mmap, popen, dup and dup2, posix_spawn with waitpid, and dlopen. Prints
+ * mmap, popen, dup and dup2, posix_spawn with waitpid, dlopen, and BSD
+ * sockets (UDP and TCP over the loopback interface, select, getaddrinfo). Prints
  * "posix-test: passed" or what failed. */
+#include <arpa/inet.h>
 #include <dirent.h>
 #include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
 #include <math.h>
+#include <netdb.h>
+#include <netinet/in.h>
 #include <pthread.h>
 #include <semaphore.h>
 #include <setjmp.h>
@@ -19,6 +23,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <sys/select.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <time.h>
@@ -423,6 +429,60 @@ static void test_dlopen(void) {
     CHECK(dlclose(library) == 0);
 }
 
+static void test_sockets(void) {
+    /* UDP to itself, with select and the sender's address. */
+    int u = socket(AF_INET, SOCK_DGRAM, 0);
+    struct sockaddr_in here = {.sin_family = AF_INET, .sin_addr.s_addr = htonl(INADDR_LOOPBACK)};
+    socklen_t length = sizeof(here);
+    CHECK(u >= 0 && bind(u, (struct sockaddr *)&here, sizeof(here)) == 0);
+    CHECK(getsockname(u, (struct sockaddr *)&here, &length) == 0 && ntohs(here.sin_port) != 0);
+    CHECK(sendto(u, "ping", 4, 0, (struct sockaddr *)&here, sizeof(here)) == 4);
+    fd_set readable;
+    FD_ZERO(&readable);
+    FD_SET(u, &readable);
+    struct timeval wait = {2, 0};
+    CHECK(select(u + 1, &readable, NULL, NULL, &wait) == 1 && FD_ISSET(u, &readable));
+    char text[16] = "";
+    struct sockaddr_in from;
+    socklen_t from_length = sizeof(from);
+    CHECK(recvfrom(u, text, sizeof text, 0, (struct sockaddr *)&from, &from_length) == 4);
+    CHECK(memcmp(text, "ping", 4) == 0 && from.sin_port == here.sin_port);
+    /* Non-blocking: nothing there, so EAGAIN at once. */
+    CHECK(fcntl(u, F_SETFL, O_NONBLOCK) == 0 && (fcntl(u, F_GETFL) & O_NONBLOCK));
+    CHECK(recv(u, text, sizeof text, 0) == -1 && errno == EAGAIN);
+    close(u);
+    /* TCP: listen, connect, accept, both ways. */
+    int listener = socket(AF_INET, SOCK_STREAM, 0);
+    struct sockaddr_in server = {.sin_family = AF_INET, .sin_addr.s_addr = htonl(INADDR_LOOPBACK)};
+    length = sizeof(server);
+    CHECK(bind(listener, (struct sockaddr *)&server, sizeof(server)) == 0);
+    CHECK(listen(listener, 4) == 0);
+    CHECK(getsockname(listener, (struct sockaddr *)&server, &length) == 0);
+    int client = socket(AF_INET, SOCK_STREAM, 0);
+    CHECK(connect(client, (struct sockaddr *)&server, sizeof(server)) == 0);
+    int peer = accept(listener, NULL, NULL);
+    CHECK(peer >= 0);
+    CHECK(send(client, "hello", 5, 0) == 5 && recv(peer, text, sizeof text, 0) == 5);
+    CHECK(memcmp(text, "hello", 5) == 0);
+    CHECK(write(peer, "back", 4) == 4 && read(client, text, sizeof text) == 4);
+    CHECK(memcmp(text, "back", 4) == 0);
+    close(peer);
+    close(client);
+    close(listener);
+    /* Names. */
+    struct addrinfo hints = {.ai_socktype = SOCK_STREAM}, *found = NULL;
+    CHECK(getaddrinfo("localhost", "80", &hints, &found) == 0 && found);
+    if (found) {
+        struct sockaddr_in *a = (struct sockaddr_in *)found->ai_addr;
+        CHECK(a->sin_addr.s_addr == htonl(INADDR_LOOPBACK) && ntohs(a->sin_port) == 80);
+        freeaddrinfo(found);
+    }
+    CHECK(inet_addr("10.0.2.15") == htonl(0x0a00020f));
+    char address[INET_ADDRSTRLEN];
+    struct in_addr a = {htonl(0xc0a80001)};
+    CHECK_TEXT(inet_ntop(AF_INET, &a, address, sizeof address), "192.168.0.1");
+}
+
 int main(int argc, char **argv) {
     /* -v: says which part it's on (to find one that hangs). */
     bool verbose = argc > 1 && strcmp(argv[1], "-v") == 0;
@@ -434,7 +494,7 @@ int main(int argc, char **argv) {
         {"strings", test_strings}, {"files", test_files},     {"time", test_time},
         {"setjmp", test_setjmp},   {"threads", test_threads}, {"memory", test_memory},
         {"processes", test_processes}, {"spawn", test_spawn},
-        {"dlopen", test_dlopen},
+        {"dlopen", test_dlopen},   {"sockets", test_sockets},
     };
     for (size_t i = 0; i < sizeof parts / sizeof *parts; i++) {
         if (verbose) {

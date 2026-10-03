@@ -28,6 +28,12 @@ static inline struct __vx_tcb *__vx_tcb(void) {
 long __vx_errno_result(long result);
 int __vx_errno_of(long vx_error);
 
+/* Sockets (socket.c): which descriptors are non-blocking, and sockets. */
+bool __vx_nonblocking(int fd);
+void __vx_set_nonblocking(int fd, bool on);
+bool __vx_is_socket(int fd);
+void __vx_forget_fd(int fd);
+
 void __libvexa_threads_init(void);
 /* A thread block (inside a pthread record) for threads started another way. */
 struct __vx_tcb *__libvexa_new_tcb(void);
