@@ -9,7 +9,8 @@ that sits on top of the Vexa kernel. See [docs/ARCHITECTURE.md](docs/ARCHITECTUR
 
 **Documentation**: the [user guide](docs/USER-GUIDE.md) (using Vexa), the
 [developer guide](docs/DEVELOPER-GUIDE.md) (building it, and writing programs and apps
-for it), the [API reference](docs/API.md) (libvexa), the
+for it), the [SDK](docs/SDK.md) (building native apps, and porting them with POSIX and
+SDL 2, on another machine), the [API reference](docs/API.md) (libvexa), the
 [architecture](docs/ARCHITECTURE.md) and the [roadmap](docs/ROADMAP.md).
 
 ![Vexa running in QEMU](docs/screenshot.png)
@@ -86,7 +87,12 @@ runs X programs such as `xterm` in windows of their own on it. The kernel:
   that misbehaves without taking the system down
 - has processes with parents and children, process groups, pipes and signals
 - saves and restores each program's floating point and vector registers (SSE, AVX)
-- has its own system call interface and C library, `libvexa`
+- has its own system call interface and C library, `libvexa`, with much of POSIX
+  (files, directories, pthreads, time, `mmap`, `poll`, the whole of `stdio` and musl's
+  libm) for programs ported to it
+- has an SDK for building native programs and apps on Linux: `vexa-cc`, an app template
+  (`vexa-new-app`), a CMake toolchain file, and SDL 2 with Vexa drivers (each SDL
+  window a desktop window, sound on the HD Audio device); each release carries it
 - has a file system tree with a root in memory (unpacked from an initramfs), `/dev`,
   and disks mounted under `/mnt`
 - drives disks through virtio-blk (virtual machines), AHCI (SATA disks and CD/DVD
@@ -120,6 +126,7 @@ the `vexa:/>` prompt:
 | `sleep 30`, then Ctrl-C | stops the program in front |
 | `ps`, `kill`, `uptime` | processes and how long the system has been up |
 | `thread-test`, `pthread-test` | threads: a Vexa program, and a Linux one using musl's pthreads |
+| `posix-test` | checks libvexa's POSIX layer: files, `printf` and `scanf` with floats, libm, pthreads, time |
 | `sys` | the kernel's own commands: `sys disks`, `sys mount`, `sys pci`, `sys cpu`, `sys mem`, `sys memtest`, `sys threads` |
 | `bash` | GNU bash, a Linux program (`exit` to go back); inside it, `ls`, `vi`, `grep`, `ps`, `top`... are BusyBox's |
 | `sh`, `busybox` | BusyBox's shell; `busybox` alone lists its commands |

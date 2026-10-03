@@ -33,6 +33,7 @@ You need a Linux machine (or WSL) with:
 | musl's compiler and Linux headers (Linux programs) | `musl-tools`, `linux-libc-dev` |
 | Meson, Ninja, pkg-config, bison, gperf (X and GTK) | `meson`, `ninja-build`, `pkg-config`, `bison`, `gperf` |
 | GLib's code generators (GTK) | `libglib2.0-dev-bin`, `gtk-update-icon-cache` |
+| CMake (LLVM for Mesa, and the SDK's check) | `cmake` |
 
 X.Org's packages want a newer Meson than some distributions have; CI uses
 `pipx install meson==1.12.1` and `pipx inject meson packaging`.
@@ -40,6 +41,7 @@ X.Org's packages want a newer Meson than some distributions have; CI uses
 ```sh
 make              # build/vexa.iso: the kernel, libvexa, the programs and the Linux files
 make programs     # just Vexa's own programs (fast)
+make sdk          # the SDK (build/sdk/vexa-sdk and its tarball), with SDL 2
 make LINUX_COMPAT=0   # a kernel without the Linux subsystem (and no /linux)
 make clean        # removes build/ (everything built, the Linux programs too)
 make distclean    # also removes the downloaded sources and Limine
@@ -118,6 +120,12 @@ QEMU drops part of long mouse moves, so they're split into steps of about 300 pi
 the pointer starts in the middle of the 1280x800 screen. New windows open at known
 places (the desktop cascades them by window number), which the tests rely on.
 
+**The SDK's apps.** The test disks also carry two apps built with the SDK (`make
+sdk-test`: one made from the template with `vexa-new-app`, and the SDL demo); at the end
+of the desktop checks, with `--disks`, the test opens both from `/mnt/vda1`, hears the
+SDL demo's chime and sends it keys. `posix-test` (in the shell checks) checks the POSIX
+layer.
+
 `--screenshot file.png` saves the screen at the end, and `--keep-log` prints the serial
 log. A small script that imports the module, sets `TYPED_COMMANDS` to a few steps and
 calls `main()` is a quick way to look at one thing.
@@ -136,10 +144,14 @@ kernel/               the kernel (see ARCHITECTURE.md)
   src/personality/    the native system calls (vexa/) and the Linux subsystem (linux/)
 abi/vexa/abi.h        system call numbers, structures and errors: kernel and libvexa share it
 libvexa/              Vexa's C library (libvexa.so) and dynamic loader (ld/)
+sdk/                  the SDK's own files: vexa-cc, vexa-new-app, the app template,
+                      the CMake toolchain file, SDL's configuration and Vexa drivers
+                      (sdl2/), and the SDL demo (examples/)
 userland/<name>/      Vexa's programs, one directory each, built into /bin
 apps/<Name>.vxapp/    the desktop apps' bundles (Info.conf, icons)
 rootfs/               files for the root file system (/etc, /share: pictures, fonts)
-third_party/          Xvexa (Vexa's X server), stb_truetype, BusyBox's configuration, the X sources list
+third_party/          Xvexa (Vexa's X server), stb_truetype, BusyBox's configuration, the X
+                      sources list; downloaded tarballs (musl for libm, SDL...) land here
 tools/                build scripts, the test harness, disk images, icons, xclipboard (the
                       X clipboard bridge xrun starts beside Xvexa)
 tests/                Linux test programs and test disk contents
@@ -148,11 +160,16 @@ docs/                 this documentation
 
 ## Writing a Vexa program
 
-Vexa programs are C, built against **libvexa**, Vexa's own C library. It has the usual
-C basics (`<stdio.h>`, `<stdlib.h>`, `<string.h>`, `<ctype.h>`: `printf`, `malloc`,
-`qsort`, `strtol`, `getenv`...) and Vexa's own interfaces under `<vexa/...>` (see the
-[API reference](API.md)). It isn't POSIX: files are handles from `vx_open`, programs
-start with `vx_spawn`, and errors are negative `VX_E*` numbers.
+Vexa programs are C, built against **libvexa**, Vexa's own C library. It has the C
+standard library and much of POSIX (`open`, `stat`, `opendir`, pthreads,
+`clock_gettime`, `mmap`, `poll`... and musl's libm), and Vexa's own interfaces under
+`<vexa/...>` (see the [API reference](API.md)). Vexa's own calls work in Vexa's way:
+files are handles from `vx_open`, programs start with `vx_spawn`, and errors are
+negative `VX_E*` numbers. Vexa's programs use those; ported ones can stay with POSIX.
+
+The programs here are built by the tree's Makefile. To build programs and apps outside
+it, on any x86-64 Linux machine, use the [SDK](SDK.md) (`make sdk`): `vexa-cc`, an app
+template, and SDL 2.
 
 To add a program, make a directory in `userland/` with its C files:
 
@@ -182,9 +199,12 @@ A few things to know:
   are the standard input, output and error).
 - **Starting programs**: `vx_spawn(path, &spawn)` with argv, the environment and which
   handles the child gets; `vx_wait` for its exit code. `environ` is the environment.
-- **Threads**: `<vexa/thread.h>` (`vx_thread_create`, `vx_thread_join`, `vx_mutex`).
+- **Threads**: `<vexa/thread.h>` (`vx_thread_create`, `vx_thread_join`, `vx_mutex`), or
+  `<pthread.h>`. Each thread has a thread pointer (`%fs`) to a block with its `errno`
+  and its pthread keys' values.
 - **Signals**: Vexa programs can't catch signals; they can ignore them
-  (`vx_signal(VX_SIGINT, VX_SIGNAL_IGNORE)`) or be stopped by them.
+  (`vx_signal(VX_SIGINT, VX_SIGNAL_IGNORE)`) or be stopped by them. (`signal()`
+  handlers run for `raise`.)
 - **Output from desktop apps**: a program the desktop started writes to the desktop's
   output, which is the serial log; `printf("myapp: ...")` lines are how the tests see
   what an app did.

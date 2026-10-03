@@ -282,6 +282,25 @@ native track in 0.12.0; in 0.13.0, X and `xterm` run in a window on it.
 
 **Milestone:** GTK applications run next to native programs on the Vexa desktop.
 
+## Native apps: writing and porting them for Vexa itself
+
+- [x] A POSIX layer in libvexa, so programs written for other systems build natively:
+      file descriptors, directories, pthreads (with a thread pointer per thread for
+      `errno` and keys), semaphores, `clock_gettime` and `strftime`, `mmap`, `poll`,
+      `popen`, the whole of `stdio` with `scanf` and exact float printing (musl's
+      `fmt_fp`), and musl's libm (0.26.0)
+- [x] An SDK for building them on Linux: `vexa-cc`, libvexa's headers and libraries, an
+      app template and `vexa-new-app`, a CMake toolchain file; released with each
+      version (0.26.0)
+- [x] SDL 2 with Vexa's own video (desktop windows, input, the clipboard) and audio
+      (`/dev/audio0`) drivers, in the SDK, with a demo (0.26.0)
+- [ ] `fork`-free process creation for ports (`posix_spawn`), `dup`, and `dlopen` for
+      shared libraries beyond libvexa
+- [ ] OpenGL for native programs (Mesa's llvmpipe, built against libvexa)
+
+**Milestone:** an SDL program written for Linux builds with the SDK and runs as a Vexa
+app.
+
 ## Phase 10: Firefox
 
 - [ ] Launch with the content sandbox disabled (`MOZ_DISABLE_CONTENT_SANDBOX=1`),

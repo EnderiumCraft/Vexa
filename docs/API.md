@@ -23,16 +23,31 @@ success and a **negative `VX_E*` error** on failure; `vx_strerror(error)` descri
 
 ## The C basics
 
+libvexa has the C standard library and much of POSIX, so programs written for other
+systems mostly build as they are (the [SDK](SDK.md) builds them on another machine).
+POSIX functions follow POSIX: they return -1 and set `errno` (Linux's numbers) on
+failure. The `vx_*` functions under `<vexa/...>` are Vexa's own.
+
 | Header | What's there |
 | --- | --- |
-| `<stdio.h>` | `FILE`, `stdin`, `stdout`, `stderr`; `fopen` (`"r"`, `"w"`, `"a"`, and with `+`), `fdopen`, `fclose`, `fflush`, `fread`, `fwrite`, `fgetc`, `fgets`, `fputc`, `fputs`, `feof`, `ferror`, `fileno`, `getchar`, `putchar`, `puts`; `printf`, `fprintf`, `sprintf`, `snprintf` and their `v` forms |
-| `<stdlib.h>` | `malloc`, `calloc`, `realloc`, `free`; `getenv`, `setenv`, `unsetenv`, `environ`; `atoi`, `atol`, `strtol`, `strtoul`; `abs`, `labs`; `qsort`; `EXIT_SUCCESS`, `EXIT_FAILURE` |
-| `<string.h>` | `mem*` (`memcpy`, `memmove`, `memset`, `memcmp`, `memchr`), `strlen`, `strnlen`, `strcmp`, `strncmp`, `strcpy`, `strncpy`, `strcat`, `strncat`, `strchr`, `strrchr`, `strstr`, `strspn`, `strcspn`, `strpbrk`, `strdup`, `strndup` |
-| `<ctype.h>` | `isdigit`, `isalpha`, `isalnum`, `isxdigit`, `isspace`, `isprint`, `ispunct`, `islower`, `isupper`, `tolower`, `toupper` |
+| `<stdio.h>` | `FILE` and the standard streams; `fopen`, `freopen`, `fdopen`, `fclose`, `fflush`, `setvbuf`; `fread`, `fwrite`, `fgetc`, `fgets`, `getline`, `getdelim`, `ungetc`, `fputc`, `fputs`, `puts`; `fseek`, `ftell`, `rewind`, `fgetpos`, `fsetpos`; `printf` and friends (with `%f %e %g %a`, exactly rounded), `asprintf`, `dprintf`; `scanf`, `fscanf`, `sscanf`; `tmpfile`, `popen`, `pclose`, `perror`, `remove`, `rename` |
+| `<stdlib.h>` | `malloc`, `calloc`, `realloc`, `free`, `aligned_alloc`, `posix_memalign`; `getenv`, `setenv`, `unsetenv`, `putenv`, `environ`; `strtol` and the rest, `strtod`, `strtof`, `strtold`, `atof`; `qsort`, `bsearch`; `rand`, `random`; `abs`, `div`; `exit`, `atexit`, `_Exit`, `system`; `mkstemp`, `mkdtemp`, `realpath`; `mbtowc` and the UTF-8 multibyte functions |
+| `<string.h>`, `<strings.h>` | the `mem*` and `str*` functions, `strtok_r`, `strsep`, `strlcpy`, `strlcat`, `stpcpy`, `strcasecmp`, `strcasestr`, `strerror`, `strsignal` |
+| `<ctype.h>`, `<wchar.h>` | character classes; wide strings (`wchar_t` is a code point) and UTF-8 conversions, `wcwidth` |
+| `<math.h>` | all of C's math library: musl's libm |
+| `<time.h>`, `<sys/time.h>` | `time`, `clock_gettime`, `nanosleep`, `gettimeofday`, `gmtime`, `localtime` (the time zone from Settings), `mktime`, `timegm`, `strftime` |
+| `<unistd.h>`, `<fcntl.h>`, `<sys/stat.h>`, `<dirent.h>` | file descriptors: `open`, `read`, `write`, `pread`, `lseek`, `close`, `ftruncate`, `fsync`, `pipe`; `stat`, `fstat`, `lstat`, `mkdir`, `rmdir`, `unlink`, `rename`, `access`, `chdir`, `getcwd`, `symlink`, `readlink`, `isatty`; `opendir`, `readdir`, `closedir`; `sleep`, `usleep`, `getpid`, `sysconf`, `getopt` |
+| `<pthread.h>`, `<semaphore.h>`, `<sched.h>` | threads, mutexes (normal, recursive, error-checking), condition variables, read-write locks, spin locks, `pthread_once`, keys; semaphores; `sched_yield` |
+| `<sys/mman.h>`, `<poll.h>` | `mmap` (anonymous, and of files), `munmap`, `mprotect`; `poll` |
+| `<signal.h>`, `<setjmp.h>` | `signal`, `sigaction` (handlers run for `raise`; from outside, signals can be ignored or end the program), `raise`, `kill`; `setjmp`, `longjmp` |
+| `<errno.h>`, `<assert.h>`, `<limits.h>`, `<inttypes.h>`, `<locale.h>` | `errno` (one per thread), `assert`, limits, `PRId64` and friends, the "C" locale |
 
 The compiler's own headers work too: `<stdint.h>`, `<stddef.h>`, `<stdbool.h>`,
-`<stdarg.h>`. `main(int argc, char **argv)` is called as usual; returning from it ends
-the program with that exit code.
+`<stdarg.h>`, `<float.h>`. `main(int argc, char **argv)` is called as usual; returning
+from it ends the program with that exit code.
+
+Not there: `fork` and `exec*` (`vx_spawn` starts programs), `dup`, `dlopen`, locales
+other than "C", and user and group IDs beyond stubs.
 
 ## `<vexa/syscall.h>`: system calls
 
