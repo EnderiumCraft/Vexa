@@ -308,17 +308,15 @@ int pipe(int fds[2]) {
 }
 
 int dup(int fd) {
-    (void)fd;
-    errno = ENOSYS;
-    return -1;
+    return (int)__vx_errno_result(vx_dup(fd, -1));
 }
 
 int dup2(int fd, int to) {
-    if (fd == to) {
-        return to;
+    if (to < 0) {
+        errno = EBADF;
+        return -1;
     }
-    errno = ENOSYS;
-    return -1;
+    return (int)__vx_errno_result(vx_dup(fd, to));
 }
 
 int symlink(const char *target, const char *path) {
@@ -479,16 +477,6 @@ void _exit(int code) {
 
 void _Exit(int code) {
     vx_exit(code);
-}
-
-int execv(const char *path, char *const argv[]) {
-    (void)path, (void)argv;
-    errno = ENOSYS;
-    return -1;
-}
-
-int execvp(const char *file, char *const argv[]) {
-    return execv(file, argv);
 }
 
 /* system(): through Vexa's shell, waiting for it. */

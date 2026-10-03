@@ -103,6 +103,9 @@ long vx_set_thread_pointer(void *address);
  * up to `count`, returns how many there are; `generation` (if not NULL)
  * changes whenever the list does. */
 long vx_device_list(struct vx_device_info *devices, size_t count, unsigned long long *generation);
+/* Another handle to the same object: `new_handle` (closing what was there) or,
+ * with -1, the lowest free one. */
+long vx_dup(int handle, int new_handle);
 long vx_kernel_command(const char *command);
 
 /* A short description of a (negative) VX_E* error. */

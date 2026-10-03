@@ -153,6 +153,27 @@ static int64_t sys_close(uint64_t handle, uint64_t a1, uint64_t a2, uint64_t a3)
     return handle_close(me()->handles, (int)handle);
 }
 
+static int64_t sys_dup(uint64_t handle, uint64_t new_handle, uint64_t a2, uint64_t a3) {
+    (void)a2, (void)a3;
+    uint32_t rights;
+    struct object *object = handle_get_any(me()->handles, (int)handle, &rights);
+    if (!object) {
+        return -VX_EBADF;
+    }
+    if ((int64_t)new_handle == (int64_t)handle) {
+        object_put(object);
+        return (int64_t)handle;
+    }
+    if ((int64_t)new_handle >= 0) {
+        return handle_set(me()->handles, (int)new_handle, object, rights); /* (Puts it if not.) */
+    }
+    int result = handle_add(me()->handles, object, rights);
+    if (result < 0) {
+        object_put(object);
+    }
+    return result;
+}
+
 /* Reading and writing work on any handle whose object can (files, pipes...). */
 static struct object *get_io(int64_t handle, uint32_t right, int *error) {
     uint32_t rights;
@@ -1376,6 +1397,7 @@ static const syscall_fn syscalls[] = {
     [VX_SYS_HOSTNAME] = sys_hostname,
     [VX_SYS_SET_THREAD_POINTER] = sys_set_thread_pointer,
     [VX_SYS_DEVICE_LIST] = sys_device_list,
+    [VX_SYS_DUP] = sys_dup,
 };
 
 static void vexa_syscall(struct interrupt_frame *frame) {

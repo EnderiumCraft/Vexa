@@ -89,6 +89,8 @@
                                         thread pointer (FS base), as vx_thread_start's tls */
 #define VX_SYS_DEVICE_LIST 61 /* vx_device_list(struct vx_device_info *, count,
                                  unsigned long long *generation) -> how many devices */
+#define VX_SYS_DUP 62      /* vx_dup(handle, new or -1) -> another handle to the same object:
+                              `new` (closing what was there), or the lowest free one */
 
 /* vx_power actions. */
 #define VX_POWER_RESTART 1

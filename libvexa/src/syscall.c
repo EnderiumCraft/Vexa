@@ -263,6 +263,10 @@ long vx_device_list(struct vx_device_info *devices, size_t count, unsigned long 
     return syscall3(VX_SYS_DEVICE_LIST, (long)devices, (long)count, (long)generation);
 }
 
+long vx_dup(int handle, int new_handle) {
+    return syscall2(VX_SYS_DUP, (long)handle, (long)new_handle);
+}
+
 long vx_set_thread_pointer(void *address) {
     return syscall1(VX_SYS_SET_THREAD_POINTER, address);
 }

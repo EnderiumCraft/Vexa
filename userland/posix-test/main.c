@@ -2,7 +2,8 @@
  * printf and scanf with floats, libm, strings and numbers, stdio files
  * (seeking, ungetc, getline), directories, stat, time, setjmp, pthreads
  * (mutexes, condition variables, keys, once, per-thread errno), semaphores,
- * mmap and popen. Prints "posix-test: passed" or what failed. */
+ * mmap, popen, dup and dup2, and posix_spawn with waitpid. Prints
+ * "posix-test: passed" or what failed. */
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -11,12 +12,14 @@
 #include <pthread.h>
 #include <semaphore.h>
 #include <setjmp.h>
+#include <spawn.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -345,6 +348,60 @@ static void test_processes(void) {
     CHECK(system("echo system > /dev/null") == 0);
 }
 
+static void read_file(const char *path, char *out, size_t size) {
+    out[0] = '\0';
+    int fd = open(path, O_RDONLY);
+    if (fd >= 0) {
+        ssize_t n = read(fd, out, size - 1);
+        out[n > 0 ? n : 0] = '\0';
+        close(fd);
+    }
+}
+
+static void test_spawn(void) {
+    char text[64];
+    /* dup: two handles, one file position. */
+    int fd = open("/tmp/posix-dup.txt", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    int copy = dup(fd);
+    CHECK(fd >= 0 && copy >= 0 && copy != fd);
+    CHECK(write(fd, "ab", 2) == 2);
+    close(fd);
+    CHECK(write(copy, "cd", 2) == 2); /* (Still open, after the first.) */
+    close(copy);
+    read_file("/tmp/posix-dup.txt", text, sizeof text);
+    CHECK_TEXT(text, "abcd");
+    /* dup2: standard output into a file, and back. */
+    int saved = dup(1);
+    fd = open("/tmp/posix-dup2.txt", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    CHECK(dup2(fd, 1) == 1);
+    CHECK(write(1, "redirected", 10) == 10);
+    CHECK(dup2(saved, 1) == 1);
+    close(fd);
+    close(saved);
+    read_file("/tmp/posix-dup2.txt", text, sizeof text);
+    CHECK_TEXT(text, "redirected");
+    /* posix_spawnp, its output in a file (a file action), and its exit code. */
+    posix_spawn_file_actions_t actions;
+    posix_spawn_file_actions_init(&actions);
+    posix_spawn_file_actions_addopen(&actions, 1, "/tmp/posix-spawn.txt",
+                                     O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    char *hello[] = {"hello-world", NULL};
+    pid_t pid = 0;
+    int status = -1;
+    CHECK(posix_spawnp(&pid, "hello-world", &actions, NULL, hello, NULL) == 0);
+    CHECK(pid > 0 && waitpid(pid, &status, 0) == pid);
+    CHECK(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+    posix_spawn_file_actions_destroy(&actions);
+    read_file("/tmp/posix-spawn.txt", text, sizeof text);
+    CHECK(strncmp(text, "Hello, world!", 13) == 0);
+    char *shell[] = {"vsh", "-c", "exit 3", NULL};
+    CHECK(posix_spawnp(&pid, "vsh", NULL, NULL, shell, NULL) == 0);
+    CHECK(waitpid(-1, &status, 0) == pid && WEXITSTATUS(status) == 3);
+    CHECK(waitpid(-1, &status, WNOHANG) == -1 && errno == ECHILD);
+    char *missing[] = {"no-such-program", NULL};
+    CHECK(posix_spawnp(&pid, "no-such-program", NULL, NULL, missing, NULL) == ENOENT);
+}
+
 int main(int argc, char **argv) {
     /* -v: says which part it's on (to find one that hangs). */
     bool verbose = argc > 1 && strcmp(argv[1], "-v") == 0;
@@ -355,7 +412,7 @@ int main(int argc, char **argv) {
         {"format", test_format},   {"numbers", test_numbers}, {"math", test_math},
         {"strings", test_strings}, {"files", test_files},     {"time", test_time},
         {"setjmp", test_setjmp},   {"threads", test_threads}, {"memory", test_memory},
-        {"processes", test_processes},
+        {"processes", test_processes}, {"spawn", test_spawn},
     };
     for (size_t i = 0; i < sizeof parts / sizeof *parts; i++) {
         if (verbose) {

@@ -66,7 +66,10 @@ int getpagesize(void);
 int gethostname(char *name, size_t size);
 char *getlogin(void);
 __attribute__((noreturn)) void _exit(int code);
+/* Vexa can't replace a process's program: these start it, wait for it and
+ * end with its exit code (see spawn.h for starting programs). */
 int execv(const char *path, char *const argv[]);
+int execve(const char *path, char *const argv[], char *const envp[]);
 int execvp(const char *file, char *const argv[]);
 
 extern char *optarg;
