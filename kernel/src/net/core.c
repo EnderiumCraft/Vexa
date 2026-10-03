@@ -92,6 +92,11 @@ void net_wake(void) {
     wait_queue_wake_all(&net_thread_queue);
 }
 
+void net_name(struct net_interface *net) {
+    static int cards;
+    ksnprintf(net->name, sizeof(net->name), "eth%d", cards++);
+}
+
 void net_register(struct net_interface *net) {
     mutex_lock(&net_lock);
     net->index = ++interface_count;

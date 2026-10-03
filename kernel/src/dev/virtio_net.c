@@ -229,8 +229,7 @@ static void probe(struct pci_device *pci) {
     struct net_interface *net = &card->net;
     int number = card_count;
     cards[card_count++] = card;
-    memcpy(net->name, "eth0", 5);
-    net->name[3] = (char)('0' + number);
+    net_name(net);
     if (features & (1U << NET_FEATURE_MAC)) {
         volatile uint8_t *mac = card->device.device_config;
         for (int i = 0; i < ETH_ADDRESS; i++) {

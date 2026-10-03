@@ -769,9 +769,10 @@ test: $(ISO) $(SAFE_ISO) $(TEST_DISKS) native-iso
 test-bios:
 	tools/qemu-smoke-test.py --disks $(BUILD)/disks
 test-uefi:
-	tools/qemu-smoke-test.py --disks $(BUILD)/disks --uefi --smp 4 --memory 6G --cpu max --usb
+	tools/qemu-smoke-test.py --disks $(BUILD)/disks --uefi --smp 4 --memory 6G --cpu max --usb \
+		--nic e1000e
 test-safe:
-	tools/qemu-smoke-test.py --disks $(BUILD)/disks --safe-mode --iso $(SAFE_ISO)
+	tools/qemu-smoke-test.py --disks $(BUILD)/disks --safe-mode --iso $(SAFE_ISO) --nic e1000
 
 # Vexa must work without the Linux subsystem: build and boot a kernel without it.
 native-iso:

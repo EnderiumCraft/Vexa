@@ -716,6 +716,8 @@ def main():
     parser.add_argument("--iso", default="build/vexa.iso", help="ISO image to boot")
     parser.add_argument("--only", help="run only these sections (comma-separated: "
                         "shell, network, usb, desktop, linux, x, linux-net, disks)")
+    parser.add_argument("--nic", default="virtio-net-pci",
+                        help="QEMU's network card: virtio-net-pci, e1000, e1000e, rtl8139")
     parser.add_argument("--usb", action="store_true",
                         help="add a USB controller with a keyboard and a mouse on a hub (typing "
                              "and the pointer then go through USB) and run the USB checks")
@@ -739,7 +741,7 @@ def main():
         # A network card behind QEMU's user-mode NAT: DHCP gives 10.0.2.15,
         # and 10.0.2.2 is this machine. (With -nic instead of -device, QEMU's
         # q35 card has no MSI-X, and Vexa would poll it.)
-        "-netdev", "user,id=net0", "-device", "virtio-net-pci,netdev=net0",
+        "-netdev", "user,id=net0", "-device", args.nic + ",netdev=net0",
         # Sound: an HD Audio controller and codec, whose output QEMU writes
         # to a WAV file (see "@sound").
         "-audiodev", "wav,id=snd0,path=" + os.path.join(tmp, "sound.wav"),

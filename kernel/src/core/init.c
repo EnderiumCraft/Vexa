@@ -107,6 +107,8 @@ void init_thread(void *unused) {
 #endif
     net_init();
     virtio_net_init();
+    e1000_init();   /* Intel cards. */
+    realtek_init(); /* Realtek cards. */
     hda_init(); /* Sound, if there's an HD Audio controller: /dev/audio0. */
     usb_init(); /* USB controllers; what's plugged in is found on the "usb" thread. */
 #ifdef LINUX_COMPAT
