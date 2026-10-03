@@ -143,6 +143,12 @@ Input devices (`/dev/input/eventN`) give `struct vx_input_event` records (type, 
 value, time) when read; `/dev/display0` is the screen (mapped with `vx_map_file` after
 `VX_DISPLAY_ACQUIRE`).
 
+`/dev/audio0` plays sound: write 16-bit little-endian samples (interleaved, when
+stereo). `VX_AUDIO_SET_FORMAT` (`struct vx_audio_format`: 44100 or 48000 Hz, 1 or 2
+channels) comes first; a write waits while the buffer is full; `VX_AUDIO_DELAY` says how
+many frames are still to play, `VX_AUDIO_DRAIN` waits for them, `VX_AUDIO_DROP` throws
+them away, and closing the handle lets them finish. `VX_AUDIO_INFO` describes the device.
+
 ## `<vexa/thread.h>`: threads
 
 ```c
