@@ -1,6 +1,6 @@
 #ifndef VEXA_VERSION_H
 #define VEXA_VERSION_H
 
-#define VEXA_VERSION "0.27.0"
+#define VEXA_VERSION "0.28.0"
 
 #endif
