@@ -426,6 +426,15 @@ LINUX_COMMANDS = [
 ]
 
 # With --disks: one ext2 file system on each kind of disk.
+# On the test disks (so only with --disks): an app built with the SDK
+# (make sdk-test), opened from a new terminal at the end of the desktop checks.
+SDK_APP_COMMANDS = [
+    ("@sendkey ctrl-alt-t", "term: tab 1 of 1", 20),
+    ("@type open /mnt/vda1/HelloSDK.vxapp", '"Hello SDK" (420x220)', 20),
+    ("@sendkey alt-f4", "desktop: asked window", 10),
+    ("@type exit", None, 5),
+]
+
 DISK_COMMANDS = [
     ("#disks",),
     ("sys disks", "nvme0n1", 10),
@@ -681,6 +690,8 @@ def main():
             command += [a.format(copy) for a in qemu_args]
             disks.append((copy, offset))
         commands[-1:-1] = DISK_COMMANDS
+        at = next(i for i, c in enumerate(commands) if c[0] == "@sendkey ctrl-alt-q")
+        commands[at:at] = SDK_APP_COMMANDS
     # Sections: ("#name",) markers; --only keeps some of them.
     only = set(args.only.split(",")) if args.only else None
     kept, section = [], "shell"

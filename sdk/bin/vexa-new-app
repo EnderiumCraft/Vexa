@@ -1,0 +1,36 @@
+#!/bin/sh
+# vexa-new-app: starts an app from the SDK's template.
+#
+#   vexa-new-app "My App" [directory]
+#
+# makes the directory (by default the name, without spaces) with the
+# template in it, named for the app, and its Makefile pointing at this SDK.
+set -e
+if [ $# -lt 1 ] || [ -z "$1" ]; then
+    echo "usage: vexa-new-app NAME [DIRECTORY]" >&2
+    exit 2
+fi
+SDK=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+NAME=$1
+# The program's name: lowercase, letters, digits and dashes.
+EXECUTABLE=$(printf '%s' "$NAME" | tr 'A-Z ' 'a-z-' | tr -cd 'a-z0-9-')
+[ -n "$EXECUTABLE" ] || EXECUTABLE=app
+# The bundle's file name: the name without spaces (Info.conf keeps the name).
+BUNDLE=$(printf '%s' "$NAME" | tr -d ' /')
+DIR=${2:-$BUNDLE}
+if [ -e "$DIR" ]; then
+    echo "vexa-new-app: $DIR already exists" >&2
+    exit 1
+fi
+cp -R "$SDK/template" "$DIR"
+rm -rf "$DIR/build"
+# (Names with | or & in them are left for the user to fix.)
+sed -i.orig -e "s|^APP := .*|APP := $BUNDLE|" -e "s|^EXECUTABLE := .*|EXECUTABLE := $EXECUTABLE|" \
+    -e "s|^SDK ?= .*|SDK ?= $SDK|" -e "s|build/Hello.vxapp|build/$BUNDLE.vxapp|" \
+    -e "s|open Hello.vxapp|open $BUNDLE.vxapp|" "$DIR/Makefile"
+sed -i.orig -e "s|^name=.*|name=$NAME|" -e "s|^executable=.*|executable=$EXECUTABLE|" \
+    "$DIR/Info.conf"
+sed -i.orig -e "s|\"Hello\", 420|\"$NAME\", 420|" -e "s|\"hello: |\"$EXECUTABLE: |g" \
+    "$DIR/src/main.c"
+rm -f "$DIR"/*.orig "$DIR"/src/*.orig
+echo "Made $DIR: cd $DIR && make  (builds build/$BUNDLE.vxapp)"

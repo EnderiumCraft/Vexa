@@ -1,0 +1,44 @@
+#!/bin/sh
+# vexa-cc: the build machine's GCC (or Clang, with VEXA_HOST_CC=clang), set
+# up to compile and link programs for Vexa against the SDK's libvexa.
+#
+#   vexa-cc -O2 -c hello.c          compile (as for any C compiler)
+#   vexa-cc hello.o -o hello        link a program for /lib/vexa-ld.so
+#   vexa-cc -static hello.o -o h    link libvexa in (no loader needed)
+#
+# -lm, -lpthread, -lrt, -ldl and -lc are accepted: all of it is in libvexa.
+set -e
+SDK=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+HOST_CC=${VEXA_HOST_CC:-cc}
+
+link=yes
+static=no
+for arg in "$@"; do
+    case $arg in
+    -c | -S | -E | -M | -MM) link=no ;;
+    -static) static=yes ;;
+    --version | -v | -dumpversion | -dumpmachine | -print-*) exec "$HOST_CC" "$@" ;;
+    esac
+done
+
+# The compiler's own headers (stdint.h, stdarg.h...) and libvexa's; nothing
+# from the build machine's C library.
+set -- -ffreestanding -fno-stack-protector -fPIC -fno-asynchronous-unwind-tables \
+    -fno-plt -m64 -march=x86-64 -D__vexa__=1 -D_REENTRANT \
+    -nostdinc -isystem "$("$HOST_CC" -print-file-name=include)" -isystem "$SDK/include" "$@"
+
+if [ $link = no ]; then
+    exec "$HOST_CC" "$@"
+fi
+
+LIBGCC=$("$HOST_CC" -print-libgcc-file-name)
+COMMON="-nostdlib -L$SDK/lib -Wl,-z,max-page-size=0x1000 -Wl,-z,norelro -Wl,--hash-style=sysv \
+    -Wl,--build-id=none -Wl,-z,noexecstack"
+if [ $static = yes ]; then
+    # shellcheck disable=SC2086
+    exec "$HOST_CC" $COMMON -Wl,--no-dynamic-linker -T "$SDK/lib/program.ld" \
+        "$SDK/lib/crt0.o" "$@" "$SDK/lib/libvexa.a" "$LIBGCC"
+fi
+# shellcheck disable=SC2086
+exec "$HOST_CC" $COMMON -pie -Wl,-dynamic-linker,/lib/vexa-ld.so \
+    "$SDK/lib/crt0.o" "$@" "$SDK/lib/libvexa.so" "$LIBGCC"

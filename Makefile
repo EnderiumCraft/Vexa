@@ -205,7 +205,7 @@ USER_OBJS := $(LIBVEXA_OBJS) \
 
 .PHONY: all openssl curl mesa alsa linux-tarballs kernel programs iso run run-disk run-nographic test test-disks clean distclean \
 	busybox busybox-source bash coreutils python x11 test-native test-quick native-iso \
-	test-bios test-uefi test-safe test-native-boot
+	test-bios test-uefi test-safe test-native-boot sdk sdk-test
 
 all: iso
 kernel: $(KERNEL)
@@ -262,6 +262,68 @@ $(BUILD)/programs/%: $(CRT0) $(LIBVEXA_SO) $(LIBVEXA_OBJS) $(LIBM) libvexa/progr
 		$(LD) $(STATIC_LDFLAGS) $(sort $(filter %.o,$^)) $(LIBM) -o $@, \
 		$(LD) $(DYNAMIC_LDFLAGS) $(CRT0) $(filter-out $(LIBVEXA_OBJS),$(filter %.o,$^)) \
 			$(LIBVEXA_SO) -o $@)
+
+# ---- The SDK: building native apps on another machine ----
+#
+# build/sdk/vexa-sdk: libvexa's headers and libraries (libvexa.so for the
+# loader, libvexa.a for static programs, crt0.o), vexa-cc (the build
+# machine's compiler, set up for Vexa), vexa-new-app and the app template, a
+# CMake toolchain file, and the guide (docs/SDK.md). The releases publish it
+# as vexa-sdk-<version>.tar.gz.
+VEXA_VERSION := $(shell sed -n 's/^\#define VEXA_VERSION "\(.*\)"/\1/p' kernel/include/vexa/version.h)
+SDK_DIR := $(BUILD)/sdk/vexa-sdk
+SDK_TARBALL := $(BUILD)/vexa-sdk-$(VEXA_VERSION).tar.gz
+SDK_FILES := $(shell find sdk -type f -not -path '*/build/*') docs/SDK.md
+LIBVEXA_A := $(BUILD)/lib/libvexa.a
+
+$(LIBVEXA_A): $(filter-out $(CRT0),$(LIBVEXA_OBJS)) $(LIBM)
+	@mkdir -p $(dir $@)
+	rm -f $@
+	ar rcs $@ $(filter %.o,$^)
+	printf 'OPEN %s\nADDLIB %s\nSAVE\nEND\n' $@ $(LIBM) | ar -M
+
+$(SDK_DIR)/.done: $(SDK_FILES) $(LIBVEXA_SO) $(LIBVEXA_A) $(CRT0) libvexa/program.ld \
+		$(shell find libvexa/include -type f) abi/vexa/abi.h $(MUSL_TARBALL)
+	rm -rf $(SDK_DIR)
+	mkdir -p $(SDK_DIR)/include/vexa $(SDK_DIR)/lib $(SDK_DIR)/licenses
+	cp -R sdk/. $(SDK_DIR)/
+	rm -rf $(SDK_DIR)/template/build $(SDK_DIR)/examples/*/build
+	cp docs/SDK.md $(SDK_DIR)/README.md
+	cp -R libvexa/include/. $(SDK_DIR)/include/
+	cp abi/vexa/abi.h $(SDK_DIR)/include/vexa/
+	cp $(LIBVEXA_SO) $(LIBVEXA_A) libvexa/program.ld $(SDK_DIR)/lib/
+	cp $(CRT0) $(SDK_DIR)/lib/crt0.o
+	# -lm, -lpthread...: all in libvexa, so these are empty.
+	for lib in c m pthread rt dl; do ar rc $(SDK_DIR)/lib/lib$$lib.a; done
+	tar -xzf $(MUSL_TARBALL) -O musl-$(MUSL_VERSION)/COPYRIGHT > $(SDK_DIR)/licenses/musl-libm.txt
+	echo "$(VEXA_VERSION)" > $(SDK_DIR)/VERSION
+	touch $@
+
+$(SDK_TARBALL): $(SDK_DIR)/.done
+	tar -C $(dir $(SDK_DIR)) --owner=0 --group=0 --numeric-owner --sort=name \
+		--exclude=.done --transform 's,^vexa-sdk,vexa-sdk-$(VEXA_VERSION),' -czf $@ vexa-sdk
+
+sdk: $(SDK_TARBALL)
+
+# The SDK's own check: a new app from the template (built here and put on
+# the test disks, where the smoke test opens it), and a CMake build.
+SDK_TEST := $(BUILD)/sdk-test
+SDK_HELLO := $(SDK_TEST)/hello-app/build/HelloSDK.vxapp/.done
+$(SDK_HELLO): $(SDK_DIR)/.done
+	rm -rf $(SDK_TEST)
+	mkdir -p $(SDK_TEST)
+	cd $(SDK_TEST) && $(abspath $(SDK_DIR))/bin/vexa-new-app "Hello SDK" hello-app
+	$(MAKE) -C $(SDK_TEST)/hello-app
+	printf 'cmake_minimum_required(VERSION 3.13)\nproject(t C)\nadd_executable(t t.c)\ntarget_link_libraries(t m pthread)\n' \
+		> $(SDK_TEST)/CMakeLists.txt
+	printf '#include <math.h>\n#include <stdio.h>\nint main(void) { printf("%%g\\n", sqrt(2.0)); return 0; }\n' \
+		> $(SDK_TEST)/t.c
+	cmake -S $(SDK_TEST) -B $(SDK_TEST)/cmake -DCMAKE_TOOLCHAIN_FILE=$(abspath $(SDK_DIR))/cmake/vexa.cmake >/dev/null
+	cmake --build $(SDK_TEST)/cmake >/dev/null
+	readelf -l $(SDK_TEST)/cmake/t | grep -q 'vexa-ld.so'
+	touch $@
+
+sdk-test: $(SDK_HELLO)
 
 # /linux is split: what's written to stays in memory, the rest is read from
 # the boot CD when it's used (the ISO's /linux; /cdrom is the boot CD).
@@ -594,10 +656,12 @@ $(XCLIPBOARD): tools/xclipboard.c $(X11)
 	$(MUSL_CC) -O2 -Wall -I$(X11_SYSROOT)/usr/include -L$(X11_SYSROOT)/usr/lib \
 		-Wl,-rpath-link,$(X11_SYSROOT)/usr/lib $< -o $@ -lXfixes -lX11
 
-$(BUILD)/disk-content: $(DISK_CONTENT_FILES) $(BUILD)/programs/hello-world
+$(BUILD)/disk-content: $(DISK_CONTENT_FILES) $(BUILD)/programs/hello-world $(SDK_HELLO)
 	rm -rf $@
 	cp -R tests/disk-content $@
 	cp $(BUILD)/programs/hello-world $@/
+	cp -R $(SDK_TEST)/hello-app/build/HelloSDK.vxapp $@/
+	rm -f $@/HelloSDK.vxapp/.done
 
 $(BUILD)/disks/virtio-gpt.img: $(BUILD)/disk-content tools/make-disk.py
 	@mkdir -p $(dir $@)

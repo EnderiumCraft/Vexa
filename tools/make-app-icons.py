@@ -302,6 +302,26 @@ def help_book():
     return im
 
 
+def hello_app():
+    """The SDK's app template: a smile."""
+    im = gradient_tile((255, 190, 90), (240, 120, 40))
+    d = ImageDraw.Draw(im)
+    white = (255, 255, 255, 255)
+    d.ellipse([17 * S, 15 * S, 21 * S, 21 * S], fill=white)
+    d.ellipse([27 * S, 15 * S, 31 * S, 21 * S], fill=white)
+    d.arc([13 * S, 14 * S, 35 * S, 35 * S], 20, 160, fill=white, width=3 * S)
+    return im
+
+
+def sdl_app():
+    """The SDL demo: overlapping colored squares."""
+    im = gradient_tile((60, 70, 110), (25, 30, 55))
+    d = ImageDraw.Draw(im)
+    for x, y, color in ((10, 10, (240, 80, 90)), (18, 18, (90, 200, 120)), (26, 26, (80, 150, 255))):
+        box(d, x, y, x + 13, y + 13, 3, color + (230,))
+    return im
+
+
 # Files' own pictures (Files.vxapp/Contents/Resources): kinds of files, places.
 FILE_ICONS = {
     "folder": files, "document": document, "text": text_file, "image": image_file,
@@ -323,6 +343,13 @@ if __name__ == "__main__":
         out = os.path.join(root, name + ".vxapp", "Contents", "Resources", "icon.png")
         os.makedirs(os.path.dirname(out), exist_ok=True)
         im.save(out, optimize=True)
+        print(out)
+    # The SDK's: the app template's icon, and the SDL demo's.
+    sdk = os.path.join(os.path.dirname(__file__), "..", "sdk")
+    for draw, out in ((hello_app, os.path.join(sdk, "template", "Resources", "icon.png")),
+                      (sdl_app, os.path.join(sdk, "examples", "sdl-demo", "Resources", "icon.png"))):
+        os.makedirs(os.path.dirname(out), exist_ok=True)
+        shadow(draw()).resize((SIZE, SIZE), Image.LANCZOS).save(out, optimize=True)
         print(out)
     for name, draw in FILE_ICONS.items():
         im = shadow(draw()).resize((SIZE, SIZE), Image.LANCZOS)
