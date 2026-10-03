@@ -41,6 +41,12 @@ The boot menu (Limine) has these entries:
 | **Vexa** | the normal boot |
 | **Vexa (safe mode)** | machines where the normal boot fails: ignores ACPI and uses only the oldest interrupt and timer hardware |
 | **Vexa (kernel monitor)** | the kernel's own command line, instead of the normal programs, for when something is badly broken |
+| **Vexa at 1024x768**, **Vexa at 1280x720** | the normal boot, with the screen at that resolution: the firmware (UEFI or VESA) is asked for it, so it works on real PCs too, where Vexa can't change the resolution later |
+
+Other resolutions: copy one of those entries in `limine.conf` and change its
+`resolution:` line (`1600x900x32`, say); if the firmware doesn't have the mode, Limine
+picks one it has instead. On QEMU's and Bochs's standard VGA, Settings → Display
+changes the resolution while Vexa runs, among the sizes the card can show.
 
 The kernel options behind safe mode (`acpi=off`, `noapic`), and `nosmp` (use only the
 first CPU core), can also be written into `limine.conf`.

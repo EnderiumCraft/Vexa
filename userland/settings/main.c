@@ -727,8 +727,9 @@ static void draw_display(void) {
     y += (int)((modes.count + cols - 1) / cols) * 32 + 8;
     if (modes.count <= 1) {
         note(y, "This display's size is the one the firmware set (Vexa can change it on QEMU's");
-        note(y + 18, "and Bochs's standard VGA).");
-        y += 44;
+        note(y + 18, "and Bochs's standard VGA). For another, choose \"Vexa at 1024x768\" or");
+        note(y + 36, "\"Vexa at 1280x720\" in the boot menu.");
+        y += 62;
     }
     heading("Size of everything", y);
     y += 28;

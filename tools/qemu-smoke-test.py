@@ -360,11 +360,11 @@ LINUX_COMMANDS = [
     ("@mouse_move -358 -44", None, 5),
     ("@mouse_button 1", "desktop: left button at 31,13", 10),
     ("@mouse_button 0", None, 5),
-    ("@mouse_move 0 163", None, 5),
-    ("@mouse_move 0 163", None, 5),
-    ("@mouse_button 1", "desktop: left button at 31,339", 10),
+    ("@mouse_move 0 175", None, 5),
+    ("@mouse_move 0 175", None, 5),
+    ("@mouse_button 1", "desktop: left button at 31,363", 10),
     ("@mouse_button 0", "desktop: window 3", 300),
-    ("@mouse_move 181 -31", None, 10),
+    ("@mouse_move 181 -55", None, 10),
     ("@mouse_button 1", "desktop: left button at 212,308", 10),
     ("@mouse_button 0", 'desktop: window 3 is now called "Change Display"', 60),
     # GTK draws its own title bar (the desktop draws none for it); its
@@ -471,7 +471,7 @@ USB_COMMANDS = [
     # written; pulled out (its file system goes), and plugged in again.
     ("@drive_add 0 if=none,id=stick,file=@STICK@,format=raw", None, 5),
     ("@device_add usb-storage,bus=xhci.0,drive=stick,id=stick", "mounted usb0 at /mnt/usb0", 30),
-    ("cat /mnt/usb0/hello.txt", "Hello from a USB stick!", 10, 2),
+    ("cat /mnt/usb0/hello.txt", "Hello from a USB stick!", 10),
     ("echo written over usb > /mnt/usb0/note.txt", None, 10),
     ("devices -l disk", "usb0 at /mnt/usb0", 10),
     ("@device_del stick", "usb0 is gone", 20),
@@ -480,6 +480,7 @@ USB_COMMANDS = [
     ("@drive_add 0 if=none,id=stick2,file=@STICK@,format=raw", None, 5),
     ("@device_add usb-storage,bus=xhci.0,drive=stick2,id=stick2", "mounted usb0 at /mnt/usb0", 30, 2),
     ("cat /mnt/usb0/note.txt", "written over usb\r\n", 10),
+    ("@device_del stick2", "usb0 is gone", 20, 2),  # (QEMU opens an image only once.)
     # A second keyboard, plugged in and out.
     ("@device_add usb-kbd,bus=xhci.0,id=kbd2", "usb-hid] QEMU USB Keyboard: keyboard", 20, 2),
     ("@device_del kbd2", "QEMU USB Keyboard unplugged", 20),
