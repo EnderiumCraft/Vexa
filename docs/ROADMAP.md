@@ -189,7 +189,7 @@ Linux track:
       module, Mozilla's root certificates in `/etc/ssl`, and a cryptographic random
       generator in the kernel (ChaCha20 over a BLAKE2s entropy pool; `getrandom`,
       `/dev/urandom`) (0.22.0)
-- [ ] HTTPS in the native `fetch` (a TLS library in libvexa)
+- [x] HTTPS in the native `fetch`: Mbed TLS (TLS 1.2 and 1.3), in the SDK too (0.29.0)
 
 **Milestone:** a native Vexa program fetches a web page, and so does Linux `wget`.
 Reached in 0.11.0 (`fetch`, BusyBox `wget`, and Python's `urllib`).

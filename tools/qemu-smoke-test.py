@@ -138,6 +138,12 @@ TYPED_COMMANDS = ([
     ("net", "address 10.0.2.15", 10),
     ("socket-test", "socket-test: passed", 60),
     ("fetch @URL@/hello.txt", "Hello from the test's web server", 30),
+    # HTTPS (Mbed TLS): a server with the test's own certificate authority is
+    # refused, then trusted with it.
+    ("fetch -o /tmp/test-ca.pem @URL@/test-ca.pem", "saved", 30),
+    ("fetch @HTTPS@/hello.txt", "certificate isn't trusted", 60),
+    ("fetch --ca /tmp/test-ca.pem @HTTPS@/hello.txt", "Hello from the test's web server", 60, 2),
+    ("fetch --ca /tmp/test-ca.pem -o /tmp/https.bin @HTTPS@/data.bin", "saved 1048576 bytes", 180),
     ("#sound",),
     # Sound through the HD Audio driver: QEMU records what's played, and the
     # recording should be the tone.

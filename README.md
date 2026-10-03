@@ -152,7 +152,7 @@ the `vexa:/>` prompt:
 | `hostname`, `df`, `shutdown [-r]` | the computer's name, how full the disks are, turning off or restarting |
 | `input` | the keyboard and mouse; `input watch 1` shows what the mouse reports |
 | `net` | network interfaces and addresses (Linux: `ifconfig`, `route -n`) |
-| `fetch http://example.com/` | downloads a web page (a Vexa program); `wget` is BusyBox's |
+| `fetch https://example.com/` | downloads a web page, over HTTP or HTTPS (a Vexa program); `wget` is BusyBox's |
 | `socket-test`, `bsd-socket-test` | checks sockets: a Vexa program and a Linux one |
 
 The kernel's built-in command line (the kernel monitor) is still there for when

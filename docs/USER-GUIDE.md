@@ -672,7 +672,9 @@ openssl s_client -connect example.com:443 </dev/null | head  # the certificate c
 python3 -c "import urllib.request; print(urllib.request.urlopen('https://example.com').status)"
 ```
 
-Vexa's own `fetch` and BusyBox's `wget` still speak only HTTP. There's no IPv6 yet.
+Vexa's own `fetch` speaks HTTPS too (`fetch https://example.com/`, checking the server's
+certificate the same way; `--ca file` trusts another certificate authority, `-k` none),
+and follows redirects; BusyBox's `wget` speaks only HTTP. There's no IPv6 yet.
 
 ## Disks and CDs
 

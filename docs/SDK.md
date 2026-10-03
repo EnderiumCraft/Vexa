@@ -149,9 +149,18 @@ directly too: `<sys/socket.h>`, `<netdb.h>` and the rest, IPv4). Link with
 `-lSDL2_net`, pkg-config (`SDL2_net`) or CMake (`find_package(SDL2_net)` and
 `SDL2_net::SDL2_net`). Doom's network games use it.
 
+## TLS
+
+Mbed TLS 3.6 (TLS 1.2 and 1.3, X.509 certificates, cryptography): link with
+`-lmbedtls -lmbedx509 -lmbedcrypto` (pkg-config `mbedtls`) and libgcc's
+`$(cc -print-libgcc-file-name)`. The standard root certificates are in
+`/etc/ssl/certs/ca-certificates.crt` on Vexa; randomness comes from `/dev/urandom`.
+Vexa's `fetch` (`userland/fetch`) is an example: an HTTPS client in 300 lines.
+
 ## Licenses
 
 libvexa is part of Vexa (see the repository). Programs built with the SDK carry libm
 from musl (MIT, `licenses/musl-libm.txt`) in libvexa, and SDL (zlib,
 `licenses/SDL2.txt`), SDL_mixer (zlib, `licenses/SDL2_mixer.txt`) and SDL_net (zlib,
-`licenses/SDL2_net.txt`) when they use them; Vexa's SDL drivers are under SDL's license.
+`licenses/SDL2_net.txt`) when they use them, and Mbed TLS (Apache-2.0,
+`licenses/mbedtls.txt`); Vexa's SDL drivers are under SDL's license.

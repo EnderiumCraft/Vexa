@@ -234,9 +234,10 @@ $(BUILD)/libvexa/%.o: libvexa/src/%
 # Limine's own tool, built for Vexa (the installer runs it), needs Limine first.
 $(BUILD)/userland/limine/main.c.o: | limine/limine
 
-$(BUILD)/userland/%.c.o: userland/%.c
+.SECONDEXPANSION:
+$(BUILD)/userland/%.c.o: userland/%.c $$(PROGRAM_LIBS_$$(firstword $$(subst /, ,$$*)))
 	@mkdir -p $(dir $@)
-	$(CC) $(USER_CFLAGS) -c $< -o $@
+	$(CC) $(USER_CFLAGS) $(PROGRAM_CFLAGS_$(firstword $(subst /, ,$*))) -c $< -o $@
 
 # libvexa.so: libvexa without crt0 (which each program carries), binding its
 # own references to itself.
@@ -244,6 +245,28 @@ $(LIBVEXA_SO): $(filter-out $(CRT0),$(LIBVEXA_OBJS)) $(LIBM)
 	@mkdir -p $(dir $@)
 	$(LD) $(USER_LDFLAGS) -shared -Bsymbolic -soname libvexa.so \
 		$(filter %.o,$^) --whole-archive $(LIBM) --no-whole-archive -o $@
+
+# Mbed TLS (TLS for native programs: fetch's HTTPS), built against libvexa;
+# in the SDK too.
+MBEDTLS_VERSION := 3.6.2
+MBEDTLS_URL := https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-$(MBEDTLS_VERSION)/mbedtls-$(MBEDTLS_VERSION).tar.bz2
+MBEDTLS_SHA256 := 8b54fb9bcf4d5a7078028e0520acddefb7900b3e66fec7f7175bb5b7d85ccdca
+MBEDTLS_TARBALL := third_party/mbedtls-$(MBEDTLS_VERSION).tar.bz2
+MBEDTLS_PREFIX := $(BUILD)/mbedtls
+MBEDTLS_LIBS := $(MBEDTLS_PREFIX)/lib/libmbedtls.a $(MBEDTLS_PREFIX)/lib/libmbedx509.a \
+	$(MBEDTLS_PREFIX)/lib/libmbedcrypto.a
+
+$(MBEDTLS_TARBALL):
+	$(call fetch,$(MBEDTLS_URL),$(MBEDTLS_SHA256))
+
+$(MBEDTLS_LIBS) &: $(MBEDTLS_TARBALL) tools/build-mbedtls.sh $(shell find libvexa/include -type f)
+	tools/build-mbedtls.sh $(MBEDTLS_TARBALL) $(BUILD)/mbedtls-work $(MBEDTLS_PREFIX) $(CC) \
+		$(filter-out -Werror -Wall -Wextra -MMD -MP -Ilibvexa/include -Iabi,$(USER_CFLAGS)) \
+		-I$(abspath libvexa/include) -I$(abspath abi) -D__vexa__=1
+
+# Programs that link more than libvexa, and what they compile with.
+PROGRAM_LIBS_fetch := $(MBEDTLS_LIBS) $(shell $(CC) -print-libgcc-file-name)
+PROGRAM_CFLAGS_fetch := -I$(MBEDTLS_PREFIX)/include
 
 # A shared library for posix-test's dlopen checks, in /lib.
 DLTEST_SO := $(BUILD)/lib/libvexa-test.so
@@ -268,14 +291,13 @@ $(VEXA_LD): $(VEXA_LD_OBJS)
 	@mkdir -p $(dir $@)
 	$(LD) $(USER_LDFLAGS) -shared -Bsymbolic -e _start $^ -o $@
 
-.SECONDEXPANSION:
 $(BUILD)/programs/%: $(CRT0) $(LIBVEXA_SO) $(LIBVEXA_OBJS) $(LIBM) libvexa/program.ld \
-		$$(addprefix $(BUILD)/,$$(addsuffix .o,$$(wildcard userland/$$*/*.c)))
+		$$(addprefix $(BUILD)/,$$(addsuffix .o,$$(wildcard userland/$$*/*.c))) $$(PROGRAM_LIBS_$$*)
 	@mkdir -p $(dir $@)
 	$(if $(filter $*,$(STATIC_PROGRAMS)), \
-		$(LD) $(STATIC_LDFLAGS) $(sort $(filter %.o,$^)) $(LIBM) -o $@, \
+		$(LD) $(STATIC_LDFLAGS) $(sort $(filter %.o,$^)) $(PROGRAM_LIBS_$*) $(LIBM) -o $@, \
 		$(LD) $(DYNAMIC_LDFLAGS) $(CRT0) $(filter-out $(LIBVEXA_OBJS),$(filter %.o,$^)) \
-			$(LIBVEXA_SO) -o $@)
+			$(PROGRAM_LIBS_$*) $(LIBVEXA_SO) -o $@)
 
 # ---- The SDK: building native apps on another machine ----
 #
@@ -359,10 +381,11 @@ $(SDL2_NET): $(SDL2_NET_TARBALL) tools/build-sdl2-net.sh $(SDL2) $(shell find li
 	tools/build-sdl2-net.sh $(SDL2_NET_TARBALL) $(BUILD)/sdl2-net-work $(SDK_DIR) \
 		$(SDL2_PREFIX) $(SDL2_NET_PREFIX)
 
-$(SDK_DIR)/.complete: $(SDK_DIR)/.done $(SDL2) $(SDL2_MIXER) $(SDL2_NET)
+$(SDK_DIR)/.complete: $(SDK_DIR)/.done $(SDL2) $(SDL2_MIXER) $(SDL2_NET) $(MBEDTLS_LIBS)
 	cp -R $(SDL2_PREFIX)/. $(SDK_DIR)/
 	cp -R $(SDL2_MIXER_PREFIX)/. $(SDK_DIR)/
 	cp -R $(SDL2_NET_PREFIX)/. $(SDK_DIR)/
+	cp -R $(MBEDTLS_PREFIX)/. $(SDK_DIR)/
 	touch $@
 
 $(SDK_TARBALL): $(SDK_DIR)/.complete
@@ -465,6 +488,9 @@ $(INITRAMFS): $(PROGRAM_BINS) $(LIBVEXA_SO) $(VEXA_LD) $(DLTEST_SO) $(ROOTFS_FIL
 	cp docs/USER-GUIDE.md $(BUILD)/rootfs/share/help/
 	cp $(PROGRAM_BINS) $(DOOM_PROGRAM) $(BUILD)/rootfs/bin/
 	cp $(LIBVEXA_SO) $(VEXA_LD) $(DLTEST_SO) $(BUILD)/rootfs/lib/
+	# The standard root certificates, for native programs (fetch's HTTPS).
+	mkdir -p $(BUILD)/rootfs/etc/ssl/certs
+	cp tools/linux-files/ca-certificates.crt $(BUILD)/rootfs/etc/ssl/certs/
 	# Apps (.vxapp bundles): each app's program moves into its bundle, and
 	# /bin keeps a link to it for the command line.
 	cp -R apps $(BUILD)/rootfs/apps
