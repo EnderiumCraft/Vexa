@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Build a disk image holding an ext2 file system, for testing Vexa's drivers.
+"""Build a disk image holding an ext2 (or ext3) file system, for testing Vexa's drivers.
 
-Usage: tools/make-disk.py OUTPUT SIZE_MIB {gpt,mbr,none} CONTENT_DIR
+Usage: tools/make-disk.py OUTPUT SIZE_MIB {gpt,mbr,none} CONTENT_DIR [ext2|ext3]
 
 The file system is made by mke2fs (from e2fsprogs) and filled from
 CONTENT_DIR. With gpt or mbr it sits in a single partition starting at 1 MiB;
@@ -54,6 +54,7 @@ def mbr(size, part_first, part_last):
 
 def main():
     output, size_mib, layout, content = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4]
+    fs_type = sys.argv[5] if len(sys.argv) > 5 else "ext2"
     size = size_mib * 1024 * 1024
     with open(output, "wb") as f:
         f.truncate(size)
@@ -72,7 +73,7 @@ def main():
                 f.seek(size - len(end))
                 f.write(end)
 
-    subprocess.run(["mke2fs", "-q", "-F", "-t", "ext2", "-b", "1024", "-L", "vexa-test",
+    subprocess.run(["mke2fs", "-q", "-F", "-t", fs_type, "-b", "1024", "-L", "vexa-test",
                     "-E", f"offset={offset},root_owner=0:0", "-d", content, output,
                     str(fs_size // 1024)], check=True,
                    env=dict(os.environ, E2FSPROGS_FAKE_TIME="0"))

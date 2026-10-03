@@ -196,8 +196,9 @@ ifeq ($(LINUX_COMPAT),1)
 LINUX_TREE := $(LINUX_ROOT)/.done
 endif
 
-# Test disks for `make test`: the same ext2 file system (tests/disk-content
-# plus hello-world) on three kinds of disk, each with a different layout.
+# Test disks for `make test`: the same file system (tests/disk-content plus
+# hello-world) on three kinds of disk, each with a different layout; ext2,
+# but ext3 (with a journal) on the NVMe one.
 DISK_CONTENT_FILES := $(shell find tests/disk-content -type f)
 TEST_DISKS := $(BUILD)/disks/virtio-gpt.img $(BUILD)/disks/sata-mbr.img \
 	$(BUILD)/disks/nvme-whole.img
@@ -773,7 +774,7 @@ $(BUILD)/disks/sata-mbr.img: $(BUILD)/disk-content tools/make-disk.py
 
 $(BUILD)/disks/nvme-whole.img: $(BUILD)/disk-content tools/make-disk.py
 	@mkdir -p $(dir $@)
-	tools/make-disk.py $@ 16 none $<
+	tools/make-disk.py $@ 16 none $< ext3
 
 test-disks: $(TEST_DISKS)
 
