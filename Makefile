@@ -64,6 +64,13 @@ STATIC_PROGRAMS := hello-world
 LIBVEXA_SRCS := $(wildcard libvexa/src/*.c libvexa/src/*.S)
 LIBVEXA_OBJS := $(patsubst libvexa/src/%,$(BUILD)/libvexa/%.o,$(LIBVEXA_SRCS))
 CRT0 := $(BUILD)/libvexa/crt0.S.o
+# The math library (libm) is musl's, built position independent and linked
+# into libvexa: it uses nothing of musl's C library.
+MUSL_VERSION := 1.2.4
+MUSL_URL := https://archive.ubuntu.com/ubuntu/pool/universe/m/musl/musl_$(MUSL_VERSION).orig.tar.gz
+MUSL_SHA256 := 7a35eae33d5372a7c0da1188de798726f68825513b7ae3ebe97aaaa52114f039
+MUSL_TARBALL := third_party/musl-$(MUSL_VERSION).tar.gz
+LIBM := $(BUILD)/libm/libm.a
 LIBVEXA_SO := $(BUILD)/lib/libvexa.so
 VEXA_LD := $(BUILD)/lib/vexa-ld.so
 VEXA_LD_OBJS := $(patsubst libvexa/ld/%,$(BUILD)/vexa-ld/%.o,$(wildcard libvexa/ld/*.c libvexa/ld/*.S))
@@ -226,9 +233,16 @@ $(BUILD)/userland/%.c.o: userland/%.c
 
 # libvexa.so: libvexa without crt0 (which each program carries), binding its
 # own references to itself.
-$(LIBVEXA_SO): $(filter-out $(CRT0),$(LIBVEXA_OBJS))
+$(LIBVEXA_SO): $(filter-out $(CRT0),$(LIBVEXA_OBJS)) $(LIBM)
 	@mkdir -p $(dir $@)
-	$(LD) $(USER_LDFLAGS) -shared -Bsymbolic -soname libvexa.so $^ -o $@
+	$(LD) $(USER_LDFLAGS) -shared -Bsymbolic -soname libvexa.so \
+		$(filter %.o,$^) --whole-archive $(LIBM) --no-whole-archive -o $@
+
+$(MUSL_TARBALL):
+	$(call fetch,$(MUSL_URL),$(MUSL_SHA256))
+
+$(LIBM): $(MUSL_TARBALL) tools/build-libm.sh
+	tools/build-libm.sh $(MUSL_TARBALL) $(BUILD)/libm-work $@
 
 # The dynamic loader relocates itself before it uses any pointer, so all its
 # symbols are hidden: it needs only relative relocations.
@@ -241,11 +255,11 @@ $(VEXA_LD): $(VEXA_LD_OBJS)
 	$(LD) $(USER_LDFLAGS) -shared -Bsymbolic -e _start $^ -o $@
 
 .SECONDEXPANSION:
-$(BUILD)/programs/%: $(CRT0) $(LIBVEXA_SO) $(LIBVEXA_OBJS) libvexa/program.ld \
+$(BUILD)/programs/%: $(CRT0) $(LIBVEXA_SO) $(LIBVEXA_OBJS) $(LIBM) libvexa/program.ld \
 		$$(addprefix $(BUILD)/,$$(addsuffix .o,$$(wildcard userland/$$*/*.c)))
 	@mkdir -p $(dir $@)
 	$(if $(filter $*,$(STATIC_PROGRAMS)), \
-		$(LD) $(STATIC_LDFLAGS) $(sort $(filter %.o,$^)) -o $@, \
+		$(LD) $(STATIC_LDFLAGS) $(sort $(filter %.o,$^)) $(LIBM) -o $@, \
 		$(LD) $(DYNAMIC_LDFLAGS) $(CRT0) $(filter-out $(LIBVEXA_OBJS),$(filter %.o,$^)) \
 			$(LIBVEXA_SO) -o $@)
 

@@ -24,5 +24,23 @@ size_t strcspn(const char *s, const char *reject);
 char *strpbrk(const char *s, const char *accept);
 char *strdup(const char *s);
 char *strndup(const char *s, size_t n);
+char *strerror(int error);
+int strerror_r(int error, char *out, size_t size);
+char *strtok(char *s, const char *delimiters);
+char *strtok_r(char *s, const char *delimiters, char **state);
+char *strsep(char **s, const char *delimiters);
+int strcoll(const char *a, const char *b);
+size_t strxfrm(char *out, const char *s, size_t n);
+char *stpcpy(char *dest, const char *src);
+char *stpncpy(char *dest, const char *src, size_t n);
+size_t strlcpy(char *dest, const char *src, size_t size);
+size_t strlcat(char *dest, const char *src, size_t size);
+void *memccpy(void *dest, const void *src, int c, size_t n);
+void *memrchr(const void *s, int c, size_t n);
+void *mempcpy(void *dest, const void *src, size_t n);
+char *strcasestr(const char *haystack, const char *needle);
+char *strsignal(int signal);
+int strcasecmp(const char *a, const char *b);
+int strncasecmp(const char *a, const char *b, size_t n);
 
 #endif

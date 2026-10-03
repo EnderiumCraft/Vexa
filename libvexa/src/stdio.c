@@ -1,3 +1,4 @@
+#include <errno.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -6,6 +7,8 @@
 #include <string.h>
 #include <vexa/syscall.h>
 #include <vexa/thread.h>
+#include "format.h"
+#include "internal.h"
 
 /* ---- Files ----
  * Each FILE has a lock, so threads can share one; the list of open files has
@@ -21,6 +24,10 @@ struct vx_file {
     size_t size;
     size_t write_used;          /* Bytes waiting to be written. */
     size_t read_pos, read_len;  /* Buffered input. */
+    bool has_ungot;             /* ungetc's character, read before the buffer. */
+    unsigned char ungot;
+    bool own_buffer;            /* (Not given with setvbuf.) */
+    int process;                /* popen's process handle, or 0. */
     struct vx_mutex lock;
     struct vx_file *next;
 };
@@ -95,6 +102,7 @@ static FILE *new_file(int handle, bool readable, bool writable) {
     file->buffering = FULLY_BUFFERED;
     file->buffer = buffer;
     file->size = BUFSIZ;
+    file->own_buffer = true;
     vx_mutex_lock(&list_lock);
     file->next = open_files;
     open_files = file;
@@ -158,7 +166,14 @@ int fclose(FILE *file) {
     }
     vx_mutex_unlock(&list_lock);
     vx_close(file->handle);
-    free(file->buffer);
+    if (file->process) { /* popen: wait for the program. */
+        long code = vx_wait(file->process, 0);
+        vx_close(file->process);
+        result = code < 0 ? -1 : (int)((code & 0xff) << 8);
+    }
+    if (file->own_buffer) {
+        free(file->buffer);
+    }
     free(file);
     return result;
 }
@@ -175,10 +190,23 @@ int ferror(FILE *file) {
     return file->error;
 }
 
+/* Before writing after reading: the handle is past what was read ahead. */
+static void drop_input(FILE *file) {
+    size_t ahead = file->read_len - file->read_pos + (file->has_ungot ? 1 : 0);
+    if (ahead) {
+        vx_seek(file->handle, -(long)ahead, VX_SEEK_CURRENT);
+    }
+    file->read_pos = file->read_len = 0;
+    file->has_ungot = false;
+}
+
 static int fputc_unlocked(int c, FILE *file) {
     if (!file->writable) {
         file->error = true;
         return EOF;
+    }
+    if (file->read_len || file->has_ungot) {
+        drop_input(file);
     }
     if (file->buffering == UNBUFFERED) {
         char ch = (char)c;
@@ -204,6 +232,9 @@ int fputc(int c, FILE *file) {
 static size_t fwrite_unlocked(const void *buffer, size_t size, size_t count, FILE *file) {
     const char *p = buffer;
     size_t total = size * count;
+    if (file->read_len || file->has_ungot) {
+        drop_input(file);
+    }
     if (file->buffering == UNBUFFERED || (file->write_used == 0 && total >= file->size)) {
         size_t done = 0;
         while (done < total) {
@@ -254,6 +285,13 @@ static int fgetc_unlocked(FILE *file) {
     if (!file->readable) {
         file->error = true;
         return EOF;
+    }
+    if (file->has_ungot) {
+        file->has_ungot = false;
+        return file->ungot;
+    }
+    if (file->write_used) {
+        flush_one(file);
     }
     if (file->read_pos == file->read_len) {
         if (file == stdin) {
@@ -311,6 +349,14 @@ size_t fread(void *buffer, size_t size, size_t count, FILE *file) {
     size_t total = size * count, done = 0;
     vx_mutex_lock(&file->lock);
     while (done < total) {
+        if (!file->has_ungot && file->read_pos < file->read_len) {
+            size_t n = file->read_len - file->read_pos;
+            n = n < total - done ? n : total - done;
+            memcpy(p + done, file->buffer + file->read_pos, n);
+            file->read_pos += n;
+            done += n;
+            continue;
+        }
         int c = fgetc_unlocked(file);
         if (c == EOF) {
             break;
@@ -323,14 +369,9 @@ size_t fread(void *buffer, size_t size, size_t count, FILE *file) {
 
 /* ---- Formatting ---- */
 
-struct sink {
-    FILE *file;     /* Either a file... */
-    char *out;      /* ...or a buffer of `size` bytes. */
-    size_t size;
-    size_t count;   /* Characters produced (even past the end of the buffer). */
-};
+#define emit __libvexa_emit
 
-static void emit(struct sink *sink, char c) {
+void __libvexa_emit(struct sink *sink, char c) {
     if (sink->file) {
         fputc_unlocked(c, sink->file);
     } else if (sink->count + 1 < sink->size) {
@@ -364,13 +405,13 @@ static int format(struct sink *sink, const char *f, va_list args) {
             continue;
         }
         f++;
-        bool left = false, zero = false, plus = false, space = false;
+        bool left = false, zero = false, plus = false, space = false, alt = false;
         for (;; f++) {
             if (*f == '-') left = true;
             else if (*f == '0') zero = true;
             else if (*f == '+') plus = true;
             else if (*f == ' ') space = true;
-            else if (*f == '#') ;
+            else if (*f == '#') alt = true;
             else break;
         }
         int width = 0;
@@ -398,10 +439,13 @@ static int format(struct sink *sink, const char *f, va_list args) {
             }
         }
         int length = 0; /* 0 int, 1 long, 2 long long, -1 short, -2 char */
+        bool long_double = false;
         for (;; f++) {
             if (*f == 'l') length++;
             else if (*f == 'h') length--;
             else if (*f == 'z' || *f == 'j' || *f == 't') length = 1;
+            else if (*f == 'q') length = 2;
+            else if (*f == 'L') long_double = true;
             else break;
         }
 
@@ -445,9 +489,13 @@ static int format(struct sink *sink, const char *f, va_list args) {
             if (negative) digits[n++] = '-';
             else if (plus && is_signed) digits[n++] = '+';
             else if (space && is_signed) digits[n++] = ' ';
-            if (*f == 'p') {
+            bool nonzero = count > 1 || (count == 1 && reversed[0] != '0');
+            if (*f == 'p' || (alt && nonzero && (*f == 'x' || *f == 'X'))) {
                 digits[n++] = '0';
-                digits[n++] = 'x';
+                digits[n++] = *f == 'X' ? 'X' : 'x';
+            } else if (alt && *f == 'o' && (count == 0 || reversed[count - 1] != '0') &&
+                       precision <= (int)count) {
+                digits[n++] = '0';
             }
             size_t prefix = n;
             for (int i = (int)count; i < precision; i++) {
@@ -467,6 +515,27 @@ static int format(struct sink *sink, const char *f, va_list args) {
             }
             break;
         }
+        case 'f':
+        case 'F':
+        case 'e':
+        case 'E':
+        case 'g':
+        case 'G':
+        case 'a':
+        case 'A': {
+            long double value = long_double ? va_arg(args, long double) : va_arg(args, double);
+            unsigned flags = (left ? LEFT_ADJ : 0) | (zero ? ZERO_PAD : 0) |
+                             (plus ? MARK_POS : 0) | (space ? PAD_POS : 0) | (alt ? ALT_FORM : 0);
+            __libvexa_fmt_fp(sink, value, width, precision, flags, *f);
+            break;
+        }
+        case 'n':
+            if (length >= 1) {
+                *va_arg(args, long *) = (long)sink->count;
+            } else {
+                *va_arg(args, int *) = (int)sink->count;
+            }
+            break;
         case 'c':
             digits[0] = (char)va_arg(args, int);
             emit_padded(sink, digits, 1, width, left, ' ');
@@ -546,4 +615,337 @@ int sprintf(char *out, const char *f, ...) {
     int n = vsnprintf(out, SIZE_MAX, f, args);
     va_end(args);
     return n;
+}
+
+int vsprintf(char *out, const char *f, va_list args) {
+    return vsnprintf(out, SIZE_MAX, f, args);
+}
+
+int vdprintf(int fd, const char *f, va_list args) {
+    char small[256];
+    va_list copy;
+    va_copy(copy, args);
+    int n = vsnprintf(small, sizeof small, f, copy);
+    va_end(copy);
+    if (n < 0) {
+        return n;
+    }
+    char *text = small;
+    if ((size_t)n >= sizeof small) {
+        text = malloc((size_t)n + 1);
+        if (!text) {
+            return -1;
+        }
+        vsnprintf(text, (size_t)n + 1, f, args);
+    }
+    for (int done = 0; done < n;) {
+        long w = vx_write(fd, text + done, (size_t)(n - done));
+        if (w <= 0) {
+            n = -1;
+            break;
+        }
+        done += (int)w;
+    }
+    if (text != small) {
+        free(text);
+    }
+    return n;
+}
+
+int dprintf(int fd, const char *f, ...) {
+    va_list args;
+    va_start(args, f);
+    int n = vdprintf(fd, f, args);
+    va_end(args);
+    return n;
+}
+
+int vasprintf(char **out, const char *f, va_list args) {
+    va_list copy;
+    va_copy(copy, args);
+    int n = vsnprintf(NULL, 0, f, copy);
+    va_end(copy);
+    *out = n < 0 ? NULL : malloc((size_t)n + 1);
+    if (!*out) {
+        return -1;
+    }
+    return vsnprintf(*out, (size_t)n + 1, f, args);
+}
+
+int asprintf(char **out, const char *f, ...) {
+    va_list args;
+    va_start(args, f);
+    int n = vasprintf(out, f, args);
+    va_end(args);
+    return n;
+}
+
+/* ---- Positions ---- */
+
+int fseeko(FILE *file, off_t offset, int whence) {
+    vx_mutex_lock(&file->lock);
+    if (file->write_used && flush_one(file)) {
+        vx_mutex_unlock(&file->lock);
+        return -1;
+    }
+    if (whence == SEEK_CUR) { /* Relative to what the program has read. */
+        offset -= (off_t)(file->read_len - file->read_pos + (file->has_ungot ? 1 : 0));
+    }
+    file->read_pos = file->read_len = 0;
+    file->has_ungot = false;
+    long result = vx_seek(file->handle, (long)offset, whence);
+    if (result >= 0) {
+        file->eof = false;
+    }
+    vx_mutex_unlock(&file->lock);
+    return result < 0 ? (int)__vx_errno_result(result) : 0;
+}
+
+int fseek(FILE *file, long offset, int whence) {
+    return fseeko(file, offset, whence);
+}
+
+off_t ftello(FILE *file) {
+    vx_mutex_lock(&file->lock);
+    long position = vx_seek(file->handle, 0, VX_SEEK_CURRENT);
+    if (position >= 0) {
+        position += (long)file->write_used;
+        position -= (long)(file->read_len - file->read_pos + (file->has_ungot ? 1 : 0));
+    }
+    vx_mutex_unlock(&file->lock);
+    return position < 0 ? __vx_errno_result(position) : position;
+}
+
+long ftell(FILE *file) {
+    return ftello(file);
+}
+
+void rewind(FILE *file) {
+    fseeko(file, 0, SEEK_SET);
+    file->error = false;
+}
+
+int fgetpos(FILE *file, fpos_t *position) {
+    off_t at = ftello(file);
+    if (at < 0) {
+        return -1;
+    }
+    *position = at;
+    return 0;
+}
+
+int fsetpos(FILE *file, const fpos_t *position) {
+    return fseeko(file, *position, SEEK_SET);
+}
+
+int ungetc(int c, FILE *file) {
+    if (c == EOF) {
+        return EOF;
+    }
+    vx_mutex_lock(&file->lock);
+    int result = EOF;
+    if (file->read_pos > 0 && !file->has_ungot &&
+        (unsigned char)file->buffer[file->read_pos - 1] == (unsigned char)c) {
+        file->read_pos--; /* The usual case: put back what was just read. */
+        result = (unsigned char)c;
+    } else if (!file->has_ungot) {
+        file->has_ungot = true;
+        file->ungot = (unsigned char)c;
+        result = (unsigned char)c;
+    }
+    if (result != EOF) {
+        file->eof = false;
+    }
+    vx_mutex_unlock(&file->lock);
+    return result;
+}
+
+void clearerr(FILE *file) {
+    file->eof = false;
+    file->error = false;
+}
+
+int setvbuf(FILE *file, char *buffer, int mode, size_t size) {
+    vx_mutex_lock(&file->lock);
+    if (file->write_used) {
+        flush_one(file);
+    }
+    if (mode == _IONBF) {
+        size = 1;
+    } else if (size == 0) {
+        size = BUFSIZ;
+    }
+    if (!buffer || mode == _IONBF) {
+        buffer = malloc(size);
+        if (!buffer) {
+            vx_mutex_unlock(&file->lock);
+            return -1;
+        }
+        if (file->own_buffer) {
+            free(file->buffer);
+        }
+        file->own_buffer = true;
+    } else {
+        if (file->own_buffer) {
+            free(file->buffer);
+        }
+        file->own_buffer = false;
+    }
+    /* The standard streams start with static buffers they don't own. */
+    file->buffer = buffer;
+    file->size = size;
+    file->read_pos = file->read_len = 0;
+    file->buffering = mode == _IONBF ? UNBUFFERED : mode == _IOLBF ? LINE_BUFFERED : FULLY_BUFFERED;
+    vx_mutex_unlock(&file->lock);
+    return 0;
+}
+
+void setbuf(FILE *file, char *buffer) {
+    setvbuf(file, buffer, buffer ? _IOFBF : _IONBF, BUFSIZ);
+}
+
+FILE *freopen(const char *path, const char *mode, FILE *file) {
+    bool readable = false, writable = false;
+    unsigned flags = mode_flags(mode, &readable, &writable);
+    if (!flags || !path) {
+        return NULL;
+    }
+    fflush(file);
+    int handle = vx_open(path, flags);
+    if (handle < 0) {
+        __vx_errno_result(handle);
+        return NULL;
+    }
+    vx_mutex_lock(&file->lock);
+    vx_close(file->handle);
+    file->handle = handle;
+    file->readable = readable;
+    file->writable = writable;
+    file->eof = file->error = file->has_ungot = false;
+    file->read_pos = file->read_len = file->write_used = 0;
+    if (!file->buffer) { /* (stderr is unbuffered with none.) */
+        file->buffering = UNBUFFERED;
+    }
+    vx_mutex_unlock(&file->lock);
+    return file;
+}
+
+FILE *tmpfile(void) {
+    char path[] = "/tmp/tmpfile-XXXXXX";
+    int fd = mkstemp(path);
+    if (fd < 0) {
+        return NULL;
+    }
+    vx_remove(path); /* Gone once closed (or left behind if open files can't be removed). */
+    FILE *file = new_file(fd, true, true);
+    if (!file) {
+        vx_close(fd);
+    }
+    return file;
+}
+
+void perror(const char *what) {
+    const char *message = strerror(errno);
+    if (what && *what) {
+        fprintf(stderr, "%s: %s\n", what, message);
+    } else {
+        fprintf(stderr, "%s\n", message);
+    }
+}
+
+ssize_t getdelim(char **line, size_t *size, int delimiter, FILE *file) {
+    if (!line || !size) {
+        errno = EINVAL;
+        return -1;
+    }
+    size_t used = 0;
+    vx_mutex_lock(&file->lock);
+    for (;;) {
+        int c = fgetc_unlocked(file);
+        if (c == EOF) {
+            if (used == 0) {
+                vx_mutex_unlock(&file->lock);
+                return -1;
+            }
+            break;
+        }
+        if (used + 2 > *size) {
+            size_t grown = *size < 64 ? 128 : *size * 2;
+            char *bigger = realloc(*line, grown);
+            if (!bigger) {
+                vx_mutex_unlock(&file->lock);
+                errno = ENOMEM;
+                return -1;
+            }
+            *line = bigger;
+            *size = grown;
+        }
+        (*line)[used++] = (char)c;
+        if (c == delimiter) {
+            break;
+        }
+    }
+    (*line)[used] = '\0';
+    vx_mutex_unlock(&file->lock);
+    return (ssize_t)used;
+}
+
+ssize_t getline(char **line, size_t *size, FILE *file) {
+    return getdelim(line, size, '\n', file);
+}
+
+FILE *popen(const char *command, const char *mode) {
+    bool reading = mode[0] == 'r';
+    if (!reading && mode[0] != 'w') {
+        errno = EINVAL;
+        return NULL;
+    }
+    int ends[2];
+    long result = vx_pipe(ends);
+    if (result < 0) {
+        __vx_errno_result(result);
+        return NULL;
+    }
+    /* ends[0] reads, ends[1] writes; the program gets the other end. */
+    int ours = reading ? ends[0] : ends[1];
+    int theirs = reading ? ends[1] : ends[0];
+    const char *argv[] = {"vsh", "-c", command, NULL};
+    unsigned long envc = 0;
+    while (environ && environ[envc]) {
+        envc++;
+    }
+    struct vx_spawn spawn = {.argv = argv, .argc = 3, .envp = (const char *const *)environ,
+                             .envc = envc,
+                             .handles = {reading ? 0 : theirs, reading ? theirs : 1, 2}};
+    int process = vx_spawn("/bin/vsh", &spawn);
+    vx_close(theirs);
+    if (process < 0) {
+        vx_close(ours);
+        __vx_errno_result(process);
+        return NULL;
+    }
+    FILE *file = new_file(ours, reading, !reading);
+    if (!file) {
+        vx_close(ours);
+        vx_kill(vx_handle_process_id(process), 9);
+        vx_wait(process, 0);
+        vx_close(process);
+        return NULL;
+    }
+    file->process = process;
+    return file;
+}
+
+int pclose(FILE *file) {
+    return fclose(file);
+}
+
+/* Each call already locks the file, and its lock isn't recursive, so these
+ * only promise what a single call does. */
+void flockfile(FILE *file) {
+    (void)file;
+}
+
+void funlockfile(FILE *file) {
+    (void)file;
 }

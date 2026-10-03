@@ -97,6 +97,8 @@ long vx_mounts(struct vx_mount_info *mounts, size_t count);
 /* The computer's name, and changing it (letters, digits, '-' and '.'). */
 long vx_get_hostname(char *buffer, size_t size);
 long vx_set_hostname(const char *name);
+/* The calling thread's thread pointer (%fs base): what libvexa keeps per thread. */
+long vx_set_thread_pointer(void *address);
 long vx_kernel_command(const char *command);
 
 /* A short description of a (negative) VX_E* error. */

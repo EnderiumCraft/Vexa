@@ -6,7 +6,22 @@
 #include <vexa/syscall.h>
 #include <vexa/thread.h>
 
+/* atexit: up to 64 functions, run last first by exit(). */
+static void (*exit_functions[64])(void);
+static int exit_function_count;
+
+int atexit(void (*fn)(void)) {
+    if (exit_function_count == 64) {
+        return -1;
+    }
+    exit_functions[exit_function_count++] = fn;
+    return 0;
+}
+
 void exit(int code) {
+    while (exit_function_count) {
+        exit_functions[--exit_function_count]();
+    }
     fflush(NULL);
     vx_exit(code);
 }
@@ -28,6 +43,7 @@ void abort(void) {
 #define CHUNK_SIZE (64 * 1024)
 #define MAGIC 0x76657861UL /* "vexa" */
 #define LARGE 0xffffffffUL
+#define ALIGNED 0xa119eedUL /* An aligned block: `size` is the malloc'd block it's in. */
 
 struct header {
     size_t size;  /* Usable bytes (small: the class size; large: what was mapped). */
@@ -85,6 +101,10 @@ static void free_unlocked(void *pointer) {
         return;
     }
     struct header *header = (struct header *)pointer - 1;
+    if ((header->magic & 0xffffffff) == MAGIC && header->magic >> 32 == ALIGNED) {
+        free_unlocked((void *)header->size);
+        return;
+    }
     if ((header->magic & 0xffffffff) != MAGIC) {
         static const char message[] = "free(): not a malloc pointer (or freed twice)\n";
         vx_write(2, message, sizeof(message) - 1);
@@ -135,15 +155,56 @@ void *realloc(void *pointer, size_t size) {
         return malloc(size);
     }
     struct header *header = (struct header *)pointer - 1;
-    if (size <= header->size) {
+    size_t usable = header->size;
+    if (header->magic >> 32 == ALIGNED) { /* What's left of the block it's in. */
+        struct header *block = (struct header *)header->size - 1;
+        usable = block->size - (size_t)((char *)pointer - (char *)header->size);
+    }
+    if (size <= usable) {
         return pointer;
     }
     void *bigger = malloc(size);
     if (bigger) {
-        memcpy(bigger, pointer, header->size);
+        memcpy(bigger, pointer, usable);
         free(pointer);
     }
     return bigger;
+}
+
+/* Aligned blocks: a bigger block, with a header just before the aligned
+ * address that says where the block starts (so free and realloc work). */
+void *aligned_alloc(size_t alignment, size_t size) {
+    if (alignment <= 16) {
+        return malloc(size);
+    }
+    if (alignment & (alignment - 1)) {
+        return NULL;
+    }
+    char *block = malloc(size + alignment + sizeof(struct header));
+    if (!block) {
+        return NULL;
+    }
+    uintptr_t at = ((uintptr_t)block + sizeof(struct header) + alignment - 1) & ~(alignment - 1);
+    struct header *header = (struct header *)at - 1;
+    header->size = (size_t)block;
+    header->magic = MAGIC | (ALIGNED << 32);
+    return (void *)at;
+}
+
+void *memalign(size_t alignment, size_t size) {
+    return aligned_alloc(alignment, size);
+}
+
+int posix_memalign(void **out, size_t alignment, size_t size) {
+    if (alignment < sizeof(void *) || (alignment & (alignment - 1))) {
+        return 22; /* EINVAL */
+    }
+    void *p = aligned_alloc(alignment, size);
+    if (!p) {
+        return 12; /* ENOMEM */
+    }
+    *out = p;
+    return 0;
 }
 
 /* ---- Environment ---- */

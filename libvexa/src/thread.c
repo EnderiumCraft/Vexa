@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <vexa/syscall.h>
 #include <vexa/thread.h>
+#include "internal.h"
 
 #define STACK_SIZE (256 * 1024)
 
@@ -11,6 +12,7 @@ struct vx_thread {
     void *result;
     void *stack;
     volatile unsigned running; /* The kernel sets it to 0 (and wakes us) at exit. */
+    struct __vx_tcb *tcb;      /* Its errno and pthread keys. */
 };
 
 __attribute__((noreturn)) static void thread_entry(struct vx_thread *thread) {
@@ -20,11 +22,14 @@ __attribute__((noreturn)) static void thread_entry(struct vx_thread *thread) {
 
 struct vx_thread *vx_thread_create(void *(*fn)(void *), void *arg) {
     struct vx_thread *thread = malloc(sizeof(*thread));
-    void *stack = thread ? vx_map(STACK_SIZE, VX_MAP_WRITE) : NULL;
+    struct __vx_tcb *tcb = thread ? __libvexa_new_tcb() : NULL;
+    void *stack = tcb ? vx_map(STACK_SIZE, VX_MAP_WRITE) : NULL;
     if (!stack) {
+        __libvexa_free_tcb(tcb);
         free(thread);
         return NULL;
     }
+    thread->tcb = tcb;
     thread->fn = fn;
     thread->arg = arg;
     thread->result = NULL;
@@ -35,11 +40,12 @@ struct vx_thread *vx_thread_create(void *(*fn)(void *), void *arg) {
         /* As if thread_entry had just been called: rsp is 8 below a 16-byte boundary. */
         .stack = (char *)stack + STACK_SIZE - 8,
         .arg = thread,
-        .tls = NULL,
+        .tls = tcb,
         .exit_word = (unsigned *)&thread->running,
     };
     if (vx_thread_start(&start) < 0) {
         vx_unmap(stack, STACK_SIZE);
+        __libvexa_free_tcb(tcb);
         free(thread);
         return NULL;
     }
@@ -52,6 +58,7 @@ void *vx_thread_join(struct vx_thread *thread) {
     }
     void *result = thread->result;
     vx_unmap(thread->stack, STACK_SIZE);
+    __libvexa_free_tcb(thread->tcb);
     free(thread);
     return result;
 }

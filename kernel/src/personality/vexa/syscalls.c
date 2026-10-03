@@ -754,6 +754,16 @@ static int64_t sys_thread_exit(uint64_t code, uint64_t a1, uint64_t a2, uint64_t
     process_thread_exit((int)code);
 }
 
+static int64_t sys_set_thread_pointer(uint64_t address, uint64_t a1, uint64_t a2, uint64_t a3) {
+    (void)a1, (void)a2, (void)a3;
+    if (address >= USER_END) {
+        return -VX_EINVAL;
+    }
+    thread_current()->fs_base = address;
+    wrmsr(IA32_FS_BASE_MSR, address);
+    return 0;
+}
+
 static int64_t sys_thread_id(uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3) {
     (void)a0, (void)a1, (void)a2, (void)a3;
     return thread_current()->tid;
@@ -1344,6 +1354,7 @@ static const syscall_fn syscalls[] = {
     [VX_SYS_POWER] = sys_power,
     [VX_SYS_MOUNTS] = sys_mounts,
     [VX_SYS_HOSTNAME] = sys_hostname,
+    [VX_SYS_SET_THREAD_POINTER] = sys_set_thread_pointer,
 };
 
 static void vexa_syscall(struct interrupt_frame *frame) {

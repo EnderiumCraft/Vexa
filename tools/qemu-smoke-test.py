@@ -128,6 +128,7 @@ TYPED_COMMANDS = ([
     # Threads: four sharing a mutex, then exiting with threads still running.
     ("thread-test", "thread-test: passed", 60),
     ("thread-test exit", "exiting with threads still running", 30),
+    ("posix-test", "posix-test: passed", 90),
     ("sys mem", "heap ", 10),
     ("sys threads", "idle", 10),
     ("sys memtest", "memtest: passed", 180),

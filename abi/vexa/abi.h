@@ -85,6 +85,8 @@
 #define VX_SYS_MOUNTS 58   /* vx_mounts(struct vx_mount_info *, count) -> how many are mounted */
 #define VX_SYS_HOSTNAME 59 /* vx_hostname(char *buffer, size, const char *new or NULL,
                               length): the computer's name (sets it first if `new`) */
+#define VX_SYS_SET_THREAD_POINTER 60 /* vx_set_thread_pointer(address): the calling thread's
+                                        thread pointer (FS base), as vx_thread_start's tls */
 
 /* vx_power actions. */
 #define VX_POWER_RESTART 1
