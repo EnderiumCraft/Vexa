@@ -1,6 +1,7 @@
 #include <stdbool.h>
 #include <vexa/arch.h>
 #include <vexa/kprintf.h>
+#include <vexa/random.h>
 #include <vexa/sched.h>
 #include <vexa/signal.h>
 #include "irqchip.h"
@@ -58,6 +59,7 @@ void irq_dispatch(struct interrupt_frame *frame) {
     if (!using_apic && isa && pic_is_spurious(irq)) {
         return;
     }
+    random_interrupt(vector);
     if (irq_handlers[vector]) {
         irq_handlers[vector](frame);
     } else if (isa && using_apic) {

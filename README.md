@@ -147,7 +147,8 @@ kernel options behind it (`acpi=off`, `noapic`) can also be set in `limine.conf`
 `make run` gives Vexa a virtio network card behind QEMU's user-mode NAT: DHCP hands out
 10.0.2.15, the router is 10.0.2.2 (which is also your machine), and DNS goes through
 10.0.2.3. Try `net`, `fetch http://example.com/`, or `wget -O - http://example.com/`.
-There is no HTTPS yet (no TLS library), and no IPv6.
+Linux programs have HTTPS: `curl https://example.com/`, `openssl`, and Python's `ssl`,
+with Mozilla's root certificates. There's no IPv6 yet.
 
 ### Disks
 
@@ -288,7 +289,9 @@ its source with the configuration in `third_party/busybox.config`, and
 [GNU bash](https://www.gnu.org/software/bash/) 5.2.37 (GPL-3.0), built unmodified with
 the options in the Makefile. [GNU coreutils](https://www.gnu.org/software/coreutils/) 9.4 (GPL-3.0) and
 [Python](https://www.python.org) 3.12.3 (PSF License, with [zlib](https://zlib.net) 1.3
-and [libffi](https://sourceware.org/libffi/) 3.4.6), also built unmodified. All of them are
+and [libffi](https://sourceware.org/libffi/) 3.4.6), [OpenSSL](https://www.openssl.org) 3.0.13
+(Apache-2.0) and [curl](https://curl.se) 8.5.0 (curl license), also built unmodified. The root
+certificates are Mozilla's (MPL-2.0), from its `certdata.txt`. All of them are
 linked against the [musl](https://musl.libc.org) C library (MIT license), which the ISO
 also includes. Every release on the Releases page carries the matching GPL sources
 (`busybox-1_36_1-source.tar.gz`, `bash-5.2.37.tar.xz`, `coreutils-9.4.tar.xz`).

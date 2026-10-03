@@ -352,6 +352,10 @@ with musl. What's in the ISO is built from source with musl by the Makefile and
 
 - BusyBox (`third_party/busybox.config`), GNU bash, GNU coreutils and Python 3.12
   (targets `busybox`, `bash`, `coreutils`, `python`)
+- OpenSSL (shared libraries) and curl (targets `openssl`, `curl`); Python's `ssl` and
+  `hashlib` use that OpenSSL. The root certificates,
+  `tools/linux-files/ca-certificates.crt`, are made from Mozilla's `certdata.txt` by
+  `tools/make-ca-bundle.py` (run it again to update them)
 - the X and GTK stack (`tools/build-x11.sh`, sources in `third_party/x11-sources.txt`),
   with `tools/musl-cc-wrapper.sh` and `tools/musl-cxx-wrapper.sh` for the compilers
 - `tools/make-linux-root.sh` puts it all together into `build/linux-root`, which
@@ -376,6 +380,10 @@ some starting points:
   `kernel/src/personality/linux/`
 - devices are files under `/dev` (`kernel/src/fs/devfs.c`); a device request is
   `vx_control`
+- random numbers (`random_bytes`, for keys too) come from ChaCha20 keyed from a
+  BLAKE2s pool of RDSEED/RDRAND and interrupt timings
+  (`kernel/src/arch/x86_64/random.c`); Linux programs get them through `getrandom`
+  and `/dev/urandom`
 - the kernel monitor (`kernel/src/core/monitor.c`) is also reachable from programs
   through `vx_kernel_command` (that's what `sys` does)
 

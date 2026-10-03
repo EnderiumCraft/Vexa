@@ -22,6 +22,7 @@ import http.server
 import os
 import shutil
 import socket
+import ssl
 import struct
 import subprocess
 import sys
@@ -370,6 +371,23 @@ LINUX_COMMANDS = [
     ("ifconfig eth0", "inet addr:10.0.2.15", 20),
     ("ping -c 2 127.0.0.1", "2 packets received", 30),
     ("python-net-test.py @URL@/data.bin @SHA1@", "python-net-test: passed", 300),
+    # HTTPS: OpenSSL, curl and Python's ssl module, with the root certificates
+    # (and, for the test's own server, its certificate authority: without it,
+    # curl refuses the server). Random numbers from the kernel's generator.
+    ("openssl version", "OpenSSL 3.0", 30),
+    ("python3 -c \"import os; print(len(set(os.urandom(16) for i in range(500))), 'different')\"",
+     "500 different", 60),
+    ("wget -q -O /tmp/test-ca.pem @URL@/test-ca.pem", None, 30),
+    ("curl -sS @HTTPS@/hello.txt", "SSL certificate problem", 60),
+    ("curl -sS --cacert /tmp/test-ca.pem @HTTPS@/hello.txt",
+     "Hello from the test's web server", 60),
+    ("curl -sS --cacert /tmp/test-ca.pem -o /tmp/data2.bin @HTTPS@/data.bin", None, 120),
+    ("sha1sum /tmp/data2.bin", "@SHA1@", 30),
+    ("python3 -c \"import ssl; print(ssl.create_default_context().cert_store_stats())\"",
+     "'x509_ca': 1", 60),
+    ("python3 -c \"import ssl, urllib.request as u; c = ssl.create_default_context("
+     "cafile='/tmp/test-ca.pem'); print(u.urlopen('@HTTPS@/hello.txt', context=c).read())\"",
+     "b\"Hello from the test's web server", 120),
     ("#shell",),
 ]
 
@@ -515,6 +533,33 @@ def start_web_server(directory):
     return "http://10.0.2.2:%d" % server.server_address[1], hashlib.sha1(data).hexdigest()
 
 
+def start_https_server(directory):
+    """Serves `directory` over HTTPS too, with a certificate for 10.0.2.2 from
+    a certificate authority made for the test (its certificate is test-ca.pem,
+    also served); returns the URL the guest uses."""
+    def run(*command):
+        subprocess.run(["openssl", *command], cwd=directory, check=True,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    run("req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "2", "-subj",
+        "/CN=Vexa test CA", "-keyout", "ca.key", "-out", "test-ca.pem")
+    run("req", "-newkey", "rsa:2048", "-nodes", "-subj", "/CN=10.0.2.2",
+        "-keyout", "server.key", "-out", "server.csr")
+    with open(os.path.join(directory, "server.ext"), "w") as f:
+        f.write("subjectAltName=IP:10.0.2.2\n")
+    run("x509", "-req", "-in", "server.csr", "-CA", "test-ca.pem", "-CAkey", "ca.key",
+        "-CAcreateserial", "-days", "2", "-extfile", "server.ext", "-out", "server.pem")
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.load_cert_chain(os.path.join(directory, "server.pem"),
+                            os.path.join(directory, "server.key"))
+    for name in ("ca.key", "server.key", "server.csr", "server.ext"):
+        os.unlink(os.path.join(directory, name))
+    handler = functools.partial(QuietHandler, directory=directory)
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    server.socket = context.wrap_socket(server.socket, server_side=True)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return "https://10.0.2.2:%d" % server.server_address[1]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--screenshot", help="save a PNG of the screen at the end")
@@ -553,6 +598,7 @@ def main():
     www = os.path.join(tmp, "www")
     os.mkdir(www)
     url, sha1 = start_web_server(www)
+    https_url = start_https_server(www)
     commands = list(TYPED_COMMANDS)
     if not args.no_linux:
         at = next(i for i, c in enumerate(commands) if c[0] == "ps")
@@ -575,7 +621,8 @@ def main():
     commands = kept
 
     def fill(text):
-        return text.replace("@URL@", url).replace("@SHA1@", sha1) if text else text
+        return (text.replace("@URL@", url).replace("@HTTPS@", https_url).replace("@SHA1@", sha1)
+                if text else text)
     commands = [(fill(c), fill(e), *rest) for c, e, *rest in commands]
     if args.uefi:
         command += ["-bios", OVMF]

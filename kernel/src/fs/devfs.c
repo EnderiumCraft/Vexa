@@ -3,6 +3,7 @@
 #include <vexa/kprintf.h>
 #include <vexa/mm.h>
 #include <vexa/process.h>
+#include <vexa/random.h>
 #include <vexa/string.h>
 #include <vexa/pty.h>
 #include <vexa/tty.h>
@@ -95,6 +96,21 @@ static int64_t block_node_write(struct vnode *vnode, const void *buffer, size_t 
     return error ? error : (int64_t)size;
 }
 
+/* /dev/random and /dev/urandom: the same generator (it never runs dry);
+ * what's written to them goes into its pool. */
+static int64_t random_read(struct vnode *v, void *b, size_t s, uint64_t o) {
+    (void)v, (void)o;
+    random_bytes(b, s);
+    return (int64_t)s;
+}
+
+static int64_t random_write(struct vnode *v, const void *b, size_t s, uint64_t o) {
+    (void)v, (void)o;
+    random_add(b, s);
+    return (int64_t)s;
+}
+
+static const struct vnode_ops random_ops = {.read = random_read, .write = random_write};
 static const struct vnode_ops null_ops = {.read = null_read, .write = null_write};
 static const struct vnode_ops zero_ops = {.read = zero_read, .write = null_write};
 static const struct vnode_ops console_ops = {
@@ -234,6 +250,8 @@ static int devfs_mount(struct mount *mount, struct block_device *device) {
     mount->root = &devfs_root;
     add_node(NULL, "null", VX_TYPE_CHAR_DEVICE, &null_ops, NULL);
     add_node(NULL, "zero", VX_TYPE_CHAR_DEVICE, &zero_ops, NULL);
+    add_node(NULL, "random", VX_TYPE_CHAR_DEVICE, &random_ops, NULL);
+    add_node(NULL, "urandom", VX_TYPE_CHAR_DEVICE, &random_ops, NULL);
     add_node(NULL, "console", VX_TYPE_CHAR_DEVICE, &console_ops, NULL);
     add_node(NULL, "tty", VX_TYPE_CHAR_DEVICE, &console_ops, NULL);
     for (size_t i = 0; i < sizeof(link_targets) / sizeof(link_targets[0]); i++) {

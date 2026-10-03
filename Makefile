@@ -114,6 +114,24 @@ LIBFFI_TARBALL := third_party/libffi-$(LIBFFI_VERSION).tar.gz
 LIBFFI_PREFIX := $(BUILD)/libffi
 LIBFFI := $(LIBFFI_PREFIX)/lib/libffi.a
 
+# OpenSSL (TLS for curl and Python's ssl module), as shared libraries, with
+# its settings in /etc/ssl (where the root certificates are).
+OPENSSL_VERSION := 3.0.13
+OPENSSL_URL := https://archive.ubuntu.com/ubuntu/pool/main/o/openssl/openssl_$(OPENSSL_VERSION).orig.tar.gz
+OPENSSL_SHA256 := 88525753f79d3bec27d2fa7c66aa0b92b3aa9498dafd93d7cfa4b3780cdae313
+OPENSSL_TARBALL := third_party/openssl-$(OPENSSL_VERSION).tar.gz
+OPENSSL_BUILD := $(BUILD)/openssl-$(OPENSSL_VERSION)
+OPENSSL_ROOT := $(BUILD)/openssl-root
+OPENSSL := $(OPENSSL_ROOT)/.done
+
+# curl (HTTPS, through OpenSSL), with libcurl built in.
+CURL_VERSION := 8.5.0
+CURL_URL := https://archive.ubuntu.com/ubuntu/pool/main/c/curl/curl_$(CURL_VERSION).orig.tar.gz
+CURL_SHA256 := 05fc17ff25b793a437a0906e0484b82172a9f4de02be5ed447e0cab8c3475add
+CURL_TARBALL := third_party/curl-$(CURL_VERSION).tar.gz
+CURL_BUILD := $(BUILD)/curl-$(CURL_VERSION)
+CURL := $(CURL_BUILD)/src/curl
+
 # Python, installed into its own root and pruned (tools/prune-python.sh).
 PYTHON_VERSION := 3.12.3
 PYTHON_URL := https://archive.ubuntu.com/ubuntu/pool/main/p/python3.12/python3.12_$(PYTHON_VERSION).orig.tar.xz
@@ -146,7 +164,7 @@ MY_DISK := $(BUILD)/my-disk.img
 USER_OBJS := $(LIBVEXA_OBJS) \
 	$(patsubst %,$(BUILD)/%.o,$(wildcard $(addsuffix /*.c,$(addprefix userland/,$(PROGRAMS)))))
 
-.PHONY: all kernel programs iso run run-disk run-nographic test test-disks clean distclean \
+.PHONY: all openssl curl kernel programs iso run run-disk run-nographic test test-disks clean distclean \
 	busybox busybox-source bash coreutils python x11 test-native test-quick native-iso \
 	test-bios test-uefi test-safe test-native-boot
 
@@ -346,13 +364,49 @@ $(LIBFFI): $(LIBFFI_TARBALL) | $(BUILD)/linux-headers
 		--prefix=$(abspath $(LIBFFI_PREFIX)) > configure.log
 	$(MAKE) -C $(BUILD)/libffi-$(LIBFFI_VERSION) install > /dev/null
 
+$(OPENSSL_TARBALL):
+	$(call fetch,$(OPENSSL_URL),$(OPENSSL_SHA256))
+
+$(OPENSSL): $(OPENSSL_TARBALL) | $(BUILD)/linux-headers
+	rm -rf $(OPENSSL_BUILD) $(OPENSSL_ROOT) && mkdir -p $(BUILD)
+	tar -xzf $(OPENSSL_TARBALL) -C $(BUILD)
+	cd $(OPENSSL_BUILD) && CC=$(MUSL_CC) ./Configure linux-x86_64 --prefix=/usr --libdir=lib \
+		--openssldir=/etc/ssl shared no-tests no-async no-engine \
+		-isystem $(abspath $(BUILD)/linux-headers) > configure.log
+	$(MAKE) -C $(OPENSSL_BUILD) -j$$(nproc) > $(OPENSSL_BUILD)/build.log 2>&1
+	$(MAKE) -C $(OPENSSL_BUILD) install_sw DESTDIR=$(abspath $(OPENSSL_ROOT)) \
+		> $(OPENSSL_BUILD)/install.log 2>&1
+	# (Its pkg-config files, for building curl and Python, point at the copy here.)
+	sed -i 's|^prefix=.*|prefix=$(abspath $(OPENSSL_ROOT))/usr|' $(OPENSSL_ROOT)/usr/lib/pkgconfig/*.pc
+	touch $@
+
+openssl: $(OPENSSL)
+
+$(CURL_TARBALL):
+	$(call fetch,$(CURL_URL),$(CURL_SHA256))
+
+$(CURL): $(CURL_TARBALL) $(OPENSSL) $(ZLIB) | $(BUILD)/linux-headers
+	rm -rf $(CURL_BUILD) && mkdir -p $(BUILD)
+	tar -xzf $(CURL_TARBALL) -C $(BUILD)
+	cd $(CURL_BUILD) && PKG_CONFIG_LIBDIR= PKG_CONFIG_PATH= CC=$(MUSL_CC) \
+		CPPFLAGS="-isystem $(abspath $(BUILD)/linux-headers)" ./configure \
+		--host=x86_64-linux-musl --prefix=/usr --disable-shared --enable-static \
+		--with-openssl=$(abspath $(OPENSSL_ROOT))/usr --with-zlib=$(abspath $(ZLIB_PREFIX)) \
+		--with-ca-bundle=/etc/ssl/certs/ca-certificates.crt --with-ca-path=/etc/ssl/certs \
+		--without-libpsl --without-brotli --without-zstd --without-libidn2 \
+		--without-nghttp2 --disable-ldap --disable-manual > configure.log
+	$(MAKE) -C $(CURL_BUILD) -j$$(nproc) > $(CURL_BUILD)/build.log 2>&1
+
+curl: $(CURL)
+
 $(PYTHON_TARBALL):
 	$(call fetch,$(PYTHON_URL),$(PYTHON_SHA256))
 
 # Built with musl like the rest; host pkg-config is kept out so only libraries
 # built here are used. The build runs its own python on the host (which has
 # musl's loader), and optional modules without their libraries are skipped.
-$(PYTHON): $(PYTHON_TARBALL) $(ZLIB) $(LIBFFI) tools/prune-python.sh | $(BUILD)/linux-headers
+$(PYTHON): $(PYTHON_TARBALL) $(ZLIB) $(LIBFFI) $(OPENSSL) tools/prune-python.sh \
+		| $(BUILD)/linux-headers
 	rm -rf $(PYTHON_BUILD) $(PYTHON_ROOT) && mkdir -p $(BUILD)
 	tar -xJf $(PYTHON_TARBALL) -C $(BUILD)
 	cd $(PYTHON_BUILD) && \
@@ -360,11 +414,15 @@ $(PYTHON): $(PYTHON_TARBALL) $(ZLIB) $(LIBFFI) tools/prune-python.sh | $(BUILD)/
 		PKG_CONFIG_PATH= MUSL_CC=$(MUSL_CC) ./configure \
 		CC=$(abspath tools/musl-cc-wrapper.sh) --prefix=/usr --without-ensurepip \
 		--disable-test-modules --with-computed-gotos \
+		--with-openssl=$(abspath $(OPENSSL_ROOT))/usr --with-openssl-rpath=no \
 		CPPFLAGS="-I$(abspath $(ZLIB_PREFIX))/include -I$(abspath $(LIBFFI_PREFIX))/include \
 		-isystem $(abspath $(BUILD)/linux-headers)" \
 		LDFLAGS="-L$(abspath $(ZLIB_PREFIX))/lib -L$(abspath $(LIBFFI_PREFIX))/lib" > configure.log
-	MUSL_CC=$(MUSL_CC) $(MAKE) -C $(PYTHON_BUILD) -j$$(nproc) > $(PYTHON_BUILD)/build.log 2>&1
-	MUSL_CC=$(MUSL_CC) $(MAKE) -C $(PYTHON_BUILD) install DESTDIR=$(abspath $(PYTHON_ROOT)) \
+	# (The build tries its modules, so they need to find OpenSSL here.)
+	MUSL_CC=$(MUSL_CC) LD_LIBRARY_PATH=$(abspath $(OPENSSL_ROOT))/usr/lib \
+		$(MAKE) -C $(PYTHON_BUILD) -j$$(nproc) > $(PYTHON_BUILD)/build.log 2>&1
+	MUSL_CC=$(MUSL_CC) LD_LIBRARY_PATH=$(abspath $(OPENSSL_ROOT))/usr/lib \
+		$(MAKE) -C $(PYTHON_BUILD) install DESTDIR=$(abspath $(PYTHON_ROOT)) \
 		> $(PYTHON_BUILD)/install.log 2>&1
 	tools/prune-python.sh $(PYTHON_ROOT) $(basename $(PYTHON_VERSION))
 	touch $@
@@ -389,12 +447,22 @@ $(X11): $(X11_SOURCES) tools/build-x11.sh $(wildcard third_party/xvexa/*) | $(BU
 x11: $(X11)
 
 $(LINUX_ROOT)/.done: $(BUSYBOX) $(BASH) $(COREUTILS) $(PYTHON) $(X11) $(MUSL_LIBC) $(LINUX_TESTS) \
-		$(XCLIPBOARD) tools/make-linux-root.sh \
+		$(XCLIPBOARD) $(OPENSSL) $(CURL) tools/make-linux-root.sh \
 		$(wildcard tools/linux-files/* tools/linux-files/applications/*)
 	tools/make-linux-root.sh $(LINUX_ROOT) $(MUSL_LIBC) $(BUSYBOX) \
 		$(BUSYBOX_BUILD)/busybox.links $(BASH) $(COREUTILS) $(COREUTILS_BUILD)/programs.txt \
 		$(PYTHON_ROOT) $(X11_SYSROOT) $(LINUX_TESTS)
 	cp $(XCLIPBOARD) $(LINUX_ROOT)/usr/bin/xclipboard
+	# TLS: OpenSSL's libraries and openssl, curl, and the root certificates
+	# (tools/make-ca-bundle.py) where OpenSSL and curl look for them.
+	cp -a $(OPENSSL_ROOT)/usr/lib/libssl.so* $(OPENSSL_ROOT)/usr/lib/libcrypto.so* \
+		$(LINUX_ROOT)/usr/lib/
+	strip --strip-unneeded $(LINUX_ROOT)/usr/lib/libssl.so.3 $(LINUX_ROOT)/usr/lib/libcrypto.so.3
+	install -s $(OPENSSL_ROOT)/usr/bin/openssl $(CURL) $(LINUX_ROOT)/usr/bin/
+	mkdir -p $(LINUX_ROOT)/etc/ssl/certs
+	cp tools/linux-files/ca-certificates.crt $(LINUX_ROOT)/etc/ssl/certs/
+	ln -sf certs/ca-certificates.crt $(LINUX_ROOT)/etc/ssl/cert.pem
+	cp $(OPENSSL_BUILD)/apps/openssl.cnf $(LINUX_ROOT)/etc/ssl/
 	touch $@
 
 # xclipboard: the clipboard between X programs and Vexa's (an X program,

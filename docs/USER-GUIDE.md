@@ -499,7 +499,8 @@ first: `/linux/usr/bin/bash` is what a Linux program sees as `/usr/bin/bash`. Fr
 | `bash` | GNU bash 5.2 (`exit` goes back to `vsh`) |
 | `busybox`, `sh` | BusyBox 1.36: `vi`, `less`, `grep`, `sed`, `awk`, `find`, `top`, `ps`, `wget`, `ping`, `ifconfig`, `tar`, and about 300 more (`busybox` lists them) |
 | GNU coreutils 9.4 | `ls`, `cp`, `sort`, `df`, `timeout`, ... (inside bash, `ls` is coreutils') |
-| `python3` | Python 3.12, with threads, `subprocess`, `multiprocessing`, sockets, `urllib`, `asyncio` |
+| `python3` | Python 3.12, with threads, `subprocess`, `multiprocessing`, sockets, `urllib`, `asyncio`, `ssl`, `hashlib` |
+| `curl`, `openssl` | curl 8.5 and OpenSSL 3.0: HTTPS (and FTP, SMTP and more) with the standard root certificates |
 | `xterm`, `gtk3-demo`, ... | X and GTK programs (see below) |
 
 They get the usual Linux interfaces: processes (`fork`, `exec`), signals, threads,
@@ -540,7 +541,18 @@ ping -c 3 10.0.2.2            # BusyBox's ping
 python3 -c "import urllib.request; print(urllib.request.urlopen('http://example.com').status)"
 ```
 
-There is no HTTPS yet (no TLS library), and no IPv6.
+HTTPS works in Linux programs: `curl` and `openssl` (OpenSSL 3.0), and Python's `ssl`
+module (so `urllib` opens `https://` addresses). They check servers' certificates
+against the standard root certificates, Mozilla's, in `/etc/ssl/certs/ca-certificates.crt`.
+
+```sh
+curl https://example.com/                        # a web page over HTTPS
+curl -sI https://www.python.org/ | head -1       # just the answer's first line
+openssl s_client -connect example.com:443 </dev/null | head  # the certificate chain
+python3 -c "import urllib.request; print(urllib.request.urlopen('https://example.com').status)"
+```
+
+Vexa's own `fetch` and BusyBox's `wget` still speak only HTTP. There's no IPv6 yet.
 
 ## Disks and CDs
 

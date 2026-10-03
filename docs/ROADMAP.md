@@ -91,7 +91,8 @@ registers survive being interrupted.
 - [x] VFS layer (vnodes, path lookup, mount points) and file system calls: `vx_open`,
       `vx_read`, `vx_write`, `vx_seek`, `vx_stat`, `vx_read_dir`, `vx_mkdir`, `vx_remove`
 - [x] initramfs loaded as a Limine module (tar), unpacked into the root file system
-- [x] tmpfs and a device file system (`/dev/null`, `/dev/zero`, `/dev/console`, disks)
+- [x] tmpfs and a device file system (`/dev/null`, `/dev/zero`, `/dev/console`, disks;
+      `/dev/random` and `/dev/urandom` since 0.22.0)
 - [x] PCI enumeration (ECAM or legacy ports), MSI and MSI-X interrupts
 - [x] Block layer: write-through block cache, GPT and MBR partitions
 - [x] virtio-blk driver (QEMU), then AHCI and NVMe for real hardware; each falls back to
@@ -180,7 +181,11 @@ Linux track:
 - [x] DNS resolver in `libvexa`; Linux programs read `/etc/resolv.conf`, which links to
       `/proc/net/resolv.conf` (the name server DHCP gave us)
 - [x] Non-blocking I/O (`O_NONBLOCK`, `FIONBIO`) for sockets and pipes
-- [ ] HTTPS: a TLS library (BearSSL or mbedTLS) for `fetch`, and OpenSSL for Linux programs
+- [x] HTTPS for Linux programs: OpenSSL 3.0 and curl built with musl, Python's `ssl`
+      module, Mozilla's root certificates in `/etc/ssl`, and a cryptographic random
+      generator in the kernel (ChaCha20 over a BLAKE2s entropy pool; `getrandom`,
+      `/dev/urandom`) (0.22.0)
+- [ ] HTTPS in the native `fetch` (a TLS library in libvexa)
 
 **Milestone:** a native Vexa program fetches a web page, and so does Linux `wget`.
 Reached in 0.11.0 (`fetch`, BusyBox `wget`, and Python's `urllib`).
