@@ -59,6 +59,14 @@ mkdir -p "$root/usr/share/glib-2.0" "$root/usr/share/icons" "$root/etc/gtk-3.0"
 cp -a "$x11/usr/share/glib-2.0/schemas" "$root/usr/share/glib-2.0/"
 cp -a "$x11/usr/share/icons/hicolor" "$root/usr/share/icons/"
 cp "$(dirname "$0")/linux-files/gtk-settings.ini" "$root/etc/gtk-3.0/settings.ini"
+# D-Bus: the message bus (xrun starts a session bus for X programs), its
+# settings, and its tools.
+for program in dbus-daemon dbus-launch dbus-send dbus-monitor dbus-run-session dbus-uuidgen; do
+    rm -f "$root/usr/bin/$program"
+    cp "$x11/usr/bin/$program" "$root/usr/bin/"
+done
+mkdir -p "$root/usr/share/dbus-1"
+cp -a "$x11/usr/share/dbus-1/." "$root/usr/share/dbus-1/"
 # The programs the desktop's menu lists (GTK's own entries hide its demos).
 mkdir -p "$root/usr/share/applications"
 cp "$(dirname "$0")"/linux-files/applications/*.desktop "$root/usr/share/applications/"

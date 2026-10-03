@@ -22,7 +22,9 @@
 
 #ifdef LINUX_COMPAT
 void linux_devices_init(void);
+void linux_sound_init(void);
 #endif
+void hda_init(void); /* dev/hda.c */
 
 static void must(int error, const char *what) {
     if (error) {
@@ -102,6 +104,10 @@ void init_thread(void *unused) {
 #endif
     net_init();
     virtio_net_init();
+    hda_init(); /* Sound, if there's an HD Audio controller: /dev/audio0. */
+#ifdef LINUX_COMPAT
+    linux_sound_init(); /* ALSA's /dev/snd for Linux programs, over it. */
+#endif
 
     kprintf("\nVexa kernel initialized.\n");
     /* Normally the rest of the system is user programs, starting with vinit.

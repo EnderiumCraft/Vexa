@@ -351,6 +351,30 @@ struct vx_display_info {
     unsigned int size;          /* Bytes to map. */
 };
 
+/* ---- Sound: /dev/audio0 ----
+ * Write 16-bit signed little-endian samples (interleaved when stereo) and
+ * they play; a write waits while the device's buffer is full. vx_control
+ * sets the format before playing, and tells how much is still to play.
+ * Closing the handle lets what was written finish. */
+#define VX_AUDIO_INFO 0x4101       /* struct vx_audio_info (out) */
+#define VX_AUDIO_SET_FORMAT 0x4102 /* struct vx_audio_format (in): 44100 or 48000 Hz, 1 or 2
+                                      channels; -VX_EBUSY while playing */
+#define VX_AUDIO_DELAY 0x4103      /* unsigned int (out): frames written, not played yet */
+#define VX_AUDIO_DRAIN 0x4104      /* no argument: waits until all of it has played */
+#define VX_AUDIO_DROP 0x4105       /* no argument: stops, throwing away what's left */
+
+struct vx_audio_format {
+    unsigned int rate;     /* Frames a second. */
+    unsigned int channels; /* 1 or 2 */
+};
+
+struct vx_audio_info {
+    char name[48];
+    struct vx_audio_format format; /* The current one. */
+    unsigned int buffer_frames;    /* How much it can hold. */
+    unsigned int reserved;
+};
+
 /* ---- Terminals ----
  * /dev/ptmx opens the controlling side of a new pseudo-terminal (what a
  * terminal window holds: it reads the programs' output and writes the keys

@@ -2204,6 +2204,13 @@ static int64_t sys_mmap(struct interrupt_frame *f, uint64_t address, uint64_t le
             return error == -LE_ESPIPE ? -LE_ENODEV : error;
         }
     }
+    /* Devices that neither lend pages nor read like files (ALSA's status
+     * page, say) can't be mapped: the program falls back to asking. */
+    if (file && file->vnode->type == VX_TYPE_CHAR_DEVICE && !file->vnode->ops->share_page &&
+        !file->vnode->ops->read) {
+        vfs_close(file);
+        return -LE_ENODEV;
+    }
     struct address_space *as = me()->address_space;
     /* Shared mappings of anonymous memory or of files that can lend their
      * pages (tmpfs, so /dev/shm) really share; other file mappings get a

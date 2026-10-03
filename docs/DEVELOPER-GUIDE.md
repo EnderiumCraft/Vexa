@@ -360,6 +360,8 @@ with musl. What's in the ISO is built from source with musl by the Makefile and
   libc++abi, libunwind) for musl, which C++ programs with exceptions and the standard
   library need (`tools/musl-libcxx-wrapper.sh` is the compiler for them), LLVM, and
   Mesa with llvmpipe. CI keeps the result between runs, like the X build
+- ALSA's library with aplay and speaker-test (target `alsa`), for sound in Linux
+  programs; `tools/linux-files/asound.conf` makes "default" alsa-lib's `plug` on the card
 - the X and GTK stack (`tools/build-x11.sh`, sources in `third_party/x11-sources.txt`),
   with `tools/musl-cc-wrapper.sh` and `tools/musl-cxx-wrapper.sh` for the compilers
 - `tools/make-linux-root.sh` puts it all together into `build/linux-root`, which
@@ -388,6 +390,11 @@ some starting points:
   BLAKE2s pool of RDSEED/RDRAND and interrupt timings
   (`kernel/src/arch/x86_64/random.c`); Linux programs get them through `getrandom`
   and `/dev/urandom`
+- sound: `dev/hda.c` drives HD Audio (codec commands through the CORB and RIRB rings, a
+  cyclic DMA stream followed by a kernel thread) as `/dev/audio0`;
+  `personality/linux/sound.c` is the kernel ALSA interface for Linux programs over it.
+  The tests check sound with QEMU's `wav` audio backend: `@sound HZ` measures the pitch
+  of what was recorded
 - the kernel monitor (`kernel/src/core/monitor.c`) is also reachable from programs
   through `vx_kernel_command` (that's what `sys` does)
 

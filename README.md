@@ -144,7 +144,8 @@ kernel options behind it (`acpi=off`, `noapic`) can also be set in `limine.conf`
 
 ### Network
 
-`make run` gives Vexa a virtio network card behind QEMU's user-mode NAT: DHCP hands out
+`make run` gives Vexa a sound card (HD Audio, played through PulseAudio or Core Audio;
+`make run QEMU_AUDIO=` leaves it out) and a virtio network card behind QEMU's user-mode NAT: DHCP hands out
 10.0.2.15, the router is 10.0.2.2 (which is also your machine), and DNS goes through
 10.0.2.3. Try `net`, `fetch http://example.com/`, or `wget -O - http://example.com/`.
 Linux programs have HTTPS: `curl https://example.com/`, `openssl`, and Python's `ssl`,
@@ -172,7 +173,8 @@ windows you can drag, resize, maximize and minimize, and X programs run on it as
 of their own: Ctrl+Alt+X opens an `xterm`.
 Linux programs also get the kernel's display and input interfaces, DRM with "dumb
 buffers" on `/dev/dri/card0` and evdev on `/dev/input`, so they can draw on the whole
-screen without X, and OpenGL through Mesa's llvmpipe (in X windows, or into memory). See [docs/ROADMAP.md](docs/ROADMAP.md) for the
+screen without X, OpenGL through Mesa's llvmpipe (in X windows, or into memory), a D-Bus
+session bus, and sound: an HD Audio driver, `play`, and ALSA for Linux programs (`aplay`). See [docs/ROADMAP.md](docs/ROADMAP.md) for the
 full plan from here to Firefox.
 
 ## Download
@@ -302,7 +304,9 @@ the other X libraries, pixman, xkbcomp and xkeyboard-config, Xft and fontconfig 
 expat, xterm 330 and ncurses 6.6) is under the MIT license and similar permissive
 licenses. So are cairo (MPL-1.1 or LGPL-2.1, used under the MPL), HarfBuzz, fribidi
 (LGPL-2.1), pixman, libpng, libepoxy, libffi and PCRE2 (BSD), and
-[Mesa](https://mesa3d.org) 24.0.5 (MIT), with [LLVM](https://llvm.org) 18.1.8 and its
+[Mesa](https://mesa3d.org) 24.0.5 (MIT), [alsa-lib](https://www.alsa-project.org) 1.2.11
+(LGPL-2.1) and alsa-utils 1.2.9 (`aplay` and `speaker-test`, GPL-2.0; their sources are in
+every release), with [LLVM](https://llvm.org) 18.1.8 and its
 libc++, libc++abi and libunwind (Apache-2.0 with LLVM exceptions); GTK 3, GLib, Pango,
 gdk-pixbuf, ATK and at-spi2-core are under the LGPL-2.1 (or later), and D-Bus under the
 AFL-2.1 or GPL-2.0; they are linked dynamically and unmodified, and every release

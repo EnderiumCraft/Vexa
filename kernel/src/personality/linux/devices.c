@@ -978,7 +978,7 @@ bool linux_device_ioctl(struct file *file, uint32_t request, uint64_t arg, int64
         *result = drm_ioctl(file, request, arg);
         return true;
     }
-    return false;
+    return linux_sound_ioctl(file, request, arg, result);
 }
 
 bool linux_device_read(struct file *file, uint64_t buffer, uint64_t size, int64_t *result) {

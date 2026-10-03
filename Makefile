@@ -15,6 +15,10 @@ LD      ?= ld
 QEMU    ?= qemu-system-x86_64
 # A network card behind QEMU's NAT (the guest gets 10.0.2.15 by DHCP).
 QEMU_NET ?= -netdev user,id=net0 -device virtio-net-pci,netdev=net0
+# A sound card (HD Audio), played through PulseAudio (or PipeWire's stand-in
+# for it) on Linux and Core Audio on macOS. `make run QEMU_AUDIO=` leaves it out.
+QEMU_AUDIO_DRIVER ?= $(if $(filter Darwin,$(shell uname -s)),coreaudio,pa)
+QEMU_AUDIO ?= -audiodev $(QEMU_AUDIO_DRIVER),id=snd0 -device intel-hda -device hda-output,audiodev=snd0
 LIMINE_BRANCH := v9.x-binary
 
 BUILD   := build
@@ -132,6 +136,19 @@ CURL_TARBALL := third_party/curl-$(CURL_VERSION).tar.gz
 CURL_BUILD := $(BUILD)/curl-$(CURL_VERSION)
 CURL := $(CURL_BUILD)/src/curl
 
+# ALSA's library and aplay/speaker-test, for sound in Linux programs (over
+# the kernel's ALSA interface, personality/linux/sound.c).
+ALSA_LIB_VERSION := 1.2.11
+ALSA_LIB_URL := https://archive.ubuntu.com/ubuntu/pool/main/a/alsa-lib/alsa-lib_$(ALSA_LIB_VERSION).orig.tar.bz2
+ALSA_LIB_SHA256 := 9f3f2f69b995f9ad37359072fbc69a3a88bfba081fc83e9be30e14662795bb4d
+ALSA_LIB_TARBALL := third_party/alsa-lib-$(ALSA_LIB_VERSION).tar.bz2
+ALSA_UTILS_VERSION := 1.2.9
+ALSA_UTILS_URL := https://archive.ubuntu.com/ubuntu/pool/main/a/alsa-utils/alsa-utils_$(ALSA_UTILS_VERSION).orig.tar.bz2
+ALSA_UTILS_SHA256 := e7623d4525595f92e11ce25ee9a97f2040a14c6e4dcd027aa96e06cbce7817bd
+ALSA_UTILS_TARBALL := third_party/alsa-utils-$(ALSA_UTILS_VERSION).tar.bz2
+ALSA_ROOT := $(BUILD)/alsa-root
+ALSA := $(ALSA_ROOT)/.done
+
 # Python, installed into its own root and pruned (tools/prune-python.sh).
 PYTHON_VERSION := 3.12.3
 PYTHON_URL := https://archive.ubuntu.com/ubuntu/pool/main/p/python3.12/python3.12_$(PYTHON_VERSION).orig.tar.xz
@@ -178,7 +195,7 @@ MY_DISK := $(BUILD)/my-disk.img
 USER_OBJS := $(LIBVEXA_OBJS) \
 	$(patsubst %,$(BUILD)/%.o,$(wildcard $(addsuffix /*.c,$(addprefix userland/,$(PROGRAMS)))))
 
-.PHONY: all openssl curl mesa kernel programs iso run run-disk run-nographic test test-disks clean distclean \
+.PHONY: all openssl curl mesa alsa kernel programs iso run run-disk run-nographic test test-disks clean distclean \
 	busybox busybox-source bash coreutils python x11 test-native test-quick native-iso \
 	test-bios test-uefi test-safe test-native-boot
 
@@ -413,6 +430,38 @@ $(CURL): $(CURL_TARBALL) $(OPENSSL) $(ZLIB) | $(BUILD)/linux-headers
 
 curl: $(CURL)
 
+$(ALSA_LIB_TARBALL):
+	$(call fetch,$(ALSA_LIB_URL),$(ALSA_LIB_SHA256))
+
+$(ALSA_UTILS_TARBALL):
+	$(call fetch,$(ALSA_UTILS_URL),$(ALSA_UTILS_SHA256))
+
+$(ALSA): $(ALSA_LIB_TARBALL) $(ALSA_UTILS_TARBALL) | $(BUILD)/linux-headers
+	rm -rf $(BUILD)/alsa-lib-$(ALSA_LIB_VERSION) $(BUILD)/alsa-utils-$(ALSA_UTILS_VERSION) \
+		$(ALSA_ROOT) && mkdir -p $(BUILD)
+	tar -xjf $(ALSA_LIB_TARBALL) -C $(BUILD)
+	cd $(BUILD)/alsa-lib-$(ALSA_LIB_VERSION) && CC=$(MUSL_CC) \
+		CFLAGS="-O2 -isystem $(abspath $(BUILD)/linux-headers)" ./configure --prefix=/usr \
+		--disable-static --enable-shared --disable-python --disable-ucm --disable-topology \
+		--without-debug > configure.log
+	$(MAKE) -C $(BUILD)/alsa-lib-$(ALSA_LIB_VERSION) -j$$(nproc) > /dev/null
+	$(MAKE) -C $(BUILD)/alsa-lib-$(ALSA_LIB_VERSION) install DESTDIR=$(abspath $(ALSA_ROOT)) \
+		> /dev/null
+	tar -xjf $(ALSA_UTILS_TARBALL) -C $(BUILD)
+	cd $(BUILD)/alsa-utils-$(ALSA_UTILS_VERSION) && CC=$(MUSL_CC) PKG_CONFIG_LIBDIR= \
+		CFLAGS="-O2 -isystem $(abspath $(BUILD)/linux-headers) -I$(abspath $(ALSA_ROOT))/usr/include" \
+		LDFLAGS="-L$(abspath $(ALSA_ROOT))/usr/lib" ./configure --prefix=/usr \
+		--with-alsa-prefix=$(abspath $(ALSA_ROOT))/usr/lib \
+		--with-alsa-inc-prefix=$(abspath $(ALSA_ROOT))/usr/include \
+		--disable-alsamixer --disable-xmlto --disable-rst2man --disable-nls --disable-alsaconf \
+		--disable-alsatest --disable-bat --with-systemdsystemunitdir=no \
+		--with-udev-rules-dir=/tmp > configure.log
+	$(MAKE) -C $(BUILD)/alsa-utils-$(ALSA_UTILS_VERSION)/aplay > /dev/null
+	$(MAKE) -C $(BUILD)/alsa-utils-$(ALSA_UTILS_VERSION)/speaker-test > /dev/null
+	touch $@
+
+alsa: $(ALSA)
+
 $(PYTHON_TARBALL):
 	$(call fetch,$(PYTHON_URL),$(PYTHON_SHA256))
 
@@ -482,7 +531,7 @@ $(GL_TEST): tests/gl/gl-test.c $(MESA)
 		-Wl,-rpath-link,$(X11_SYSROOT)/usr/lib $< -o $@ -lOSMesa -lGL -lX11 -lunwind
 
 $(LINUX_ROOT)/.done: $(BUSYBOX) $(BASH) $(COREUTILS) $(PYTHON) $(X11) $(MUSL_LIBC) $(LINUX_TESTS) \
-		$(XCLIPBOARD) $(OPENSSL) $(CURL) $(MESA) $(GL_TEST) tools/make-linux-root.sh \
+		$(XCLIPBOARD) $(OPENSSL) $(CURL) $(MESA) $(GL_TEST) $(ALSA) tools/make-linux-root.sh \
 		$(wildcard tools/linux-files/* tools/linux-files/applications/*)
 	tools/make-linux-root.sh $(LINUX_ROOT) $(MUSL_LIBC) $(BUSYBOX) \
 		$(BUSYBOX_BUILD)/busybox.links $(BASH) $(COREUTILS) $(COREUTILS_BUILD)/programs.txt \
@@ -507,6 +556,13 @@ $(LINUX_ROOT)/.done: $(BUSYBOX) $(BASH) $(COREUTILS) $(PYTHON) $(X11) $(MUSL_LIB
 		-name 'libOSMesa*' -o -name 'libglapi*' -o -name 'libc++*' -o -name 'libunwind*' \) \
 		-type f -exec strip --strip-unneeded {} +
 	install -s $(GL_TEST) $(LINUX_ROOT)/usr/bin/
+	# Sound: ALSA's library and its settings, aplay (and arecord), speaker-test.
+	cp -a $(ALSA_ROOT)/usr/lib/libasound.so.2* $(LINUX_ROOT)/usr/lib/
+	cp -a $(ALSA_ROOT)/usr/share/alsa $(LINUX_ROOT)/usr/share/
+	cp tools/linux-files/asound.conf $(LINUX_ROOT)/etc/asound.conf
+	install -s $(BUILD)/alsa-utils-$(ALSA_UTILS_VERSION)/aplay/aplay \
+		$(BUILD)/alsa-utils-$(ALSA_UTILS_VERSION)/speaker-test/speaker-test $(LINUX_ROOT)/usr/bin/
+	ln -sf aplay $(LINUX_ROOT)/usr/bin/arecord
 	touch $@
 
 # xclipboard: the clipboard between X programs and Vexa's (an X program,
@@ -577,16 +633,16 @@ $(SAFE_ISO): $(KERNEL) $(INITRAMFS) $(BUILD)/limine.conf limine/limine
 	$(call make_iso,$(BUILD)/limine-safe-mode.conf,$@)
 
 run: $(ISO)
-	$(QEMU) -M q35 -m 512M -cdrom $(ISO) -serial stdio -no-reboot $(QEMU_NET)
+	$(QEMU) -M q35 -m 512M -cdrom $(ISO) -serial stdio -no-reboot $(QEMU_NET) $(QEMU_AUDIO)
 
 # Like run, with a virtio disk mounted at /mnt/vda1. It keeps what you write;
 # delete build/my-disk.img to start over.
 run-disk: $(ISO) $(MY_DISK)
-	$(QEMU) -M q35 -m 512M -cdrom $(ISO) -boot d -serial stdio -no-reboot $(QEMU_NET) \
+	$(QEMU) -M q35 -m 512M -cdrom $(ISO) -boot d -serial stdio -no-reboot $(QEMU_NET) $(QEMU_AUDIO) \
 		-drive file=$(MY_DISK),if=virtio,format=raw
 
 run-nographic: $(ISO)
-	$(QEMU) -M q35 -m 512M -cdrom $(ISO) -nographic -no-reboot $(QEMU_NET)
+	$(QEMU) -M q35 -m 512M -cdrom $(ISO) -nographic -no-reboot $(QEMU_NET) $(QEMU_AUDIO)
 
 # `make test` boots Vexa four ways at once (each in its own QEMU, with KVM
 # when this machine has it); each one's output is shown when it's done.

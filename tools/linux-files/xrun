@@ -23,6 +23,18 @@ if [ ! -S "$socket" ]; then
     DISPLAY="$display" xclipboard </dev/null >/dev/null 2>&1 &
 fi
 export DISPLAY="$display"
-# No accessibility bus (D-Bus) yet: GTK needn't look for one.
+# A D-Bus session bus for the X programs (one, kept running like the server).
+# libdbus wants the machine's ID: made once, in Vexa's /etc.
+bus=/tmp/.dbus-session
+if [ ! -S "$bus" ]; then
+    [ -s /etc/machine-id ] || dbus-uuidgen > /etc/machine-id 2>/dev/null
+    dbus-daemon --session --fork --nopidfile --address="unix:path=$bus" >/dev/null 2>&1
+    for i in 1 2 3 4 5 6 7 8 9 10; do
+        [ -S "$bus" ] && break
+        sleep 0.2
+    done
+fi
+export DBUS_SESSION_BUS_ADDRESS="unix:path=$bus"
+# No accessibility services (at-spi's registry) to start: GTK needn't look for them.
 export NO_AT_BRIDGE=1
 exec "$@"

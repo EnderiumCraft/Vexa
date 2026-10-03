@@ -137,6 +137,11 @@ TYPED_COMMANDS = ([
     ("net", "address 10.0.2.15", 10),
     ("socket-test", "socket-test: passed", 60),
     ("fetch @URL@/hello.txt", "Hello from the test's web server", 30),
+    ("#sound",),
+    # Sound through the HD Audio driver: QEMU records what's played, and the
+    # recording should be the tone.
+    ("play --tone 1000 2", "play: done", 60),
+    ("@sound 1000", None, 10),
     ("#desktop",),
     # Graphics: the mouse, then the desktop with a terminal window. Typing
     # goes to the window's shell; dragging its title bar moves it (the pointer
@@ -364,6 +369,11 @@ LINUX_COMMANDS = [
     # (the GL window is window 5, and closes itself).
     ("@sendkey ctrl-alt-x", 'desktop: window 4 "xterm"', 90),
     ("@type gl-test x > /dev/console 2>&1", "gl-test: passed", 180),
+    # The D-Bus session bus xrun started for X programs: the bus itself
+    # answers with the names on it.
+    ("@type dbus-send --session --print-reply --dest=org.freedesktop.DBus "
+     "/org/freedesktop/DBus org.freedesktop.DBus.ListNames > /dev/console 2>&1",
+     'string "org.freedesktop.DBus"', 60),
     ("@type exit", 'desktop: closed window 4 "xterm"', 30),
     ("@sendkey ctrl-alt-q", "desktop: asking before leaving", 30),
     ("@sendkey ret", "desktop: back to the console", 30),
@@ -399,6 +409,16 @@ LINUX_COMMANDS = [
     # reads the grabbed keyboard through evdev.
     ("drm-test", "drm-test: press a key", 60),
     ("@sendkey a", "drm-test: passed", 30),
+    ("#linux-sound",),
+    # Sound for Linux programs: ALSA (alsa-lib's "plug" on the kernel's ALSA
+    # interface, over the HD Audio driver). Python writes a WAV file, aplay
+    # plays it, and QEMU's recording should be its tone.
+    ("python3 -c \"import wave, math, struct; w = wave.open('/tmp/tone.wav', 'wb'); "
+     "w.setnchannels(1); w.setsampwidth(2); w.setframerate(44100); "
+     "w.writeframes(b''.join(struct.pack('<h', int(9000 * math.sin(2 * math.pi * 600 * i / 44100))) "
+     "for i in range(88200)))\"", None, 120),
+    ("aplay /tmp/tone.wav && echo aplay-finished", "aplay-finished", 60),
+    ("@sound 600", None, 10),
     # OpenGL without X: Mesa's llvmpipe (shaders compiled by LLVM) into memory.
     ("gl-test", "gl-test: passed", 180),
     ("#shell",),
@@ -573,6 +593,30 @@ def start_https_server(directory):
     return "https://10.0.2.2:%d" % server.server_address[1]
 
 
+def sound_frequency(path, start=44):
+    """The pitch of the loud part of QEMU's recording of what Vexa played
+    (from byte `start`), how many seconds of it there are, and where the
+    recording ends now."""
+    try:
+        with open(path, "rb") as f:
+            data = f.read()
+    except OSError:
+        return 0, 0, start
+    if len(data) < 48 or data[:4] != b"RIFF":
+        return 0, 0, start
+    channels, rate = struct.unpack("<HI", data[22:28])
+    end = start + (len(data) - start) // (2 * channels) * 2 * channels
+    samples = struct.unpack("<%dh" % ((end - start) // 2), data[start:end])
+    left = samples[::channels]
+    loud = [i for i, v in enumerate(left) if abs(v) > 3000]
+    if len(loud) < rate // 10:
+        return 0, 0, end
+    part = left[loud[0]:loud[-1] + 1]
+    crossings = sum(1 for a, b in zip(part, part[1:]) if (a < 0) != (b < 0))
+    seconds = len(part) / rate
+    return crossings / 2 / seconds, seconds, end
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--screenshot", help="save a PNG of the screen at the end")
@@ -606,6 +650,10 @@ def main():
         # and 10.0.2.2 is this machine. (With -nic instead of -device, QEMU's
         # q35 card has no MSI-X, and Vexa would poll it.)
         "-netdev", "user,id=net0", "-device", "virtio-net-pci,netdev=net0",
+        # Sound: an HD Audio controller and codec, whose output QEMU writes
+        # to a WAV file (see "@sound").
+        "-audiodev", "wav,id=snd0,path=" + os.path.join(tmp, "sound.wav"),
+        "-device", "intel-hda", "-device", "hda-output,audiodev=snd0",
     ]
     disks = []
     www = os.path.join(tmp, "www")
@@ -659,6 +707,7 @@ def main():
         if not failures:
             typed = 0
             previous_start = 0
+            sound_heard = 44  # How much of QEMU's sound recording "@sound" has looked at.
             for command, expected, timeout, *count in commands:
                 # Normally, how many times the text is in the whole log;
                 # with --only (earlier checks skipped), whether it's in what
@@ -685,6 +734,16 @@ def main():
                                 break
                         else:
                             failures.append(f"{command!r}: missing {expected!r}")
+                        continue
+                    if command.startswith("@sound "):
+                        # What QEMU recorded should be a tone of that pitch.
+                        want = float(command.split()[1])
+                        time.sleep(3)  # (QEMU records a little behind what's played.)
+                        hz, seconds, sound_heard = sound_frequency(os.path.join(tmp, "sound.wav"),
+                                                                   sound_heard)
+                        print(f"qemu-smoke-test: heard {hz:.0f} Hz for {seconds:.1f} s")
+                        if abs(hz - want) > want * 0.03:
+                            failures.append(f"{command!r}: heard {hz:.0f} Hz")
                         continue
                     if command == "@double-click":
                         # Two left clicks, quicker than one command at a time.

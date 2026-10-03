@@ -275,8 +275,10 @@ native track in 0.12.0; in 0.13.0, X and `xterm` run in a window on it.
       runtime (libc++) built for musl; GLX on Xlib for X programs, and OSMesa (0.24.0)
 - [x] Run X11 windows inside the Vexa compositor: Xvexa is rootless, and each X window
       is a desktop window next to the native ones (0.14.0)
-- [ ] Audio (optional for first light): Intel HDA driver, a native audio interface,
-      and an ALSA-compatible layer for Linux programs
+- [x] Audio (optional for first light): Intel HDA driver, a native audio interface
+      (`/dev/audio0`, `play`), and an ALSA-compatible layer for Linux programs (the
+      kernel's ALSA interface, alsa-lib and aplay); a D-Bus session bus for X programs
+      (0.25.0)
 
 **Milestone:** GTK applications run next to native programs on the Vexa desktop.
 

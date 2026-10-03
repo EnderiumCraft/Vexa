@@ -105,6 +105,8 @@ jobs:
           # BusyBox (GPL-2.0), bash and coreutils (GPL-3.0): every release carries
           # their exact sources; BusyBox's with its configuration.
           cp build/busybox-*-source.tar.gz third_party/bash-*.tar.xz third_party/coreutils-*.tar.xz .
+          # alsa-utils (GPL-2.0) and alsa-lib (LGPL-2.1): their sources too.
+          cp third_party/alsa-lib-*.tar.bz2 third_party/alsa-utils-*.tar.bz2 .
           # GTK 3 and the LGPL (and MPL) libraries under it: their sources too.
           mkdir -p lgpl-sources
           cp third_party/x11/glib2.0_*.orig.tar.* third_party/x11/gtk+3.0_*.orig.tar.* \
@@ -122,6 +124,7 @@ jobs:
             busybox-*-source.tar.gz
             bash-*.tar.xz
             coreutils-*.tar.xz
+            alsa-*.tar.bz2
             gtk-and-lgpl-sources-*.tar
 
     outputs:
@@ -164,7 +167,7 @@ jobs:
           gh release create latest-build \
             --title "Latest build (${VERSION}, ${short_sha})" \
             --notes "$notes" --prerelease --latest=false \
-            "vexa-${VERSION}.iso" "vexa-${VERSION}.iso.sha256" busybox-*-source.tar.gz bash-*.tar.xz coreutils-*.tar.xz gtk-and-lgpl-sources-*.tar
+            "vexa-${VERSION}.iso" "vexa-${VERSION}.iso.sha256" busybox-*-source.tar.gz bash-*.tar.xz coreutils-*.tar.xz alsa-*.tar.bz2 gtk-and-lgpl-sources-*.tar
 
       - name: Create versioned release if VEXA_VERSION is new
         run: |
@@ -174,4 +177,4 @@ jobs:
           fi
           gh release create "v${VERSION}" --target "$GITHUB_SHA" \
             --title "Vexa ${VERSION}" --generate-notes --latest \
-            "vexa-${VERSION}.iso" "vexa-${VERSION}.iso.sha256" busybox-*-source.tar.gz bash-*.tar.xz coreutils-*.tar.xz gtk-and-lgpl-sources-*.tar
+            "vexa-${VERSION}.iso" "vexa-${VERSION}.iso.sha256" busybox-*-source.tar.gz bash-*.tar.xz coreutils-*.tar.xz alsa-*.tar.bz2 gtk-and-lgpl-sources-*.tar

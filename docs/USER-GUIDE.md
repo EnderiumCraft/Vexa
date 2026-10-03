@@ -539,6 +539,27 @@ draw into memory use OSMesa, without X. `gl-test` draws a triangle with a shader
 checks the result (`xrun gl-test x` does it in an X window). It isn't fast, but it's
 enough for programs that need OpenGL to run.
 
+## Sound
+
+With an HD Audio sound card (the kind in most PCs, and QEMU's `intel-hda`; `make run`
+adds one), Vexa plays sound through `/dev/audio0`:
+
+```sh
+play --tone 440 3        # a 440 Hz tone for three seconds
+play music.wav           # a WAV file (16-bit, 44100 or 48000 Hz, mono or stereo)
+```
+
+Linux programs play through ALSA, as on Linux: `aplay file.wav` and `speaker-test -t
+sine` work, and so do programs built with alsa-lib (its "default" device converts
+whatever they play to what the card takes). There's no recording, mixer or volume
+control yet; the volume is the card's.
+
+## D-Bus
+
+X programs get a D-Bus session bus, started with the X server (`xrun` sets
+`DBUS_SESSION_BUS_ADDRESS`), for the programs that need one to talk to each other.
+`dbus-send` and `dbus-monitor` are there to look at it.
+
 ## Network
 
 With a network card (QEMU's `virtio-net-pci`), Vexa gets an address by DHCP when it

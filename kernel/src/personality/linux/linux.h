@@ -231,6 +231,7 @@
 #define LE_ERANGE 34
 #define LE_ENAMETOOLONG 36
 #define LE_ENOSYS 38
+#define LE_EBADFD 77
 #define LE_ENOTEMPTY 39
 #define LE_ELOOP 40
 #define LE_ENOTSOCK 88
@@ -632,5 +633,8 @@ int64_t linux_errno(int64_t result);
 void linux_devices_init(void);
 bool linux_device_ioctl(struct file *file, uint32_t request, uint64_t arg, int64_t *result);
 bool linux_device_read(struct file *file, uint64_t buffer, uint64_t size, int64_t *result);
+/* sound.c: ALSA (/dev/snd), over /dev/audio0. */
+void linux_sound_init(void);
+bool linux_sound_ioctl(struct file *file, uint32_t request, uint64_t arg, int64_t *result);
 
 #endif
