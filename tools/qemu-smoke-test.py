@@ -279,6 +279,13 @@ TYPED_COMMANDS = ([
     ("@type Notes", '"Notes" (780x520)', 20),
     ("@sendkey ctrl-n", "notes: new note Note.txt", 10),
     ("@sendkey alt-f4", "desktop: asked window", 10),
+    # Device Manager: the devices by type; Down picks the first one; Tab shows
+    # them as they're connected.
+    ("@sendkey ctrl-spc", "desktop: search", 10),
+    ("@type Device Manager", '"Device Manager" (780x520)', 20),
+    ("@sendkey down", 'devmgr: showing "', 10),
+    ("@sendkey tab", None, 2),
+    ("@sendkey alt-f4", "desktop: asked window", 10),
     ("@sendkey ctrl-alt-q", "desktop: asking before leaving", 20),
     ("@sendkey ret", "desktop: back to the console", 20),
     # (Keys typed while the desktop ran can be left at the console: Ctrl-U erases them.)
@@ -434,6 +441,25 @@ USB_DEVICES = [
     "-device", "usb-kbd,bus=xhci.0",
     "-device", "usb-hub,bus=xhci.0",
     "-device", "usb-mouse,bus=xhci.0,port=2.1",
+]
+
+# With --usb, at the end of the desktop checks: Device Manager open while a
+# USB stick is plugged in and pulled out; the desktop says so too.
+USB_DESKTOP_COMMANDS = [
+    ("@sendkey ctrl-spc", "desktop: search", 10),
+    ("@type Device Manager", '"Device Manager" (780x520)', 20, 2),
+    ("@drive_add 0 if=none,id=stick3,file=@STICK@,format=raw", None, 5),
+    ("@device_add usb-storage,bus=xhci.0,drive=stick3,id=stick3", "devmgr: devices changed", 30),
+    ("@mouse_move 0 0", 'desktop: notification "Connected: QEMU USB HARDDRIVE', 20),
+    ("@device_del stick3", 'desktop: notification "Disconnected: QEMU USB HARDDRIVE"', 30),
+    ("@sendkey alt-f4", "desktop: asked window", 10),
+    # A tablet (absolute positions). QEMU's monitor only moves pointers
+    # relatively, which a tablet ignores: it stays at 0,0, so its click puts
+    # the pointer there (from wherever the mouse left it).
+    ("@device_add usb-tablet,bus=xhci.0,id=tablet", "tablet (absolute)", 20),
+    ("@mouse_button 1", "desktop: left button at 0,0", 10),
+    ("@mouse_button 0", None, 2),
+    ("@device_del tablet", "QEMU USB Tablet unplugged", 20),
 ]
 
 USB_COMMANDS = [
@@ -730,6 +756,10 @@ def main():
     if args.usb:
         at = next(i for i, c in enumerate(commands) if c[0] == "#network")
         commands[at:at] = USB_COMMANDS
+        desktop = next(i for i, c in enumerate(commands) if c[0] == "#desktop")
+        at = next(i for i, c in enumerate(commands)
+                  if i > desktop and c[0] == "@sendkey ctrl-alt-q")
+        commands[at:at] = USB_DESKTOP_COMMANDS
     if args.disks:
         for name, qemu_args, offset in TEST_DISKS:
             copy = os.path.join(tmp, name)

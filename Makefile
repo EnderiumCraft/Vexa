@@ -19,6 +19,9 @@ QEMU_NET ?= -netdev user,id=net0 -device virtio-net-pci,netdev=net0
 # for it) on Linux and Core Audio on macOS. `make run QEMU_AUDIO=` leaves it out.
 QEMU_AUDIO_DRIVER ?= $(if $(filter Darwin,$(shell uname -s)),coreaudio,pa)
 QEMU_AUDIO ?= -audiodev $(QEMU_AUDIO_DRIVER),id=snd0 -device intel-hda -device hda-output,audiodev=snd0
+# A USB controller with a tablet: the pointer follows the host's, without
+# QEMU's window grabbing the mouse. `make run QEMU_USB=` leaves it out.
+QEMU_USB ?= -device qemu-xhci,id=xhci -device usb-tablet,bus=xhci.0
 LIMINE_BRANCH := v9.x-binary
 
 BUILD   := build
@@ -744,13 +747,14 @@ $(SAFE_ISO): $(KERNEL) $(INITRAMFS) $(BUILD)/limine.conf limine/limine
 	$(call make_iso,$(BUILD)/limine-safe-mode.conf,$@)
 
 run: $(ISO)
-	$(QEMU) -M q35 -m 512M -cdrom $(ISO) -serial stdio -no-reboot $(QEMU_NET) $(QEMU_AUDIO)
+	$(QEMU) -M q35 -m 512M -cdrom $(ISO) -serial stdio -no-reboot $(QEMU_NET) $(QEMU_AUDIO) \
+		$(QEMU_USB)
 
 # Like run, with a virtio disk mounted at /mnt/vda1. It keeps what you write;
 # delete build/my-disk.img to start over.
 run-disk: $(ISO) $(MY_DISK)
 	$(QEMU) -M q35 -m 512M -cdrom $(ISO) -boot d -serial stdio -no-reboot $(QEMU_NET) $(QEMU_AUDIO) \
-		-drive file=$(MY_DISK),if=virtio,format=raw
+		-drive file=$(MY_DISK),if=virtio,format=raw $(QEMU_USB)
 
 run-nographic: $(ISO)
 	$(QEMU) -M q35 -m 512M -cdrom $(ISO) -nographic -no-reboot $(QEMU_NET) $(QEMU_AUDIO)
@@ -765,7 +769,7 @@ test: $(ISO) $(SAFE_ISO) $(TEST_DISKS) native-iso
 test-bios:
 	tools/qemu-smoke-test.py --disks $(BUILD)/disks
 test-uefi:
-	tools/qemu-smoke-test.py --disks $(BUILD)/disks --uefi --smp 4 --memory 6G --cpu max
+	tools/qemu-smoke-test.py --disks $(BUILD)/disks --uefi --smp 4 --memory 6G --cpu max --usb
 test-safe:
 	tools/qemu-smoke-test.py --disks $(BUILD)/disks --safe-mode --iso $(SAFE_ISO)
 

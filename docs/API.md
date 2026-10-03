@@ -153,10 +153,24 @@ long code = child >= 0 ? vx_wait(child, 0) : child;
 | Function | What it does |
 | --- | --- |
 | `long vx_control(int handle, unsigned request, void *arg, size_t size)` | a device request, such as `VX_INPUT_INFO`, `VX_INPUT_GRAB`, `VX_DISPLAY_INFO`, `VX_DISPLAY_ACQUIRE`, or a terminal's `VX_TTY_GET_SIZE`, `VX_TTY_SET_SIZE` and `VX_TTY_PTY_NUMBER` |
+| `long vx_device_list(struct vx_device_info *devices, size_t count, unsigned long long *generation)` | the devices the kernel knows, parents before children: up to `count` of them; returns how many there are. `generation` changes whenever a device comes, goes or changes (pass `NULL, 0` to read only that) |
+
+Each `struct vx_device_info` has an `id` and its `parent`'s (0 at the top), a `bus`
+(`VX_BUS_PCI`, `VX_BUS_USB`, `VX_BUS_PLATFORM`, `VX_BUS_VIRTUAL` for what drivers make,
+like a disk on a controller), a `kind` (`VX_DEVICE_DISK`, `VX_DEVICE_KEYBOARD`,
+`VX_DEVICE_USB_HUB`...), PCI or USB `vendor_id` and `product_id`, `flags`
+(`VX_DEVICE_HAS_DRIVER`, `VX_DEVICE_REMOVABLE`), and text: `name`, `driver`, `location`
+(`"PCI 00:1f.3"`, `"USB port 2"`, `"/dev/usb0"`) and `details`.
 
 Input devices (`/dev/input/eventN`) give `struct vx_input_event` records (type, code,
-value, time) when read; `/dev/display0` is the screen (mapped with `vx_map_file` after
-`VX_DISPLAY_ACQUIRE`).
+value, time) when read. event0 is every keyboard and event1 every pointer (mice,
+touchpads, tablets), whatever is plugged in, so most programs want those two; the
+others are the devices one by one. Mice report `VX_EV_REL` motion (and
+`VX_REL_WHEEL`, `VX_REL_HWHEEL`); tablets report `VX_EV_ABS` positions, `VX_ABS_X` and
+`VX_ABS_Y` from 0 to `VX_ABS_MAX` across the screen (`VX_INPUT_ABSOLUTE` in
+`VX_INPUT_INFO`'s capabilities). A device that's unplugged sends nothing more;
+`/dev/display0` is the screen (mapped with `vx_map_file` after `VX_DISPLAY_ACQUIRE`).
+Reading or writing a disk that was unplugged gives `-VX_ENODEV` or `-VX_EIO`.
 
 `/dev/audio0` plays sound: write 16-bit little-endian samples (interleaved, when
 stereo). `VX_AUDIO_SET_FORMAT` (`struct vx_audio_format`: 44100 or 48000 Hz, 1 or 2

@@ -80,7 +80,7 @@ also boots on real PCs from a USB stick or CD, with BIOS or UEFI.
 | Target | Machine |
 | --- | --- |
 | `test-bios` | BIOS, 1 CPU, 512 MiB, with virtio, SATA and NVMe test disks |
-| `test-uefi` | UEFI (OVMF), 4 CPUs, 6 GiB, `-cpu max` (AVX, SMEP, SMAP) |
+| `test-uefi` | UEFI (OVMF), 4 CPUs, 6 GiB, `-cpu max` (AVX, SMEP, SMAP), and USB (`--usb`) |
 | `test-safe` | the safe mode boot (no ACPI, the legacy PIC and PIT) |
 | `test-native-boot` | a kernel built with `LINUX_COMPAT=0` |
 
@@ -98,7 +98,17 @@ make test-quick ONLY=desktop        # about 2 minutes without KVM
 make test-quick ONLY=shell,network
 ```
 
-The sections are `shell`, `network`, `desktop`, `linux`, `x`, `linux-net` and `disks`.
+The sections are `shell`, `network`, `usb`, `desktop`, `linux`, `x`, `linux-net` and
+`disks`.
+
+**USB** (`--usb`, which `test-uefi` uses): an xHCI controller with a USB keyboard and a
+hub with a USB mouse on it. QEMU sends keys and mouse motion to the newest keyboard and
+mouse, so that boot types and points through USB all along. The `usb` section checks
+the device tree, then plugs a USB stick in through QEMU's monitor (`device_add`),
+reads and writes it, pulls it out (`device_del`) and plugs it in again, and plugs a
+second keyboard in and out; the stick's file system is checked with `e2fsck` after the
+run. At the end of the desktop checks, Device Manager watches a stick come and go,
+the desktop's notifications say so, and a USB tablet moves the pointer.
 In this mode each check looks only at what came after the step before it, since earlier
 checks were skipped.
 
@@ -144,6 +154,7 @@ kernel/               the kernel (see ARCHITECTURE.md)
   src/personality/    the native system calls (vexa/) and the Linux subsystem (linux/)
 abi/vexa/abi.h        system call numbers, structures and errors: kernel and libvexa share it
 libvexa/              Vexa's C library (libvexa.so) and dynamic loader (ld/)
+kernel/src/dev/usb/   USB: the xHCI driver, the core, hubs, HID and mass storage
 sdk/                  the SDK's own files: vexa-cc, vexa-new-app, the app template,
                       the CMake toolchain file, SDL's configuration and Vexa drivers
                       (sdl2/), and the SDL demo (examples/)

@@ -100,7 +100,8 @@ registers survive being interrupted.
 - [x] ext2 read/write (ext4 later), so disks can be shared with other systems
 - [x] CDs: ATAPI drives on AHCI and ISO 9660 with Rock Ridge; the Linux programs and
       libraries are read from the boot CD instead of living in memory (0.14.0)
-- [ ] Moved to later phases: USB storage (with USB in Phase 8), ext4, a journal or
+- [x] USB storage (0.27.0)
+- [ ] Moved to later phases: ext4, a journal or
       another crash-safe file system, finer-grained VFS locking, running `vinit` from a
       disk as the root file system
 
@@ -193,8 +194,10 @@ Reached in 0.11.0 (`fetch`, BusyBox `wget`, and Python's `urllib`).
 ## Phase 8: Graphics and input
 
 Core:
-- [x] PS/2 mouse with a scroll wheel (0.12.0); USB (xHCI and HID keyboards and mice)
-      still to come
+- [x] PS/2 mouse with a scroll wheel (0.12.0); USB (0.27.0): xHCI, USB 2 and 3 hubs,
+      HID keyboards, mice and tablets, mass storage, plugging in and out
+- [x] A device tree in the kernel (every device and its driver) and Device Manager
+      (0.27.0)
 - [x] Vexa display interface: `/dev/display0` on the boot framebuffer, which a program
       acquires (the text console steps aside) and maps (0.12.0); a virtio-gpu driver,
       mode setting and several outputs come later

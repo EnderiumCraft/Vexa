@@ -102,6 +102,7 @@ Vexa's own programs are in `/bin` (`ls /bin` lists them).
 | `hello` | says hi, with Vexa's version |
 | `hostname [name]` | the computer's name; sets it with a name |
 | `df` | the mounted file systems, and how full they are |
+| `devices [-l] [kind]` | the devices Vexa found, as a tree, with their drivers; `-l` adds ids, places and details; a kind or bus shows only those: `devices usb`, `devices disk`, `devices keyboard` |
 | `shutdown`, `shutdown -r` | turns the machine off (ACPI), or restarts it |
 | `clear` | clears the screen |
 | `sys [command]` | the kernel monitor's commands: `sys disks`, `sys mount`, `sys pci`, `sys cpu`, `sys mem`, `sys memmap`, `sys memtest`, `sys threads`; `sys` alone lists them |
@@ -133,6 +134,7 @@ These check that parts of Vexa work, and print what they find:
 | `fs-test` | the file system calls (in `/tmp`, and on a disk at `/mnt/vda1` if there is one) |
 | `fpu-stress` | that each program's vector registers survive; run several with `&` |
 | `thread-test [exit]` | threads, a mutex and waits |
+| `posix-test [-v]` | the POSIX layer: files, `printf` and `scanf` with floats, math, pthreads, time |
 | `socket-test` | sockets over the loopback network |
 
 ## Files and folders
@@ -326,6 +328,17 @@ Every process with its CPU use (over the last second), memory and threads, updat
 every second; a click on a column sorts by it. Below, CPU and memory over the last
 minute. Select a process and **Quit** asks it to stop (SIGTERM; Delete does the same),
 **Force Quit** stops it (SIGKILL).
+
+### Device Manager
+
+Every device Vexa found and which driver has it: processors, the display, disks and
+their controllers, keyboards, mice and tablets, sound, network, USB controllers, hubs
+and devices. **By type** groups them (a click on a group's heading folds it away);
+**By connection** shows what's connected to what: a USB mouse on a hub, on a port of
+the USB controller, on the PCI bus (Tab switches between the two). Choose a device to
+see its driver, where it's connected, its vendor and device ids and details (a disk's
+size and where it's mounted, a USB device's speed). Devices Vexa has no driver for are
+shown in orange. It follows along as USB devices are plugged in and out.
 
 ### Calculator
 
@@ -607,7 +620,32 @@ truncate -s 64M disk.img && mke2fs -t ext2 disk.img
 qemu-system-x86_64 -M q35 -m 512M -cdrom vexa.iso -drive file=disk.img,if=virtio,format=raw
 ```
 
-Then `ls /mnt/vda1`, and what you save there is still there next time.
+Then `ls /mnt/vda` (a disk that's one file system, without partitions, is mounted as
+itself), and what you save there is still there next time.
+
+## USB
+
+Vexa drives USB controllers (xHCI: USB 1, 2 and 3, what PCs have had since about
+2012) and what's plugged into them, through hubs too:
+
+- **Keyboards and mice** work as soon as they're plugged in, next to the PS/2 ones, in
+  the desktop and at the text console. **Tablets** (and QEMU's USB tablet, which `make
+  run` adds so the pointer follows the host's) move the pointer to where they point.
+- **USB sticks and disks** appear as `usb0`, `usb1`... and are mounted at `/mnt/usb0`
+  (or `/mnt/usb0p1` for a partition), in Files' sidebar too. Writes go straight to the
+  stick, so it can be pulled out once a copy has finished; files left open on it stop
+  working.
+- The desktop says what was connected (and where a stick is) and what was
+  disconnected. `devices usb` and Device Manager show what's plugged in and where.
+
+Other kinds of USB devices (printers, cameras, sound, network adapters) are listed,
+without a driver yet.
+
+In QEMU: `-device qemu-xhci,id=xhci -device usb-kbd,bus=xhci.0 -device
+usb-mouse,bus=xhci.0`, and a stick: `-drive if=none,id=stick,file=stick.img,format=raw
+-device usb-storage,bus=xhci.0,drive=stick`. QEMU's monitor (Ctrl+Alt+2) plugs them in
+and out while Vexa runs: `device_add usb-storage,bus=xhci.0,drive=stick,id=s` and
+`device_del s`.
 
 ## Keyboard shortcuts
 

@@ -273,6 +273,7 @@ void display_init(void) {
         page_ref_pin(frame_phys + offset);
     }
     devfs_add("display0", &display_ops, NULL);
+    check_dispi(); /* (PCI has been scanned: the card is named in the device tree.) */
     kprintf("[display] display0: %ux%u, %u bits per pixel\n", info.width, info.height,
             info.bits_per_pixel);
 }

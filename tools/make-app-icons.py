@@ -292,6 +292,22 @@ def paint():
     return im
 
 
+def device_manager():
+    """A chip on a board."""
+    im = gradient_tile((120, 200, 170), (40, 130, 110))
+    d = ImageDraw.Draw(im)
+    pin = (230, 240, 235, 255)
+    for i in range(4):
+        x = 16 + i * 5
+        d.rectangle([x * S, 10 * S, (x + 2) * S, 14 * S], fill=pin)
+        d.rectangle([x * S, 34 * S, (x + 2) * S, 38 * S], fill=pin)
+        d.rectangle([10 * S, x * S, 14 * S, (x + 2) * S], fill=pin)
+        d.rectangle([34 * S, x * S, 38 * S, (x + 2) * S], fill=pin)
+    box(d, 13, 13, 35, 35, 3, (35, 45, 50, 255))
+    box(d, 19, 19, 29, 29, 2, (120, 200, 170, 255))
+    return im
+
+
 def help_book():
     im = gradient_tile((80, 170, 255), (30, 100, 210))
     d = ImageDraw.Draw(im)
@@ -333,7 +349,7 @@ ICONS = {
     "Terminal": terminal, "Files": files, "Editor": editor, "Viewer": viewer,
     "Settings": settings, "About": about, "XTerm": xterm,
     "Monitor": activity, "Calculator": calculator, "Calendar": calendar,
-    "Notes": notes, "Paint": paint, "Help": help_book,
+    "Notes": notes, "Paint": paint, "Help": help_book, "DeviceManager": device_manager,
 }
 
 if __name__ == "__main__":

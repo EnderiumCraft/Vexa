@@ -2078,6 +2078,7 @@ static unsigned long apps_signature(void) {
 
 static unsigned long apps_seen;
 static long apps_checked_ms;
+static void check_devices(void);
 
 static void check_apps(void) {
     long now = vx_uptime();
@@ -2085,6 +2086,7 @@ static void check_apps(void) {
         return;
     }
     apps_checked_ms = now;
+    check_devices();
     unsigned long signature = apps_signature();
     if (signature == apps_seen) {
         return;
@@ -2099,6 +2101,86 @@ static void check_apps(void) {
     build_menu();
     icons_load();
     printf("desktop: apps changed: %d apps\n", app_count);
+}
+
+/* USB devices plugged in and out (every two seconds): a notification each;
+ * a USB drive says where it's mounted. */
+#define MAX_USB_SEEN 64
+static unsigned usb_seen[MAX_USB_SEEN];
+static char usb_seen_names[MAX_USB_SEEN][64];
+static int usb_seen_count = -1; /* (-1: not looked yet; what's there at the start isn't news.) */
+static unsigned long long devices_generation;
+
+static void check_devices(void) {
+    unsigned long long now = 0;
+    vx_device_list(NULL, 0, &now);
+    if (now == devices_generation) {
+        return;
+    }
+    devices_generation = now;
+    static struct vx_device_info list[256];
+    long n = vx_device_list(list, 256, NULL);
+    n = n < 0 ? 0 : n > 256 ? 256 : n;
+    unsigned current[MAX_USB_SEEN];
+    int current_count = 0;
+    for (long i = 0; i < n && current_count < MAX_USB_SEEN; i++) {
+        if (list[i].bus == VX_BUS_USB && list[i].kind != VX_DEVICE_USB_HUB) {
+            current[current_count++] = list[i].id;
+        }
+    }
+    if (usb_seen_count >= 0) {
+        for (int c = 0; c < current_count; c++) {
+            bool known = false;
+            for (int j = 0; j < usb_seen_count; j++) {
+                known = known || usb_seen[j] == current[c];
+            }
+            if (known) {
+                continue;
+            }
+            const struct vx_device_info *d = NULL;
+            for (long i = 0; i < n; i++) {
+                if (list[i].id == current[c]) {
+                    d = &list[i];
+                }
+            }
+            /* A disk under it, mounted: where. */
+            const char *mounted = NULL;
+            for (long i = 0; d && i < n && !mounted; i++) {
+                if (list[i].kind == VX_DEVICE_DISK && list[i].parent == d->id) {
+                    const char *at = strstr(list[i].details, " at /");
+                    mounted = at ? at + 4 : NULL;
+                }
+            }
+            char text[128];
+            if (mounted) {
+                snprintf(text, sizeof(text), "Connected: %s, in %s", d->name, mounted);
+            } else {
+                snprintf(text, sizeof(text), "Connected: %s", d ? d->name : "a USB device");
+            }
+            add_note(text);
+        }
+        for (int j = 0; j < usb_seen_count; j++) {
+            bool still = false;
+            for (int c = 0; c < current_count; c++) {
+                still = still || usb_seen[j] == current[c];
+            }
+            if (!still) {
+                char text[128];
+                snprintf(text, sizeof(text), "Disconnected: %s", usb_seen_names[j]);
+                add_note(text);
+            }
+        }
+    }
+    for (int c = 0; c < current_count; c++) {
+        usb_seen[c] = current[c];
+        usb_seen_names[c][0] = '\0';
+        for (long i = 0; i < n; i++) {
+            if (list[i].id == current[c]) {
+                snprintf(usb_seen_names[c], sizeof(usb_seen_names[c]), "%s", list[i].name);
+            }
+        }
+    }
+    usb_seen_count = current_count;
 }
 
 static void run_menu_item(int index) {

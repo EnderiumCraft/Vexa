@@ -103,7 +103,7 @@ with `LINUX_COMPAT=0`.
 kernel/src/
   arch/x86_64/            CPU setup, interrupts, paging, syscall entry
   core/                   handles, processes, scheduler, memory, VFS, IPC, net
-  dev/                    drivers
+  dev/                    drivers (dev/usb: xHCI, the USB core, hubs, HID, storage)
   lib/                    kernel support code (strings, kprintf)
   personality/vexa/       native system calls
   personality/linux/      Linux subsystem (LINUX_COMPAT)
@@ -185,9 +185,38 @@ PACKET command), as `cd0`... with 2048-byte sectors.
   size)` is Vexa's `ioctl`: the argument is copied into the kernel and back.
 - **Input** (`core/input.c`): drivers report events (Linux's types and codes, so the
   Linux subsystem's evdev view is a thin layer) and each open `/dev/input/eventN` gets
-  its own queue. A program can grab a device; a grabbed keyboard no longer types into
-  the console terminal. The PS/2 keyboard and mouse share the controller's interrupt
-  path: each byte goes to one or the other by where it came from.
+  its own queue. The first two, event0 and event1, are "all keyboards" and "all
+  pointers": every keyboard's and pointer's events come out of them too, so the
+  desktop reads those two and anything plugged in later just works. Tablets report
+  absolute positions (`VX_EV_ABS`, 0 to `VX_ABS_MAX` across the screen). A program can
+  grab a device; a grabbed keyboard no longer types into the console terminal. Every
+  keyboard's keys go through one shared part (`core/keyboard.c`): input events, text
+  for the console, and key repeat for keyboards that don't repeat by themselves (USB
+  ones). An unplugged device stays as `/dev/input/eventN` (programs may have it open)
+  and the next one of its kind takes its place. The PS/2 keyboard and mouse share the
+  controller's interrupt path: each byte goes to one or the other by where it came
+  from.
+- **USB** (`dev/usb/`): `xhci.c` drives xHCI controllers (USB 1 to 3): a device
+  context per slot, rings of TRBs for commands and each endpoint, and an event ring
+  that a kernel thread per controller reads, woken by the MSI interrupt. Threads that
+  start a command or a transfer sleep until its event; interrupt endpoints (keyboards,
+  mice, hubs) stay queued, each report going to a callback. `usb.c` is the core: one
+  kernel thread, "usb", handles plugging and unplugging, so drivers may sleep. A new
+  device gets an address, its descriptors are read, it's configured, and each
+  interface goes to the first class driver that takes it: `hub.c` (USB 2 and 3 hubs,
+  whose ports are enumerated like the controller's), `hid.c` (boot-protocol
+  keyboards; mice and tablets read with their report descriptors) and `storage.c`
+  (bulk-only mass storage with SCSI commands: disks `usb0`, `usb1`..., mounted at
+  `/mnt`). Unplugging takes a device away with everything under it; an unplugged disk's
+  file systems are detached (`vfs_detach`) and its files still open fail with an I/O
+  error.
+- **The device tree** (`core/device.c`): every device the kernel found, for
+  `vx_device_list` (Device Manager, `devices`): the processors, each PCI function
+  (named by its class and vendor until a driver claims it with `pci_claim`), and what
+  drivers make of them as children: disks (`block_register` adds them, with where
+  they're mounted), input devices, USB devices as they come and go. Each has a kind,
+  a bus, ids, a location and a line of details; a generation number changes with
+  every change, so programs know when to look again.
 - **Linux graphics and input** (`personality/linux/devices.c`): `/dev/dri/card0` is a
   DRM device with one CRTC, encoder and connector, and dumb buffers in memory that
   programs map; the buffer on screen is copied to the frame buffer when it's set,

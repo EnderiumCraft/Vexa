@@ -40,8 +40,8 @@ runs X programs such as `xterm` in windows of their own on it. The kernel:
 - gives programs memory on demand, and shares pages copy-on-write
 - runs on kernel stacks with guard pages, and reports stack overflows and other faults
   in plain words
-- reads the PS/2 keyboard and mouse (with a scroll wheel), as input events programs
-  can read (the text console types a US layout; the desktop, the layout Settings chose)
+- reads PS/2 and USB keyboards and mice (with scroll wheels) and tablets, as input
+  events programs can read (the text console types a US layout; the desktop, the layout Settings chose)
 - has a graphical desktop: a compositor that draws programs' windows (shared buffers)
   on the screen, with soft shadows, round corners and animations, a panel (the Vexa
   menu, a button per window, search, a clock with a calendar and the notifications),
@@ -95,6 +95,10 @@ runs X programs such as `xterm` in windows of their own on it. The kernel:
   window a desktop window, sound on the HD Audio device); each release carries it
 - has a file system tree with a root in memory (unpacked from an initramfs), `/dev`,
   and disks mounted under `/mnt`
+- drives USB: xHCI controllers (USB 1 to 3), hubs, keyboards, mice and tablets, and
+  USB sticks and disks (mounted at `/mnt/usb0`), plugged in and out while it runs
+- keeps a tree of every device and its driver, which Device Manager (an app) and
+  `devices` (a command) show
 - drives disks through virtio-blk (virtual machines), AHCI (SATA disks and CD/DVD
   drives) and NVMe, reads GPT and MBR partition tables, reads and writes ext2 file
   systems, and reads CDs (ISO 9660 with Rock Ridge): the Linux programs and libraries
@@ -127,6 +131,7 @@ the `vexa:/>` prompt:
 | `ps`, `kill`, `uptime` | processes and how long the system has been up |
 | `thread-test`, `pthread-test` | threads: a Vexa program, and a Linux one using musl's pthreads |
 | `posix-test` | checks libvexa's POSIX layer: files, `printf` and `scanf` with floats, libm, pthreads, time |
+| `devices`, `devices -l usb` | the devices Vexa found and their drivers, as a tree; only the USB ones, in detail |
 | `sys` | the kernel's own commands: `sys disks`, `sys mount`, `sys pci`, `sys cpu`, `sys mem`, `sys memtest`, `sys threads` |
 | `bash` | GNU bash, a Linux program (`exit` to go back); inside it, `ls`, `vi`, `grep`, `ps`, `top`... are BusyBox's |
 | `sh`, `busybox` | BusyBox's shell; `busybox` alone lists its commands |
