@@ -198,6 +198,7 @@ Reached in 0.11.0 (`fetch`, BusyBox `wget`, and Python's `urllib`).
 Core:
 - [x] PS/2 mouse with a scroll wheel (0.12.0); USB (0.27.0): xHCI, USB 2 and 3 hubs,
       HID keyboards, mice and tablets, mass storage, plugging in and out
+- [x] Older USB controllers: EHCI with UHCI or OHCI companions, and either alone (0.29.0)
 - [x] A device tree in the kernel (every device and its driver) and Device Manager
       (0.27.0)
 - [x] Vexa display interface: `/dev/display0` on the boot framebuffer, which a program

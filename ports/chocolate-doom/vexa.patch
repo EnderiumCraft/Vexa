@@ -1,0 +1,77 @@
+diff --git a/src/d_iwad.c b/src/d_iwad.c
+index 5b6db20..1495ff3 100644
+--- a/src/d_iwad.c
++++ b/src/d_iwad.c
+@@ -745,6 +745,23 @@ static void BuildIWADDirList(void)
+     // be different from the current directory.
+     AddIWADDir(M_DirName(myargv[0]));
+ 
++#ifdef __vexa__
++    // In a Vexa app bundle (Doom.vxapp/Contents/Vexa/chocolate-doom), the
++    // game's files are in Contents/Resources. (Started as chocolate-doom at
++    // a shell, through the link to it in /bin, the bundle is where the link
++    // leads.)
++    {
++        char *program = realpath("/proc/self/exe", NULL);
++
++        if (program != NULL)
++        {
++            AddIWADDir(M_StringJoin(M_DirName(program), DIR_SEPARATOR_S, "..",
++                                    DIR_SEPARATOR_S, "Resources", NULL));
++            free(program);
++        }
++    }
++#endif
++
+     // Add DOOMWADDIR if it is in the environment
+     env = M_getenv("DOOMWADDIR");
+     if (env != NULL)
+diff --git a/src/doom/d_main.c b/src/doom/d_main.c
+index 8722bb0..7bf00a1 100644
+--- a/src/doom/d_main.c
++++ b/src/doom/d_main.c
+@@ -120,7 +120,11 @@ boolean         storedemo;
+ // If true, the main game loop has started.
+ boolean         main_loop_started = false;
+ 
++#ifdef __vexa__
++int             show_endoom = 0;
++#else
+ int             show_endoom = 1;
++#endif
+ int             show_diskicon = 1;
+ 
+ 
+diff --git a/src/i_video.c b/src/i_video.c
+index 9d9c8cc..6183954 100644
+--- a/src/i_video.c
++++ b/src/i_video.c
+@@ -124,7 +124,11 @@ static int max_scaling_buffer_pixels = 16000000;
+ 
+ // Run in full screen mode?  (int type for config code)
+ 
++#ifdef __vexa__
++int fullscreen = false; // (A window on Vexa's desktop, like its other apps.)
++#else
+ int fullscreen = true;
++#endif
+ 
+ // Aspect ratio correction mode
+ 
+@@ -554,11 +558,14 @@ static void LimitTextureSize(int *w_upscale, int *h_upscale)
+                 SDL_GetError());
+     }
+ 
+-    while (*w_upscale * SCREENWIDTH > rinfo.max_texture_width)
++    // (A maximum of 0 means there is none: SDL's software renderer.)
++    while (rinfo.max_texture_width > 0
++        && *w_upscale * SCREENWIDTH > rinfo.max_texture_width)
+     {
+         --*w_upscale;
+     }
+-    while (*h_upscale * SCREENHEIGHT > rinfo.max_texture_height)
++    while (rinfo.max_texture_height > 0
++        && *h_upscale * SCREENHEIGHT > rinfo.max_texture_height)
+     {
+         --*h_upscale;
+     }

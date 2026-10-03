@@ -12,8 +12,8 @@ bool ext2_probe(struct block_device *device);   /* fs/ext2.c */
 bool iso9660_probe(struct block_device *device); /* fs/iso9660.c */
 
 /* Mounts an ext2 file system or a CD at /mnt/<device>, e.g. /mnt/vda1 or
- * /mnt/cd0. The first CD with Vexa's Linux files on it (the boot CD,
- * normally) is also /cdrom: /linux/usr and the like point there. */
+ * /mnt/cd0. The first CD with Vexa on it (the boot CD, normally) is also
+ * /cdrom: /linux/usr and the like point there, and Doom's game files. */
 bool storage_root_on_disk;
 
 static bool already_mounted(struct block_device *device) {
@@ -46,10 +46,10 @@ static void mount_one(struct block_device *device) {
     kprintf("[storage] mounted %s at %s\n", device->name, path);
     block_update_details(device->parent ? device->parent : device);
     struct vx_stat stat;
-    char linux_dir[40];
-    ksnprintf(linux_dir, sizeof(linux_dir), "%s/linux", path);
+    char kernel[48];
+    ksnprintf(kernel, sizeof(kernel), "%s/boot/vexa-kernel", path);
     if (fs[0] == 'i' && !storage_root_on_disk && vfs_stat("/cdrom", 6, &stat) != 0 &&
-        vfs_stat(linux_dir, strlen(linux_dir), &stat) == 0) {
+        vfs_stat(kernel, strlen(kernel), &stat) == 0) {
         vfs_symlink(path, "/cdrom", 6);
         kprintf("[storage] /cdrom is %s\n", path);
     }

@@ -207,7 +207,7 @@ USER_OBJS := $(LIBVEXA_OBJS) \
 	$(patsubst %,$(BUILD)/%.o,$(wildcard $(addsuffix /*.c,$(addprefix userland/,$(PROGRAMS)))))
 
 .PHONY: all openssl curl mesa alsa linux-tarballs kernel programs iso run run-disk run-nographic test test-install test-disks clean distclean \
-	busybox busybox-source bash coreutils python x11 test-native test-quick native-iso \
+	busybox busybox-source doom doom-source bash coreutils python x11 test-native test-quick native-iso \
 	test-bios test-uefi test-safe test-native-boot sdk sdk-test
 
 all: iso
@@ -321,8 +321,24 @@ $(SDL2): $(SDL2_TARBALL) tools/build-sdl2.sh $(shell find sdk/sdl2 -type f) sdk/
 		$(shell find libvexa/include -type f) | $(SDK_DIR)/.done
 	tools/build-sdl2.sh $(SDL2_TARBALL) $(BUILD)/sdl2-work $(SDK_DIR) $(SDL2_PREFIX)
 
-$(SDK_DIR)/.complete: $(SDK_DIR)/.done $(SDL2)
+# SDL_mixer 2 (sound effects and music for SDL programs), likewise.
+SDL2_MIXER_VERSION := 2.8.0
+SDL2_MIXER_URL := https://github.com/libsdl-org/SDL_mixer/releases/download/release-$(SDL2_MIXER_VERSION)/SDL2_mixer-$(SDL2_MIXER_VERSION).tar.gz
+SDL2_MIXER_SHA256 := 1cfb34c87b26dbdbc7afd68c4f545c0116ab5f90bbfecc5aebe2a9cb4bb31549
+SDL2_MIXER_TARBALL := third_party/SDL2_mixer-$(SDL2_MIXER_VERSION).tar.gz
+SDL2_MIXER_PREFIX := $(BUILD)/sdl2-mixer
+SDL2_MIXER := $(SDL2_MIXER_PREFIX)/lib/libSDL2_mixer.a
+
+$(SDL2_MIXER_TARBALL):
+	$(call fetch,$(SDL2_MIXER_URL),$(SDL2_MIXER_SHA256))
+
+$(SDL2_MIXER): $(SDL2_MIXER_TARBALL) tools/build-sdl2-mixer.sh $(SDL2)
+	tools/build-sdl2-mixer.sh $(SDL2_MIXER_TARBALL) $(BUILD)/sdl2-mixer-work $(SDK_DIR) \
+		$(SDL2_PREFIX) $(SDL2_MIXER_PREFIX)
+
+$(SDK_DIR)/.complete: $(SDK_DIR)/.done $(SDL2) $(SDL2_MIXER)
 	cp -R $(SDL2_PREFIX)/. $(SDK_DIR)/
+	cp -R $(SDL2_MIXER_PREFIX)/. $(SDK_DIR)/
 	touch $@
 
 $(SDK_TARBALL): $(SDK_DIR)/.complete
@@ -356,6 +372,57 @@ $(SDK_HELLO): $(SDK_DIR)/.complete
 
 sdk-test: $(SDK_HELLO)
 
+# Doom: Chocolate Doom (GPL-2.0), built with the SDK like any SDL program,
+# with Freedoom's levels and art (BSD), which stay on the boot CD (/cdrom/doom)
+# until they're played. `make doom-source` packs its source and Vexa's patch,
+# which the releases publish next to the ISO.
+CHOCOLATE_DOOM_VERSION := 3.1.0
+CHOCOLATE_DOOM_REPO := https://github.com/chocolate-doom/chocolate-doom
+CHOCOLATE_DOOM_COMMIT := 35fb1372d10756ca27eca05665bd8a7cebc71c05
+CHOCOLATE_DOOM_SRC := third_party/chocolate-doom-$(CHOCOLATE_DOOM_VERSION)
+CHOCOLATE_DOOM_SOURCE_TARBALL := $(BUILD)/chocolate-doom-$(CHOCOLATE_DOOM_VERSION)-source.tar.gz
+DOOM := $(BUILD)/doom/chocolate-doom
+# (The native ISO's build uses this one.)
+DOOM_PROGRAM ?= $(DOOM)
+FREEDOOM_VERSION := 0.13.0
+FREEDOOM_URL := https://github.com/freedoom/freedoom/releases/download/v$(FREEDOOM_VERSION)/freedoom-$(FREEDOOM_VERSION).zip
+FREEDOOM_SHA256 := 3f9b264f3e3ce503b4fb7f6bdcb1f419d93c7b546f4df3e874dd878db9688f59
+FREEDOOM_ZIP := third_party/freedoom-$(FREEDOOM_VERSION).zip
+FREEDOOM_DIR ?= $(BUILD)/freedoom
+
+$(CHOCOLATE_DOOM_SRC)/CMakeLists.txt:
+	rm -rf $(CHOCOLATE_DOOM_SRC)
+	git clone -q --depth 1 --branch chocolate-doom-$(CHOCOLATE_DOOM_VERSION) \
+		$(CHOCOLATE_DOOM_REPO) $(CHOCOLATE_DOOM_SRC)
+	test "$$(git -C $(CHOCOLATE_DOOM_SRC) rev-parse HEAD)" = $(CHOCOLATE_DOOM_COMMIT)
+
+$(DOOM): $(CHOCOLATE_DOOM_SRC)/CMakeLists.txt ports/chocolate-doom/vexa.patch tools/build-doom.sh \
+		$(SDK_DIR)/.complete
+	tools/build-doom.sh $(CHOCOLATE_DOOM_SRC) ports/chocolate-doom/vexa.patch $(BUILD)/doom-work \
+		$(SDK_DIR) $@
+
+$(FREEDOOM_ZIP):
+	$(call fetch,$(FREEDOOM_URL),$(FREEDOOM_SHA256))
+
+$(BUILD)/freedoom/freedoom1.wad: $(FREEDOOM_ZIP)
+	rm -rf $(BUILD)/freedoom && mkdir -p $(BUILD)/freedoom
+	unzip -q -j $(FREEDOOM_ZIP) 'freedoom-$(FREEDOOM_VERSION)/freedoom1.wad' \
+		'freedoom-$(FREEDOOM_VERSION)/COPYING.txt' 'freedoom-$(FREEDOOM_VERSION)/CREDITS.txt' \
+		-d $(BUILD)/freedoom
+	touch $@
+
+$(CHOCOLATE_DOOM_SOURCE_TARBALL): $(CHOCOLATE_DOOM_SRC)/CMakeLists.txt ports/chocolate-doom/vexa.patch
+	git -C $(CHOCOLATE_DOOM_SRC) archive --format=tar \
+		--prefix=chocolate-doom-$(CHOCOLATE_DOOM_VERSION)/ HEAD > $(BUILD)/doom-source.tar
+	tar --append -f $(BUILD)/doom-source.tar \
+		--transform 's,^ports/chocolate-doom/,chocolate-doom-$(CHOCOLATE_DOOM_VERSION)/vexa-,' \
+		ports/chocolate-doom/vexa.patch
+	gzip -9n < $(BUILD)/doom-source.tar > $@
+	rm $(BUILD)/doom-source.tar
+
+doom: $(DOOM) $(BUILD)/freedoom/freedoom1.wad
+doom-source: $(CHOCOLATE_DOOM_SOURCE_TARBALL)
+
 # /linux is split: what's written to stays in memory, the rest is read from
 # the boot CD when it's used (the ISO's /linux; /cdrom is the boot CD).
 LINUX_IN_MEMORY := etc var root
@@ -365,14 +432,14 @@ LINUX_ON_CD := bin lib sbin usr
 # apps in /apps, as a tar archive (ustar, with fixed owners and times so
 # builds are reproducible).
 $(INITRAMFS): $(PROGRAM_BINS) $(LIBVEXA_SO) $(VEXA_LD) $(ROOTFS_FILES) $(APP_FILES) $(LINUX_TREE) \
-		docs/USER-GUIDE.md
+		docs/USER-GUIDE.md $(DOOM_PROGRAM)
 	rm -rf $(BUILD)/rootfs
 	mkdir -p $(BUILD)/rootfs/bin $(BUILD)/rootfs/lib
 	cp -R rootfs/. $(BUILD)/rootfs/
 	# The Help app's book: the user guide.
 	mkdir -p $(BUILD)/rootfs/share/help
 	cp docs/USER-GUIDE.md $(BUILD)/rootfs/share/help/
-	cp $(PROGRAM_BINS) $(BUILD)/rootfs/bin/
+	cp $(PROGRAM_BINS) $(DOOM_PROGRAM) $(BUILD)/rootfs/bin/
 	cp $(LIBVEXA_SO) $(VEXA_LD) $(BUILD)/rootfs/lib/
 	# Apps (.vxapp bundles): each app's program moves into its bundle, and
 	# /bin keeps a link to it for the command line.
@@ -384,6 +451,8 @@ $(INITRAMFS): $(PROGRAM_BINS) $(LIBVEXA_SO) $(VEXA_LD) $(ROOTFS_FILES) $(APP_FIL
 		mv $(BUILD)/rootfs/bin/$$exe $$bundle/Contents/Vexa/ && \
 		ln -s /apps/$${bundle##*/}/Contents/Vexa/$$exe $(BUILD)/rootfs/bin/$$exe || exit 1; \
 	done
+	# Doom's game files are on the boot CD (make_iso puts them there).
+	ln -s /cdrom/doom/freedoom1.wad $(BUILD)/rootfs/apps/Doom.vxapp/Contents/Resources/freedoom1.wad
 	# /linux: the files that change (etc, var, root) are here, in memory;
 	# the programs and libraries stay on the boot CD (see make_iso).
 	if [ -n "$(LINUX_TREE)" ]; then \
@@ -734,6 +803,9 @@ define make_iso
 	cp limine/BOOTX64.EFI limine/BOOTIA32.EFI $(BUILD)/iso_root/EFI/BOOT/
 	if [ -n "$(LINUX_TREE)" ]; then mkdir -p $(BUILD)/iso_root/linux && \
 		for dir in $(LINUX_ON_CD); do cp -a $(LINUX_ROOT)/$$dir $(BUILD)/iso_root/linux/; done; fi
+	mkdir -p $(BUILD)/iso_root/doom
+	cp $(FREEDOOM_DIR)/freedoom1.wad $(FREEDOOM_DIR)/COPYING.txt $(FREEDOOM_DIR)/CREDITS.txt \
+		$(BUILD)/iso_root/doom/
 	xorriso -as mkisofs -R -r -J -D -b boot/limine/limine-bios-cd.bin \
 		-no-emul-boot -boot-load-size 4 -boot-info-table -hfsplus \
 		-apm-block-size 2048 --efi-boot boot/limine/limine-uefi-cd.bin \
@@ -742,10 +814,11 @@ define make_iso
 	./limine/limine bios-install $(2)
 endef
 
-$(ISO): $(KERNEL) $(INITRAMFS) $(BUILD)/limine.conf limine/limine $(LINUX_TREE)
+$(ISO): $(KERNEL) $(INITRAMFS) $(BUILD)/limine.conf limine/limine $(LINUX_TREE) \
+		$(FREEDOOM_DIR)/freedoom1.wad
 	$(call make_iso,$(BUILD)/limine.conf,$@)
 
-$(SAFE_ISO): $(KERNEL) $(INITRAMFS) $(BUILD)/limine.conf limine/limine
+$(SAFE_ISO): $(KERNEL) $(INITRAMFS) $(BUILD)/limine.conf limine/limine $(FREEDOOM_DIR)/freedoom1.wad
 	{ echo 'default_entry: 2'; cat $(BUILD)/limine.conf; } > $(BUILD)/limine-safe-mode.conf
 	$(call make_iso,$(BUILD)/limine-safe-mode.conf,$@)
 
@@ -775,17 +848,19 @@ test-uefi:
 	tools/qemu-smoke-test.py --disks $(BUILD)/disks --uefi --smp 4 --memory 6G --cpu max --usb \
 		--nic e1000e
 test-safe:
-	tools/qemu-smoke-test.py --disks $(BUILD)/disks --safe-mode --iso $(SAFE_ISO) --nic e1000
+	tools/qemu-smoke-test.py --disks $(BUILD)/disks --safe-mode --iso $(SAFE_ISO) --nic e1000 \
+		--usb ehci
 
 # Vexa must work without the Linux subsystem: build and boot a kernel without it.
-native-iso:
-	$(MAKE) BUILD=$(BUILD)/native LINUX_COMPAT=0 iso
+native-iso: $(DOOM) $(BUILD)/freedoom/freedoom1.wad
+	$(MAKE) BUILD=$(BUILD)/native LINUX_COMPAT=0 DOOM_PROGRAM=$(abspath $(DOOM)) \
+		FREEDOOM_DIR=$(abspath $(BUILD)/freedoom) iso
 # Installing on a disk (the Installer app), then starting from it.
 test-install: $(ISO)
 	tools/install-test.sh
 
 test-native-boot:
-	tools/qemu-smoke-test.py --no-linux --iso $(BUILD)/native/vexa.iso
+	tools/qemu-smoke-test.py --no-linux --iso $(BUILD)/native/vexa.iso --usb ohci
 test-native: native-iso
 	$(MAKE) --no-print-directory test-native-boot
 

@@ -385,6 +385,22 @@ see its driver, where it's connected, its vendor and device ids and details (a d
 size and where it's mounted, a USB device's speed). Devices Vexa has no driver for are
 shown in orange. It follows along as USB devices are plugged in and out.
 
+### Doom
+
+The 1993 game, as Chocolate Doom (a faithful port of id Software's released source,
+here built for Vexa with SDL), with **Freedoom: Phase 1**, a free set of levels, art,
+sounds and music made to replace the original's. Its music is played on an emulated
+OPL2 FM synthesizer, like a 1990s Sound Blaster.
+
+Arrow keys move, Ctrl fires, Space opens doors, Shift runs, 1 to 7 choose a weapon,
+Tab shows the map and Escape the menu (where Options sets the mouse, the sound and the
+keys). Its settings and saved games are kept in `/home/.local/share/chocolate-doom`.
+
+It also plays other Doom WAD files: `chocolate-doom -iwad /path/to/doom2.wad` at a
+terminal (with your own copy of Doom or Doom II, say), and `-file` adds levels made for
+them. `chocolate-doom -timedemo demo1` plays the first demo as fast as it can and says
+how many frames a second that was.
+
 ### Calculator
 
 Click the buttons or type: digits, `+ - * /`, `%`, Enter or `=`, Backspace, Escape
@@ -677,8 +693,12 @@ itself), and what you save there is still there next time.
 
 ## USB
 
-Vexa drives USB controllers (xHCI: USB 1, 2 and 3, what PCs have had since about
-2012) and what's plugged into them, through hubs too:
+Vexa drives USB controllers and what's plugged into them, through hubs too:
+**xHCI** (USB 1, 2 and 3, what PCs have had since about 2012), and the older ones:
+**EHCI** (USB 2) with its USB 1 companions, **UHCI** (Intel's and VIA's) and **OHCI**
+(AMD's, SiS's, NVIDIA's and others'). On those older PCs, USB 2 devices go through EHCI
+and keyboards, mice and other USB 1 devices through the companion controller on the
+same port; Vexa hands them over by itself.
 
 - **Keyboards and mice** work as soon as they're plugged in, next to the PS/2 ones, in
   the desktop and at the text console. **Tablets** (and QEMU's USB tablet, which `make
@@ -693,11 +713,16 @@ Vexa drives USB controllers (xHCI: USB 1, 2 and 3, what PCs have had since about
 Other kinds of USB devices (printers, cameras, sound, network adapters) are listed,
 without a driver yet.
 
+The older controllers have no MSI interrupts, so Vexa checks on them every few
+milliseconds instead (a tiny amount of work).
+
 In QEMU: `-device qemu-xhci,id=xhci -device usb-kbd,bus=xhci.0 -device
 usb-mouse,bus=xhci.0`, and a stick: `-drive if=none,id=stick,file=stick.img,format=raw
 -device usb-storage,bus=xhci.0,drive=stick`. QEMU's monitor (Ctrl+Alt+2) plugs them in
 and out while Vexa runs: `device_add usb-storage,bus=xhci.0,drive=stick,id=s` and
-`device_del s`.
+`device_del s`. The older controllers: `-device usb-ehci,id=xhci` (USB 2 alone),
+`-device piix3-usb-uhci,id=xhci` or `-device pci-ohci,id=xhci` in place of
+`qemu-xhci` (keeping the name, so the rest stays the same).
 
 ## Keyboard shortcuts
 

@@ -320,6 +320,22 @@ def installer():
     return im
 
 
+def doom():
+    """A skull, in hellish light."""
+    im = gradient_tile((200, 60, 30), (90, 15, 10))
+    d = ImageDraw.Draw(im)
+    bone = (240, 232, 214, 255)
+    dark = (60, 10, 8, 255)
+    d.ellipse([11 * S, 8 * S, 37 * S, 32 * S], fill=bone)
+    d.rectangle([16 * S, 28 * S, 32 * S, 38 * S], fill=bone)
+    d.ellipse([15 * S, 17 * S, 22 * S, 25 * S], fill=dark)
+    d.ellipse([26 * S, 17 * S, 33 * S, 25 * S], fill=dark)
+    d.polygon([(24 * S, 25 * S), (22 * S, 29 * S), (26 * S, 29 * S)], fill=dark)
+    for x in (19, 23, 27):
+        d.line([(x * S, 32 * S), (x * S, 38 * S)], fill=dark, width=S)
+    return im
+
+
 def help_book():
     im = gradient_tile((80, 170, 255), (30, 100, 210))
     d = ImageDraw.Draw(im)
@@ -362,7 +378,7 @@ ICONS = {
     "Settings": settings, "About": about, "XTerm": xterm,
     "Monitor": activity, "Calculator": calculator, "Calendar": calendar,
     "Notes": notes, "Paint": paint, "Help": help_book, "DeviceManager": device_manager,
-    "Installer": installer,
+    "Installer": installer, "Doom": doom,
 }
 
 if __name__ == "__main__":

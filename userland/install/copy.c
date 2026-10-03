@@ -2,7 +2,7 @@
  * what's made at each boot (/dev, /proc, /tmp, /run) and the other disks
  * (/mnt); the Linux programs (/linux) too, unless left out: their parts on
  * the boot CD (/linux/usr -> /cdrom/linux/usr...) are copied as the
- * directories they are there. */
+ * directories they are there (and Doom's game files, as files). */
 #include <dirent.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -79,8 +79,14 @@ static void copy_entry(const char *from, const char *to) {
             return;
         }
         target[n] = '\0';
-        if (!strncmp(target, "/cdrom/", 7)) {
-            copy_tree(target, to); /* The Linux files on the boot CD: copied for real. */
+        struct stat real;
+        if (!strncmp(target, "/cdrom/", 7) && stat(target, &real) == 0) {
+            /* What's on the boot CD (the Linux files, Doom's): copied for real. */
+            if (S_ISDIR(real.st_mode)) {
+                copy_tree(target, to);
+            } else {
+                copy_file(target, to, real.st_mode, real.st_size);
+            }
         } else if (!counting) {
             symlink(target, to);
         }

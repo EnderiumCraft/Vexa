@@ -286,6 +286,23 @@ TYPED_COMMANDS = ([
     ("@sendkey down", 'devmgr: showing "', 10),
     ("@sendkey tab", None, 2),
     ("@sendkey alt-f4", "desktop: asked window", 10),
+    # Doom (Chocolate Doom, with Freedoom's levels from the boot CD): its
+    # title music (SDL_mixer's OPL synthesizer), a new game from its menu,
+    # and quitting (Alt+F4 asks the game, which asks the player).
+    ("@sendkey ctrl-spc", "desktop: search", 10),
+    ("@type Doom", '"Freedoom: Phase 1 - Chocolate Doom 3.1.0" (800x600)', 60),
+    ("@music", None, 20),
+    ("@sendkey esc", None, 3),
+    ("@sendkey ret", None, 3),
+    ("@sendkey ret", None, 3),
+    ("@sendkey ret", None, 3),
+    ("@sendkey alt-f4", "desktop: asked window", 10),
+    ("@sendkey y", 'desktop: closed window', 30),
+    # Its first demo, played as fast as it goes (without drawing it).
+    ("@sendkey ctrl-alt-t", "term: tab 1 of 1", 20, 4),
+    ("@type chocolate-doom -timedemo demo1 -nodraw > /dev/console 2> /dev/console",
+     "gametics in", 600),
+    ("@type exit", None, 5),
     ("@sendkey ctrl-alt-q", "desktop: asking before leaving", 20),
     ("@sendkey ret", "desktop: back to the console", 20),
     # (Keys typed while the desktop ran can be left at the console: Ctrl-U erases them.)
@@ -360,11 +377,11 @@ LINUX_COMMANDS = [
     ("@mouse_move -358 -44", None, 5),
     ("@mouse_button 1", "desktop: left button at 31,13", 10),
     ("@mouse_button 0", None, 5),
-    ("@mouse_move 0 187", None, 5),
-    ("@mouse_move 0 187", None, 5),
-    ("@mouse_button 1", "desktop: left button at 31,387", 10),
+    ("@mouse_move 0 199", None, 5),
+    ("@mouse_move 0 199", None, 5),
+    ("@mouse_button 1", "desktop: left button at 31,411", 10),
     ("@mouse_button 0", "desktop: window 3", 300),
-    ("@mouse_move 181 -79", None, 10),
+    ("@mouse_move 181 -103", None, 10),
     ("@mouse_button 1", "desktop: left button at 212,308", 10),
     ("@mouse_button 0", 'desktop: window 3 is now called "Change Display"', 60),
     # GTK draws its own title bar (the desktop draws none for it); its
@@ -436,11 +453,22 @@ LINUX_COMMANDS = [
 # With --usb: an xHCI controller with a keyboard, and a hub with a mouse on
 # it. QEMU sends keys and mouse motion to the newest keyboard and mouse, so
 # then everything typed and pointed goes through USB.
-USB_DEVICES = [
-    "-device", "qemu-xhci,id=xhci",
-    "-device", "usb-kbd,bus=xhci.0",
-    "-device", "usb-hub,bus=xhci.0",
-    "-device", "usb-mouse,bus=xhci.0,port=2.1",
+# --usb CONTROLLER: a keyboard, and a hub with a mouse on it. With ehci, an
+# Intel ICH9's USB 2 controller and its three USB 1 companions: the keyboard
+# is high speed (EHCI's), the hub full speed (handed to a UHCI controller).
+USB_DEVICES = {
+    "xhci": ["-device", "qemu-xhci,id=usb"],
+    "ehci": ["-device", "ich9-usb-ehci1,id=usb,addr=1d.7,multifunction=on",
+             "-device", "ich9-usb-uhci1,masterbus=usb.0,firstport=0,addr=1d.0,multifunction=on",
+             "-device", "ich9-usb-uhci2,masterbus=usb.0,firstport=2,addr=1d.1,multifunction=on",
+             "-device", "ich9-usb-uhci3,masterbus=usb.0,firstport=4,addr=1d.2,multifunction=on"],
+    "uhci": ["-device", "piix3-usb-uhci,id=usb"],
+    "ohci": ["-device", "pci-ohci,id=usb"],
+}
+USB_ATTACHED = [
+    "-device", "usb-kbd,bus=usb.0,port=1",
+    "-device", "usb-hub,bus=usb.0,port=2",
+    "-device", "usb-mouse,bus=usb.0,port=2.1",
 ]
 
 # With --usb, at the end of the desktop checks: Device Manager open while a
@@ -449,14 +477,14 @@ USB_DESKTOP_COMMANDS = [
     ("@sendkey ctrl-spc", "desktop: search", 10),
     ("@type Device Manager", '"Device Manager" (780x520)', 20, 2),
     ("@drive_add 0 if=none,id=stick3,file=@STICK@,format=raw", None, 5),
-    ("@device_add usb-storage,bus=xhci.0,drive=stick3,id=stick3", "devmgr: devices changed", 30),
+    ("@device_add usb-storage,bus=usb.0,drive=stick3,id=stick3", "devmgr: devices changed", 30),
     ("@mouse_move 0 0", 'desktop: notification "Connected: QEMU USB HARDDRIVE', 20),
     ("@device_del stick3", 'desktop: notification "Disconnected: QEMU USB HARDDRIVE"', 30),
     ("@sendkey alt-f4", "desktop: asked window", 10),
     # A tablet (absolute positions). QEMU's monitor only moves pointers
     # relatively, which a tablet ignores: it stays at 0,0, so its click puts
     # the pointer there (from wherever the mouse left it).
-    ("@device_add usb-tablet,bus=xhci.0,id=tablet", "tablet (absolute)", 20),
+    ("@device_add usb-tablet,bus=usb.0,id=tablet", "tablet (absolute)", 20),
     ("@mouse_button 1", "desktop: left button at 0,0", 10),
     ("@mouse_button 0", None, 2),
     ("@device_del tablet", "QEMU USB Tablet unplugged", 20),
@@ -464,13 +492,15 @@ USB_DESKTOP_COMMANDS = [
 
 USB_COMMANDS = [
     ("#usb",),
+    # (Typing goes to the newest keyboard: first, everything's found.)
+    ("@sendkey shift", "hub port 1: QEMU USB Mouse", 30),
     ("devices usb", "QEMU USB Keyboard  [usb-hid]", 10),
     ("devices -l usb", "port 1 of a hub", 10),
     ("devices keyboard", "PS/2 keyboard", 10),
     # A USB stick plugged in while Vexa runs: mounted at /mnt/usb0, read and
     # written; pulled out (its file system goes), and plugged in again.
     ("@drive_add 0 if=none,id=stick,file=@STICK@,format=raw", None, 5),
-    ("@device_add usb-storage,bus=xhci.0,drive=stick,id=stick", "mounted usb0 at /mnt/usb0", 30),
+    ("@device_add usb-storage,bus=usb.0,drive=stick,id=stick", "mounted usb0 at /mnt/usb0", 30),
     ("cat /mnt/usb0/hello.txt", "Hello from a USB stick!", 10),
     ("echo written over usb > /mnt/usb0/note.txt", None, 10),
     ("devices -l disk", "usb0 at /mnt/usb0", 10),
@@ -478,11 +508,11 @@ USB_COMMANDS = [
     ("ls /mnt/usb0", "vexa:/> ", 10),
     ("df", "cd0", 10),
     ("@drive_add 0 if=none,id=stick2,file=@STICK@,format=raw", None, 5),
-    ("@device_add usb-storage,bus=xhci.0,drive=stick2,id=stick2", "mounted usb0 at /mnt/usb0", 30, 2),
+    ("@device_add usb-storage,bus=usb.0,drive=stick2,id=stick2", "mounted usb0 at /mnt/usb0", 30, 2),
     ("cat /mnt/usb0/note.txt", "written over usb\r\n", 10),
     ("@device_del stick2", "usb0 is gone", 20, 2),  # (QEMU opens an image only once.)
     # A second keyboard, plugged in and out.
-    ("@device_add usb-kbd,bus=xhci.0,id=kbd2", "usb-hid] QEMU USB Keyboard: keyboard", 20, 2),
+    ("@device_add usb-kbd,bus=usb.0,id=kbd2", "usb-hid] QEMU USB Keyboard: keyboard", 20, 2),
     ("@device_del kbd2", "QEMU USB Keyboard unplugged", 20),
     ("echo still typing", "still typing\r\n", 10),
 ]
@@ -704,6 +734,25 @@ def sound_frequency(path, start=44):
     return pitches[len(pitches) // 2], len(pitches) / 20, end
 
 
+def sound_heard_seconds(path, start=44):
+    """How many seconds of QEMU's recording (from byte `start`) aren't
+    silence (music, say, which has no one pitch), and where it ends now."""
+    try:
+        with open(path, "rb") as f:
+            data = f.read()
+    except OSError:
+        return 0, start
+    if len(data) < 48 or data[:4] != b"RIFF":
+        return 0, start
+    channels, rate = struct.unpack("<HI", data[22:28])
+    end = start + (len(data) - start) // (2 * channels) * 2 * channels
+    left = struct.unpack("<%dh" % ((end - start) // 2), data[start:end])[::channels]
+    size = rate // 20
+    loud = sum(1 for at in range(0, len(left) - size + 1, size)
+               if sum(abs(v) for v in left[at:at + size]) / size > 200)
+    return loud / 20, end
+
+
 # Installing (--install DISK): the Installer app puts Vexa on an empty disk
 # (without the Linux programs, to be quick), from the desktop; then the
 # install program itself would refuse a disk that's in use.
@@ -767,7 +816,7 @@ def main():
                         help="boot from the first disk (an installed Vexa), without the CD")
     parser.add_argument("--nic", default="virtio-net-pci",
                         help="QEMU's network card: virtio-net-pci, e1000, e1000e, rtl8139")
-    parser.add_argument("--usb", action="store_true",
+    parser.add_argument("--usb", nargs="?", const="xhci", choices=sorted(USB_DEVICES),
                         help="add a USB controller with a keyboard and a mouse on a hub (typing "
                              "and the pointer then go through USB) and run the USB checks")
     parser.add_argument("--accel", default="auto", choices=["auto", "kvm", "tcg"],
@@ -856,7 +905,7 @@ def main():
     if args.uefi:
         command += ["-bios", OVMF]
     if args.usb:
-        command += USB_DEVICES
+        command += USB_DEVICES[args.usb] + USB_ATTACHED
     if args.cpu:
         command += ["-cpu", args.cpu]
     accel = args.accel
@@ -904,6 +953,15 @@ def main():
                                 break
                         else:
                             failures.append(f"{command!r}: missing {expected!r}")
+                        continue
+                    if command == "@music":
+                        # Something that isn't silence, for a few seconds.
+                        time.sleep(6)
+                        seconds, sound_heard = sound_heard_seconds(os.path.join(tmp, "sound.wav"),
+                                                                   sound_heard)
+                        print(f"qemu-smoke-test: heard {seconds:.1f} s of sound")
+                        if seconds < 1:
+                            failures.append(f"{command!r}: heard {seconds:.1f} s of sound")
                         continue
                     if command.startswith("@sound "):
                         # What QEMU recorded should be a tone of that pitch.

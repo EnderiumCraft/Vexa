@@ -17,6 +17,8 @@
 #include <vexa/string.h>
 #include <vexa/usb.h>
 
+#include "hcd.h"
+
 /* ---- The "usb" thread and its work ---- */
 
 #define WORK_MAX 128
@@ -85,9 +87,14 @@ int usb_bulk(struct usb_device *device, uint8_t endpoint, void *data, uint32_t l
 }
 
 int usb_clear_halt(struct usb_device *device, uint8_t endpoint) {
-    /* (The controller's side of the endpoint is restarted after the stall.) */
-    return usb_control(device, USB_DIR_OUT | USB_RECIP_ENDPOINT, USB_REQ_CLEAR_FEATURE, 0,
-                       endpoint, NULL, 0);
+    /* (xHCI restarts its side of the endpoint after the stall; the others
+     * start its data toggle again, as the device does.) */
+    int result = usb_control(device, USB_DIR_OUT | USB_RECIP_ENDPOINT, USB_REQ_CLEAR_FEATURE, 0,
+                             endpoint, NULL, 0);
+    if (result >= 0 && device->hc->ops->clear_toggle) {
+        device->hc->ops->clear_toggle(device->hc, device, endpoint);
+    }
+    return result;
 }
 
 int usb_interrupt_in(struct usb_device *device, uint8_t endpoint, uint16_t size,
@@ -463,4 +470,8 @@ void usb_add_controller(struct usb_hc *hc) {
 
 void usb_init(void) {
     xhci_init();
+    /* EHCI before its companions: until it starts, every port is theirs. */
+    ehci_init();
+    uhci_init();
+    ohci_init();
 }

@@ -41,6 +41,8 @@ const struct mem_range *pmm_memory_map(size_t *count);
 void pmm_reclaim_bootloader_memory(void);
 /* Returns the physical address of 2^order contiguous pages, or 0 if out of memory. */
 uint64_t pmm_alloc(unsigned order);
+/* The same, ending at or below `limit` (for devices that take 32-bit addresses). */
+uint64_t pmm_alloc_below(unsigned order, uint64_t limit);
 void pmm_free(uint64_t phys, unsigned order);
 /* One zeroed page; panics when memory runs out. For page tables and such. */
 uint64_t pmm_alloc_zeroed_page(void);

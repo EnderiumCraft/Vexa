@@ -14,11 +14,11 @@ vexa-sdk/
     bin/vexa-new-app     starts an app from the template
     bin/sdl2-config      SDL's flags
     include/             libvexa's headers (and SDL2/)
-    lib/                 libvexa.so, libvexa.a, crt0.o, libSDL2.a, pkgconfig/, cmake/
+    lib/                 libvexa.so, libvexa.a, crt0.o, libSDL2.a, libSDL2_mixer.a, pkgconfig/, cmake/
     cmake/vexa.cmake     a CMake toolchain file
     template/            the app template
     examples/sdl-demo/   an SDL program as an app
-    licenses/            musl's (libm) and SDL's
+    licenses/            musl's (libm), SDL's and SDL_mixer's
 ```
 
 ## A first app
@@ -128,8 +128,18 @@ Drawing is in software: SDL's renderer (the "software" one) or the window's surf
 mode, and full screen is a window as big as the screen. The pointer can take SDL's
 system shapes, but not pictures of its own.
 
+## SDL_mixer
+
+SDL_mixer 2 (2.8) is there too, for sound effects and music: WAV, AIFF and VOC
+files, and Ogg Vorbis, MP3 and FLAC music (through the single-file decoders it
+carries). Link with `-lSDL2_mixer` (before SDL), pkg-config (`SDL2_mixer`) or CMake
+(`find_package(SDL2_mixer)` and `SDL2_mixer::SDL2_mixer`). MIDI music needs a program's
+own synthesizer: Doom's (Chocolate Doom, in Vexa's Doom app) uses SDL_mixer's music
+hook with an OPL emulator.
+
 ## Licenses
 
 libvexa is part of Vexa (see the repository). Programs built with the SDK carry libm
 from musl (MIT, `licenses/musl-libm.txt`) in libvexa, and SDL (zlib,
-`licenses/SDL2.txt`) when they use it; Vexa's SDL drivers are under SDL's license.
+`licenses/SDL2.txt`) and SDL_mixer (zlib, `licenses/SDL2_mixer.txt`) when they use
+them; Vexa's SDL drivers are under SDL's license.

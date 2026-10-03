@@ -189,6 +189,33 @@ uint64_t pmm_alloc(unsigned order) {
     return page << PAGE_SHIFT;
 }
 
+uint64_t pmm_alloc_below(unsigned order, uint64_t limit) {
+    if (order > PMM_MAX_ORDER) {
+        return 0;
+    }
+    uint64_t flags = spin_lock_irqsave(&pmm_lock);
+    for (unsigned found = order; found <= PMM_MAX_ORDER; found++) {
+        struct free_block *head = &free_lists[found];
+        for (struct free_block *b = head->next; b != head; b = b->next) {
+            uint64_t page = virt_to_phys(b) >> PAGE_SHIFT;
+            /* (The low part of the block is what's handed out.) */
+            if (((page + (1ULL << order)) << PAGE_SHIFT) > limit) {
+                continue;
+            }
+            list_remove(page);
+            while (found > order) {
+                found--;
+                list_push(found, page + (1ULL << found));
+            }
+            free_pages -= 1ULL << order;
+            spin_unlock_irqrestore(&pmm_lock, flags);
+            return page << PAGE_SHIFT;
+        }
+    }
+    spin_unlock_irqrestore(&pmm_lock, flags);
+    return 0;
+}
+
 void pmm_free(uint64_t phys, unsigned order) {
     uint64_t page = phys >> PAGE_SHIFT;
     if ((phys & (PAGE_SIZE - 1)) || order > PMM_MAX_ORDER || page + (1ULL << order) > page_count ||

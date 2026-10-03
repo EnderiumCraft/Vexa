@@ -69,6 +69,7 @@ static int command(struct storage *s, const uint8_t *cdb, int cdb_length, void *
     memcpy(cbw->command, cdb, (size_t)cdb_length);
     int n = usb_bulk(s->usb, s->out, cbw, sizeof(*cbw), 5000);
     if (n != (int)sizeof(*cbw)) {
+        kprintf("[usb-storage] %s: command %02x: sending it failed (%d)\n", s->block.name, cdb[0], n);
         reset_recovery(s);
         return n < 0 ? n : -VX_EIO;
     }
@@ -79,6 +80,8 @@ static int command(struct storage *s, const uint8_t *cdb, int cdb_length, void *
             usb_clear_halt(s->usb, in ? s->in : s->out); /* Then the status still comes. */
             moved = 0;
         } else if (moved < 0) {
+            kprintf("[usb-storage] %s: command %02x: its data failed (%d)\n", s->block.name, cdb[0],
+                    moved);
             reset_recovery(s);
             return moved;
         }
@@ -90,6 +93,7 @@ static int command(struct storage *s, const uint8_t *cdb, int cdb_length, void *
     }
     if (n != (int)sizeof(*csw) || csw->signature != CSW_SIGNATURE || csw->tag != cbw->tag ||
         csw->status == 2) {
+        kprintf("[usb-storage] %s: command %02x: no good status (%d)\n", s->block.name, cdb[0], n);
         reset_recovery(s);
         return n < 0 ? n : -VX_EIO;
     }

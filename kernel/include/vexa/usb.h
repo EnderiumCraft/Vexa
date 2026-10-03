@@ -5,7 +5,7 @@
 #include <stdint.h>
 
 /*
- * USB: host controllers (dev/usb/xhci.c) find devices on their ports; the
+ * USB: host controllers (dev/usb/xhci.c, ehci.c, uhci.c, ohci.c) find devices on their ports; the
  * core (dev/usb/usb.c) reads what each device is, configures it and hands
  * its interfaces to class drivers (hubs, HID keyboards and mice, mass
  * storage). Plugging and unplugging is handled by one kernel thread, "usb",
@@ -183,6 +183,9 @@ struct usb_hc_ops {
     int (*interrupt_in)(struct usb_hc *hc, struct usb_device *device, uint8_t endpoint,
                         uint16_t size, usb_report_fn callback, void *arg);
     int (*reset_endpoint)(struct usb_hc *hc, struct usb_device *device, uint8_t endpoint);
+    /* After CLEAR_FEATURE ENDPOINT_HALT: the next packet is DATA0 again
+     * (controllers that keep data toggles in software; NULL for xHCI). */
+    int (*clear_toggle)(struct usb_hc *hc, struct usb_device *device, uint8_t endpoint);
     /* Root ports: resets one (returns its speed, or a negative error). */
     int (*reset_port)(struct usb_hc *hc, int port);
     bool (*port_connected)(struct usb_hc *hc, int port);

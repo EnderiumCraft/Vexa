@@ -92,12 +92,16 @@ runs X programs such as `xterm` in windows of their own on it. The kernel:
   libm) for programs ported to it
 - has an SDK for building native programs and apps on Linux: `vexa-cc`, an app template
   (`vexa-new-app`), a CMake toolchain file, and SDL 2 with Vexa drivers (each SDL
-  window a desktop window, sound on the HD Audio device); each release carries it
+  window a desktop window, sound on the HD Audio device), and SDL_mixer; each release
+  carries it
+- plays Doom: Chocolate Doom, built with the SDK like any SDL program, with Freedoom's
+  levels, art and music
 - has a file system tree with a root in memory (unpacked from an initramfs), `/dev`,
   and disks mounted under `/mnt`
 - installs itself on a disk (the Installer app, or `install`) and starts from it, with
   BIOS or UEFI firmware, keeping what you change
-- drives USB: xHCI controllers (USB 1 to 3), hubs, keyboards, mice and tablets, and
+- drives USB: xHCI controllers (USB 1 to 3) and the older EHCI, UHCI and OHCI ones,
+  hubs, keyboards, mice and tablets, and
   USB sticks and disks (mounted at `/mnt/usb0`), plugged in and out while it runs
 - drives wired network cards: virtio-net, Intel e1000 and e1000e, Realtek RTL8139 and
   RTL8111/8168

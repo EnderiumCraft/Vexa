@@ -103,7 +103,9 @@ make test-quick ONLY=shell,network
 The sections are `shell`, `network`, `usb`, `desktop`, `linux`, `x`, `linux-net` and
 `disks`.
 
-**USB** (`--usb`, which `test-uefi` uses): an xHCI controller with a USB keyboard and a
+**USB** (`--usb`, which `test-uefi` uses; `--usb ehci`, `uhci` or `ohci` for the older
+controllers: `test-safe` uses an Intel ICH9's EHCI with its UHCI companions, where the
+hub is handed to a companion, and `test-native-boot` OHCI): a controller with a USB keyboard and a
 hub with a USB mouse on it. QEMU sends keys and mouse motion to the newest keyboard and
 mouse, so that boot types and points through USB all along. The `usb` section checks
 the device tree, then plugs a USB stick in through QEMU's monitor (`device_add`),
@@ -159,7 +161,7 @@ kernel/               the kernel (see ARCHITECTURE.md)
   src/personality/    the native system calls (vexa/) and the Linux subsystem (linux/)
 abi/vexa/abi.h        system call numbers, structures and errors: kernel and libvexa share it
 libvexa/              Vexa's C library (libvexa.so) and dynamic loader (ld/)
-kernel/src/dev/usb/   USB: the xHCI driver, the core, hubs, HID and mass storage
+kernel/src/dev/usb/   USB: the xHCI, EHCI, UHCI and OHCI drivers, the core, hubs, HID and mass storage
 sdk/                  the SDK's own files: vexa-cc, vexa-new-app, the app template,
                       the CMake toolchain file, SDL's configuration and Vexa drivers
                       (sdl2/), and the SDL demo (examples/)
@@ -379,6 +381,22 @@ The desktop is in parts, in `userland/desktop/`:
 It prints what it does to its standard output (the serial log, when it's started from
 the console): `desktop: window 3 "Settings" (860x580) at 144,138`, `desktop: snapped
 window 1 to the top left`, `desktop: locked`... The tests wait for these lines.
+
+## Ports built with the SDK
+
+Doom is a program from elsewhere built for Vexa as a native app, the way anyone would
+with the SDK: Chocolate Doom's own CMake build, given the SDK's toolchain file, finds
+SDL and SDL_mixer and builds unchanged (`tools/build-doom.sh`, `make doom`). Vexa's
+changes are a small patch, `ports/chocolate-doom/vexa.patch` (`#ifdef __vexa__`: its
+game files in its bundle's `Contents/Resources`, a window rather than the whole screen,
+no text screen on quitting), and a fix it needed: SDL's software renderer says its
+largest texture is 0 by 0, meaning no limit, which Chocolate Doom took literally.
+
+The source comes from a pinned tag (its commit is checked), Freedoom's WAD from its
+release (by checksum); the WAD goes on the boot CD (`/doom`), not into the initramfs,
+and the bundle's `Resources/freedoom1.wad` links to `/cdrom/doom/freedoom1.wad` (the
+installer copies it as a file). Chocolate Doom is GPL-2.0, so `make doom-source` packs
+its source and the patch, which releases publish next to the ISO.
 
 ## Linux programs in the ISO
 

@@ -103,7 +103,7 @@ with `LINUX_COMPAT=0`.
 kernel/src/
   arch/x86_64/            CPU setup, interrupts, paging, syscall entry
   core/                   handles, processes, scheduler, memory, VFS, IPC, net
-  dev/                    drivers (dev/usb: xHCI, the USB core, hubs, HID, storage)
+  dev/                    drivers (dev/usb: xHCI, EHCI, UHCI, OHCI, the USB core, hubs, HID, storage)
   lib/                    kernel support code (strings, kprintf)
   personality/vexa/       native system calls
   personality/linux/      Linux subsystem (LINUX_COMPAT)
@@ -214,7 +214,19 @@ partition table again through controls on its `/dev` node (`VX_BLOCK_INFO`,
   context per slot, rings of TRBs for commands and each endpoint, and an event ring
   that a kernel thread per controller reads, woken by the MSI interrupt. Threads that
   start a command or a transfer sleep until its event; interrupt endpoints (keyboards,
-  mice, hubs) stay queued, each report going to a callback. `usb.c` is the core: one
+  mice, hubs) stay queued, each report going to a callback. The older controllers
+  (`ehci.c`, `uhci.c`, `ohci.c`, sharing `hcd.c`) keep a queue head (an ED, for OHCI)
+  per endpoint, in the controller's asynchronous list (control, bulk) or its
+  periodic one (interrupt endpoints, visited every frame), with a transfer's
+  descriptors hung on it. They take 32-bit addresses, so their memory comes from below
+  4 GiB (`pmm_alloc_below`) and data goes through bounce buffers there; they have no
+  MSI, and Vexa doesn't route the older PCI interrupts, so a thread waiting for a
+  transfer checks its descriptors, and a thread per controller checks the interrupt
+  endpoints and the ports (every 2 ms with a keyboard or mouse, else every 20).
+  EHCI starts before its companions (until then every port is theirs) and hands a
+  port to them when what's on it isn't high speed; low and full speed devices behind
+  a high speed hub get split transactions instead. UHCI keeps data toggles in
+  software (`clear_toggle` after a halt is cleared). `usb.c` is the core: one
   kernel thread, "usb", handles plugging and unplugging, so drivers may sleep. A new
   device gets an address, its descriptors are read, it's configured, and each
   interface goes to the first class driver that takes it: `hub.c` (USB 2 and 3 hubs,
