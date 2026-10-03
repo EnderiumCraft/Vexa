@@ -20,6 +20,10 @@
  * waiting for a disk and so can't happen on a CPU's idle thread, then starts
  * the monitor. */
 
+#ifdef LINUX_COMPAT
+void linux_devices_init(void);
+#endif
+
 static void must(int error, const char *what) {
     if (error) {
         panic("init: %s failed: %s", what, vfs_error_name(error));
@@ -93,6 +97,9 @@ void init_thread(void *unused) {
 
     storage_init();
     display_init();
+#ifdef LINUX_COMPAT
+    linux_devices_init(); /* /dev/dri/card0 (and evdev) for Linux programs. */
+#endif
     net_init();
     virtio_net_init();
 

@@ -264,7 +264,7 @@ $(BUSYBOX_SRC)/Makefile:
 # (from linux-libc-dev), so make a directory with just those.
 $(BUILD)/linux-headers:
 	rm -rf $@ && mkdir -p $@
-	for dir in linux asm-generic mtd; do ln -s /usr/include/$$dir $@/$$dir; done
+	for dir in linux asm-generic mtd drm; do ln -s /usr/include/$$dir $@/$$dir; done
 	ln -s /usr/include/$$($(CC) -dumpmachine)/asm $@/asm
 
 $(BUSYBOX): $(BUSYBOX_SRC)/Makefile third_party/busybox.config tools/configure-busybox.sh \
@@ -435,9 +435,9 @@ python: $(PYTHON)
 LINUX_TESTS := $(patsubst tests/linux/%.c,$(BUILD)/linux-tests/%,$(wildcard tests/linux/*.c)) \
 	$(wildcard tests/linux/*.py)
 
-$(BUILD)/linux-tests/%: tests/linux/%.c
+$(BUILD)/linux-tests/%: tests/linux/%.c | $(BUILD)/linux-headers
 	@mkdir -p $(dir $@)
-	$(MUSL_CC) -O2 -Wall -Wextra -Werror -pthread $< -o $@
+	$(MUSL_CC) -O2 -Wall -Wextra -Werror -pthread -isystem $(BUILD)/linux-headers $< -o $@
 
 $(X11): $(X11_SOURCES) tools/build-x11.sh $(wildcard third_party/xvexa/*) | $(BUILD)/linux-headers
 	tools/build-x11.sh $(X11_SOURCES) third_party/x11 $(BUILD)/x11-work $(X11_SYSROOT) \

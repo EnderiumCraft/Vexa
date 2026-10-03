@@ -311,6 +311,11 @@ static int64_t read_object(struct object *object, uint64_t buffer, uint64_t size
         ((struct file *)object)->vnode->type == VX_TYPE_DIRECTORY) {
         return -LE_EISDIR;
     }
+    int64_t device_result;
+    if (object->type == &file_object_type &&
+        linux_device_read((struct file *)object, buffer, size, &device_result)) {
+        return device_result;
+    }
     uint8_t *chunk = kmalloc(IO_CHUNK);
     if (!chunk) {
         return -LE_ENOMEM;
@@ -1491,6 +1496,12 @@ static int64_t sys_ioctl(struct interrupt_frame *f, uint64_t fd, uint64_t reques
         int64_t result = linux_socket_ioctl(object, request, arg);
         object_put(object);
         return result;
+    }
+    int64_t device_result;
+    if (object->type == &file_object_type &&
+        linux_device_ioctl((struct file *)object, (uint32_t)request, arg, &device_result)) {
+        object_put(object);
+        return device_result;
     }
     if (request == LINUX_FIONREAD && object->type == &pipe_read_type) {
         int ready = (object->type->poll(object) & OBJECT_READABLE) ? 1 : 0;

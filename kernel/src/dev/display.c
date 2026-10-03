@@ -22,7 +22,7 @@
 
 static struct vx_display_info info, boot_info;
 static uint64_t frame_phys;
-static struct file *owner; /* The file that acquired the display. */
+static const void *owner; /* Who has the display: a file, or the Linux DRM device. */
 static struct spinlock lock = SPINLOCK_INIT;
 
 /* ---- Mode setting (Bochs DISPI) ---- */
@@ -137,9 +137,24 @@ static void list_modes(struct vx_display_modes *out) {
     }
 }
 
-static void display_close(struct file *file) {
+/* ---- For the kernel, too (the Linux subsystem's DRM device) ---- */
+
+int display_claim(const void *who) {
     uint64_t flags = spin_lock_irqsave(&lock);
-    bool was_owner = owner == file;
+    int error = !frame_phys ? -VX_EIO : owner && owner != who ? -VX_EBUSY : 0;
+    if (!error) {
+        owner = who;
+    }
+    spin_unlock_irqrestore(&lock, flags);
+    if (!error) {
+        fb_set_hidden(true);
+    }
+    return error;
+}
+
+void display_release(const void *who) {
+    uint64_t flags = spin_lock_irqsave(&lock);
+    bool was_owner = who && owner == who;
     if (was_owner) {
         owner = NULL;
     }
@@ -153,6 +168,37 @@ static void display_close(struct file *file) {
     }
 }
 
+void *display_frame(struct vx_display_info *out) {
+    if (out) {
+        *out = info;
+    }
+    return frame_phys ? phys_to_virt(frame_phys) : NULL;
+}
+
+void display_modes(struct vx_display_modes *out) {
+    list_modes(out);
+}
+
+int display_set_mode(const void *who, unsigned width, unsigned height) {
+    check_dispi();
+    if (owner != who) {
+        return -VX_EACCES;
+    }
+    if (width == info.width && height == info.height) {
+        return 0;
+    }
+    if (!dispi || !mode_fits(width, height) || width < 640 || height < 480) {
+        return -VX_EINVAL;
+    }
+    dispi_set(width, height);
+    kprintf("[display] now %ux%u\n", info.width, info.height);
+    return 0;
+}
+
+static void display_close(struct file *file) {
+    display_release(file);
+}
+
 static int display_control(struct file *file, uint32_t request, void *arg, size_t size) {
     switch (request) {
     case VX_DISPLAY_INFO:
@@ -161,18 +207,8 @@ static int display_control(struct file *file, uint32_t request, void *arg, size_
         }
         memcpy(arg, &info, sizeof(info));
         return 0;
-    case VX_DISPLAY_ACQUIRE: {
-        uint64_t flags = spin_lock_irqsave(&lock);
-        int error = owner && owner != file ? -VX_EBUSY : 0;
-        if (!error) {
-            owner = file;
-        }
-        spin_unlock_irqrestore(&lock, flags);
-        if (!error) {
-            fb_set_hidden(true);
-        }
-        return error;
-    }
+    case VX_DISPLAY_ACQUIRE:
+        return display_claim(file);
     case VX_DISPLAY_MODES:
         if (size < sizeof(struct vx_display_modes)) {
             return -VX_EINVAL;
@@ -184,20 +220,7 @@ static int display_control(struct file *file, uint32_t request, void *arg, size_
             return -VX_EINVAL;
         }
         const struct vx_display_mode *mode = arg;
-        check_dispi();
-        if (owner != file) {
-            return -VX_EACCES;
-        }
-        if (mode->width == info.width && mode->height == info.height) {
-            return 0;
-        }
-        if (!dispi || !mode_fits(mode->width, mode->height) || mode->width < 640 ||
-            mode->height < 480) {
-            return -VX_EINVAL;
-        }
-        dispi_set(mode->width, mode->height);
-        kprintf("[display] now %ux%u\n", info.width, info.height);
-        return 0;
+        return display_set_mode(file, mode->width, mode->height);
     }
     default:
         return -VX_ENOTTY;

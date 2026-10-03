@@ -37,5 +37,8 @@ bool input_grabbed(struct input_device *device);
 
 /* Every registered device, for the Linux subsystem's evdev view. */
 struct input_device *input_device_at(int index);
+/* The device an open /dev/input/eventN is, or NULL for other files. */
+struct file;
+struct input_device *input_file_device(struct file *file);
 
 #endif

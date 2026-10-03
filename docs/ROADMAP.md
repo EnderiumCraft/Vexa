@@ -256,8 +256,9 @@ Linux track:
       server with a Vexa backend (Xvexa, a kdrive server whose screen is a desktop
       window), xkbcomp and the keyboard data, and `xterm` (0.13.0)
 - [x] Controlling terminals: a pty becomes its session's `/dev/tty` (0.13.0)
-- [ ] Translate the Linux interfaces onto the core: DRM/KMS "dumb buffers",
-      evdev devices under `/dev/input`, `memfd_create`, `/dev/shm`, `MAP_SHARED`
+- [x] Translate the Linux interfaces onto the core: `memfd_create`, `/dev/shm` and
+      `MAP_SHARED` (0.15.0); DRM/KMS with "dumb buffers" on `/dev/dri/card0` (mode
+      setting, page flips with events) and evdev devices under `/dev/input` (0.23.0)
 - [ ] Xorg with the modesetting driver on those, for X on the whole screen
 
 **Milestone:** a graphical Vexa desktop with windows you can drag around. Reached on the

@@ -388,6 +388,12 @@ LINUX_COMMANDS = [
     ("python3 -c \"import ssl, urllib.request as u; c = ssl.create_default_context("
      "cafile='/tmp/test-ca.pem'); print(u.urlopen('@HTTPS@/hello.txt', context=c).read())\"",
      "b\"Hello from the test's web server", 120),
+    ("#linux-graphics",),
+    # Linux's graphics and input interfaces: a DRM program shows pictures on
+    # the whole screen (taking it from the console, then giving it back) and
+    # reads the grabbed keyboard through evdev.
+    ("drm-test", "drm-test: press a key", 60),
+    ("@sendkey a", "drm-test: passed", 30),
     ("#shell",),
 ]
 

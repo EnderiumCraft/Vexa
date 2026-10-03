@@ -188,6 +188,13 @@ PACKET command), as `cd0`... with 2048-byte sectors.
   its own queue. A program can grab a device; a grabbed keyboard no longer types into
   the console terminal. The PS/2 keyboard and mouse share the controller's interrupt
   path: each byte goes to one or the other by where it came from.
+- **Linux graphics and input** (`personality/linux/devices.c`): `/dev/dri/card0` is a
+  DRM device with one CRTC, encoder and connector, and dumb buffers in memory that
+  programs map; the buffer on screen is copied to the frame buffer when it's set,
+  flipped to or marked dirty, and about 30 times a second besides. Showing one takes
+  the display as `/dev/display0`'s holder would (`display_claim`); closing the card
+  gives it back. Linux reads of `/dev/input/eventN` get `struct input_event`, and the
+  `EVIOC*` requests describe the devices.
 - **The display** (`dev/display.c`): `/dev/display0` is the boot framebuffer. A program
   acquires it, which hides the text console (it keeps its text and redraws when the
   program is done), and maps it with `vx_map_file`. The framebuffer's pages are device

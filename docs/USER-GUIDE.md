@@ -150,7 +150,7 @@ Vexa's file system starts in memory and has these folders:
 | `/share/fonts` | the fonts Vexa's apps draw text with (DejaVu Sans, Sans Bold, Sans Mono) |
 | `/tmp` | scratch space |
 | `/Trash` | what Files moved to the Trash |
-| `/dev` | devices: the console, terminals (`/dev/pts`), `/dev/input`, `/dev/display0` |
+| `/dev` | devices: the console, terminals (`/dev/pts`), `/dev/input`, `/dev/display0`, `/dev/dri/card0` (for Linux programs), `/dev/random` |
 | `/proc` | the processes and the system, in Linux's format (`cat /proc/meminfo`) |
 | `/run` | the desktop's socket and shared window buffers |
 | `/mnt` | disks and CDs (`/mnt/vda1`, `/mnt/cd0`, ...) |
@@ -505,8 +505,11 @@ first: `/linux/usr/bin/bash` is what a Linux program sees as `/usr/bin/bash`. Fr
 
 They get the usual Linux interfaces: processes (`fork`, `exec`), signals, threads,
 pipes, terminals, sockets (TCP, UDP, local sockets that pass open files), shared memory
-and `/proc`. `pthread-test`, `bsd-socket-test`, `memfd-test` and `python-net-test.py`
-check parts of it.
+and `/proc`, and Linux's graphics and input interfaces: DRM on `/dev/dri/card0` (kernel
+modesetting with "dumb buffers": a program can show pictures on the whole screen, taking
+it from the console while it does, though not while the desktop has it) and evdev on
+`/dev/input/event*`. `pthread-test`, `bsd-socket-test`, `memfd-test`,
+`python-net-test.py` and `drm-test` check parts of it.
 
 ## X and GTK programs
 

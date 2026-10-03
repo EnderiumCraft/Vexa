@@ -170,8 +170,9 @@ journal, so pulling the plug mid-write can leave the disk needing a check with
 Phase 8 is under way: Vexa has a graphical desktop of its own (`desktop`), with terminal
 windows you can drag, resize, maximize and minimize, and X programs run on it as windows
 of their own: Ctrl+Alt+X opens an `xterm`.
-Next: the Linux display and input interfaces (DRM "dumb buffers", evdev), so that Linux
-graphics programs can also run without X. See [docs/ROADMAP.md](docs/ROADMAP.md) for the
+Linux programs also get the kernel's display and input interfaces, DRM with "dumb
+buffers" on `/dev/dri/card0` and evdev on `/dev/input`, so they can draw on the whole
+screen without X. Next: Mesa's software OpenGL. See [docs/ROADMAP.md](docs/ROADMAP.md) for the
 full plan from here to Firefox.
 
 ## Download

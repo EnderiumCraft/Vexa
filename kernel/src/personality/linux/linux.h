@@ -206,6 +206,7 @@
 #define LE_ESRCH 3
 #define LE_EINTR 4
 #define LE_EIO 5
+#define LE_ENXIO 6
 #define LE_E2BIG 7
 #define LE_ENOEXEC 8
 #define LE_EBADF 9
@@ -623,5 +624,13 @@ struct linux_ifconf {
     int32_t pad;
     uint64_t buffer;
 };
+
+/* devices.c: evdev (/dev/input/eventN) and DRM (/dev/dri/card0). The two
+ * hooks return false for other files. */
+struct file;
+int64_t linux_errno(int64_t result);
+void linux_devices_init(void);
+bool linux_device_ioctl(struct file *file, uint32_t request, uint64_t arg, int64_t *result);
+bool linux_device_read(struct file *file, uint64_t buffer, uint64_t size, int64_t *result);
 
 #endif

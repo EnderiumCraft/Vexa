@@ -189,6 +189,10 @@ static const struct vnode_ops event_ops = {
     .control = event_control,
 };
 
+struct input_device *input_file_device(struct file *file) {
+    return file->vnode->ops == &event_ops ? devfs_data(file->vnode) : NULL;
+}
+
 void input_register(struct input_device *device) {
     if (device_count == MAX_DEVICES) {
         return;
