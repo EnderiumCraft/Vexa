@@ -1,4 +1,5 @@
 #include <vexa/cmdline.h>
+#include <vexa/device.h>
 #include <vexa/fb.h>
 #include <vexa/fs.h>
 #include <vexa/keyboard.h>
@@ -14,6 +15,7 @@
 #include <vexa/sched.h>
 #include <vexa/storage.h>
 #include <vexa/string.h>
+#include <vexa/usb.h>
 #include <vexa/vfs.h>
 
 /* The first kernel thread: sets up file systems and devices, which can mean
@@ -97,6 +99,7 @@ void init_thread(void *unused) {
     vfs_mkdir("/run/shm", 8);
     vfs_chmod("/run/shm", 8, 01777);
 
+    device_add_processors();
     storage_init();
     display_init();
 #ifdef LINUX_COMPAT
@@ -105,6 +108,7 @@ void init_thread(void *unused) {
     net_init();
     virtio_net_init();
     hda_init(); /* Sound, if there's an HD Audio controller: /dev/audio0. */
+    usb_init(); /* USB controllers; what's plugged in is found on the "usb" thread. */
 #ifdef LINUX_COMPAT
     linux_sound_init(); /* ALSA's /dev/snd for Linux programs, over it. */
 #endif

@@ -29,5 +29,7 @@ void ps2_drain(void);              /* Reads every waiting byte, keyboard or mous
 bool ps2_command(uint8_t command);
 bool ps2_write(uint8_t value);
 bool ps2_wait_output(void);
+/* The controller in the device tree (keyboard and mouse go under it). */
+struct device *ps2_controller_node(void);
 
 #endif

@@ -1,3 +1,4 @@
+#include <vexa/device.h>
 #include <vexa/abi.h>
 #include <vexa/block.h>
 #include <vexa/kprintf.h>
@@ -167,6 +168,9 @@ static void probe(struct pci_device *pci) {
     disk->block.sector_size = 512;
     disk->block.read = virtio_read;
     disk->block.write = read_only ? NULL : virtio_write;
+    disk->block.description = "Virtio disk";
+    disk->block.controller = pci->node;
+    pci_claim(pci, "virtio-blk", "Virtio block device");
     kprintf("[virtio] %s: virtio disk%s, %s\n", disk->block.name, read_only ? " (read-only)" : "",
             disk->waiter.has_interrupt ? "MSI-X interrupts" : "polling");
     block_register(&disk->block);

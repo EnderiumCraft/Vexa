@@ -14,6 +14,7 @@
  */
 
 struct input_client;
+struct device;
 
 struct input_device {
     char name[64];
@@ -22,12 +23,45 @@ struct input_device {
     struct spinlock lock;
     struct input_client *clients;
     struct input_client *grab; /* Only this client gets events, if set. */
+    /* In the device tree: under `parent` (its controller; NULL: the
+     * computer), as `node` (input_register adds it). */
+    struct device *parent;
+    struct device *node;
     /* Optional: how a held key repeats (VX_INPUT_SET_REPEAT). */
     int (*set_repeat)(const struct vx_key_repeat *repeat);
+    /* Set by input: false once unplugged (input_unregister). */
+    bool connected;
+    bool merged; /* One of the "all keyboards" / "all pointers" devices. */
+    /* Keyboards that don't repeat held keys themselves (keyboard_soft_repeat). */
+    bool soft_repeat;
+    uint16_t repeat_key;
+    uint64_t repeat_at;
 };
 
-/* Adds the device and its /dev/input/eventN. */
+/* Adds the device and its /dev/input/eventN. The first two are "all
+ * keyboards" and "all pointers": every keyboard's and pointer's events come
+ * out of them too, so a program (the desktop) can read them all, whatever
+ * is plugged in later. */
 void input_register(struct input_device *device);
+/* The device was unplugged: no more events, and gone from the device tree.
+ * Its /dev/input/eventN stays (programs may have it open), for
+ * input_reuse to give to the next device of its kind. */
+void input_unregister(struct input_device *device);
+/* An unplugged device with these capabilities, to register again (or NULL). */
+struct input_device *input_reuse(uint32_t capabilities);
+struct input_device *input_all_keyboards(void);
+struct input_device *input_all_pointers(void);
+
+/* Absolute pointers (tablets, touch screens) report VX_ABS_X and VX_ABS_Y
+ * from 0 to VX_ABS_MAX across the screen. */
+
+/* Keyboards report keys here (Linux key codes; value 1 pressed, 0 released,
+ * 2 repeated): as input events, and as text for the console (core/keyboard.c). */
+void keyboard_key(struct input_device *device, uint16_t keycode, int value);
+/* For keyboards that don't repeat held keys themselves: repeats from the kernel. */
+void keyboard_soft_repeat(struct input_device *device);
+/* How held keys repeat, on every keyboard. */
+int keyboard_set_repeat(const struct vx_key_repeat *repeat);
 /* Queues an event for every reader (drivers call it, also from interrupts).
  * After a group of events, report VX_EV_SYN (see input_sync). */
 void input_report(struct input_device *device, uint16_t type, uint16_t code, int32_t value);

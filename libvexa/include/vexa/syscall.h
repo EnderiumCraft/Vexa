@@ -99,6 +99,10 @@ long vx_get_hostname(char *buffer, size_t size);
 long vx_set_hostname(const char *name);
 /* The calling thread's thread pointer (%fs base): what libvexa keeps per thread. */
 long vx_set_thread_pointer(void *address);
+/* The devices the kernel knows (see "Devices" in abi/vexa/abi.h): fills in
+ * up to `count`, returns how many there are; `generation` (if not NULL)
+ * changes whenever the list does. */
+long vx_device_list(struct vx_device_info *devices, size_t count, unsigned long long *generation);
 long vx_kernel_command(const char *command);
 
 /* A short description of a (negative) VX_E* error. */

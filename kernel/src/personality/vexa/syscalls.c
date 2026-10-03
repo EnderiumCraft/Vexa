@@ -1,4 +1,5 @@
 #include <stddef.h>
+#include <vexa/device.h>
 #include <vexa/abi.h>
 #include <vexa/arch.h>
 #include <vexa/cpu.h>
@@ -724,6 +725,25 @@ static int64_t sys_process_list(uint64_t out, uint64_t count, uint64_t a2, uint6
     return result;
 }
 
+static int64_t sys_device_list(uint64_t out, uint64_t count, uint64_t user_generation,
+                               uint64_t a3) {
+    (void)a3;
+    if (count > 4096 || (count && !user_range_ok(out, count * sizeof(struct vx_device_info)))) {
+        return -VX_EINVAL;
+    }
+    struct vx_device_info *list = count ? kzalloc(count * sizeof(*list)) : NULL;
+    if (count && !list) {
+        return -VX_ENOMEM;
+    }
+    uint64_t generation;
+    unsigned total = device_list(list, (unsigned)count, &generation);
+    unsigned copied = total < count ? total : (unsigned)count;
+    bool ok = (!copied || copy_to_user(out, list, copied * sizeof(*list))) &&
+              (!user_generation || copy_to_user(user_generation, &generation, sizeof(generation)));
+    kfree(list);
+    return ok ? (int64_t)total : -VX_EFAULT;
+}
+
 /* ---- Threads ---- */
 
 static int64_t sys_thread_create(uint64_t user_start, uint64_t a1, uint64_t a2, uint64_t a3) {
@@ -1355,6 +1375,7 @@ static const syscall_fn syscalls[] = {
     [VX_SYS_MOUNTS] = sys_mounts,
     [VX_SYS_HOSTNAME] = sys_hostname,
     [VX_SYS_SET_THREAD_POINTER] = sys_set_thread_pointer,
+    [VX_SYS_DEVICE_LIST] = sys_device_list,
 };
 
 static void vexa_syscall(struct interrupt_frame *frame) {

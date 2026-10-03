@@ -87,6 +87,8 @@
                               length): the computer's name (sets it first if `new`) */
 #define VX_SYS_SET_THREAD_POINTER 60 /* vx_set_thread_pointer(address): the calling thread's
                                         thread pointer (FS base), as vx_thread_start's tls */
+#define VX_SYS_DEVICE_LIST 61 /* vx_device_list(struct vx_device_info *, count,
+                                 unsigned long long *generation) -> how many devices */
 
 /* vx_power actions. */
 #define VX_POWER_RESTART 1
@@ -100,6 +102,53 @@ struct vx_mount_info {
     unsigned long long total, free; /* Bytes (0 if it doesn't say). */
     unsigned int read_only;
     unsigned int reserved;
+};
+
+/* ---- Devices: what the kernel found, and which driver has each ----
+ * A tree: the computer, its buses' devices (PCI, USB...) and what drivers
+ * made of them (disks, keyboards...). vx_device_list fills in up to `count`
+ * (parents before their children) and returns how many there are; the
+ * generation changes whenever one is added or removed (or changes). */
+enum {
+    VX_BUS_NONE,     /* The computer itself, processors. */
+    VX_BUS_PLATFORM, /* Built in: the PS/2 controller, serial ports. */
+    VX_BUS_PCI,
+    VX_BUS_USB,
+    VX_BUS_VIRTUAL,  /* Made by a driver: a disk on a controller, a keyboard... */
+};
+
+enum {
+    VX_DEVICE_OTHER,
+    VX_DEVICE_COMPUTER,
+    VX_DEVICE_PROCESSOR,
+    VX_DEVICE_BRIDGE,
+    VX_DEVICE_DISPLAY,
+    VX_DEVICE_STORAGE,   /* Disk controllers. */
+    VX_DEVICE_DISK,      /* Disks, CD drives, USB sticks. */
+    VX_DEVICE_NETWORK,
+    VX_DEVICE_SOUND,
+    VX_DEVICE_KEYBOARD,
+    VX_DEVICE_POINTER,   /* Mice, tablets, touchpads. */
+    VX_DEVICE_INPUT,     /* Other input devices. */
+    VX_DEVICE_USB_CONTROLLER,
+    VX_DEVICE_USB_HUB,
+    VX_DEVICE_SERIAL,
+    VX_DEVICE_SYSTEM,    /* Timers, the RTC, the SMBus, the PS/2 controller... */
+    VX_DEVICE_KIND_COUNT,
+};
+
+#define VX_DEVICE_HAS_DRIVER 0x1 /* A driver is using it. */
+#define VX_DEVICE_REMOVABLE 0x2  /* It can be unplugged (USB). */
+
+struct vx_device_info {
+    unsigned int id, parent;       /* parent 0: at the top. */
+    unsigned short bus, kind;      /* VX_BUS_*, VX_DEVICE_* */
+    unsigned short vendor_id, product_id; /* PCI or USB ids (0 if none). */
+    unsigned int flags;            /* VX_DEVICE_* */
+    char name[64];                 /* "USB keyboard", "Intel HD Audio controller" */
+    char driver[24];               /* "xhci", "usb-storage" ("" without one) */
+    char location[32];             /* "PCI 00:1f.3", "USB port 2", "/dev/vda" */
+    char details[128];             /* "32 MiB, mounted at /mnt/vda1" */
 };
 
 #define VX_MAP_WRITE 0x1
@@ -260,10 +309,15 @@ struct vx_net_interface {
 #define VX_EV_SYN 0x00 /* The end of a group of events that belong together. */
 #define VX_EV_KEY 0x01 /* A key or button: value 1 pressed, 0 released, 2 repeated. */
 #define VX_EV_REL 0x02 /* Relative motion. */
+#define VX_EV_ABS 0x03 /* Absolute positions (tablets): 0 to VX_ABS_MAX across the screen. */
 
 #define VX_REL_X 0x00
 #define VX_REL_Y 0x01 /* Positive is down. */
+#define VX_REL_HWHEEL 0x06 /* Positive is to the right. */
 #define VX_REL_WHEEL 0x08 /* Positive is away from the user. */
+#define VX_ABS_X 0x00
+#define VX_ABS_Y 0x01
+#define VX_ABS_MAX 32767
 #define VX_BTN_LEFT 0x110
 #define VX_BTN_RIGHT 0x111
 #define VX_BTN_MIDDLE 0x112
@@ -302,6 +356,7 @@ struct vx_input_event {
 
 #define VX_INPUT_KEYS 0x1    /* A keyboard. */
 #define VX_INPUT_POINTER 0x2 /* A mouse: buttons and relative motion. */
+#define VX_INPUT_ABSOLUTE 0x4 /* A pointer with absolute positions (VX_EV_ABS): a tablet. */
 
 /* vx_control requests for input devices. */
 #define VX_INPUT_INFO 0x4901 /* struct vx_input_info (out) */
@@ -488,6 +543,7 @@ struct vx_dir_entry {
 #define VX_ENOPROTOOPT 45  /* No such socket option. */
 #define VX_ECONNABORTED 46 /* The connection went away before it was accepted. */
 #define VX_EHOSTUNREACH 47 /* The host can't be reached. */
+#define VX_ENODEV 48       /* No such device (it was unplugged). */
 
 /* Every Vexa program carries an ELF note with this name and type, holding the
  * ABI version as a 32-bit integer. The kernel uses it to tell native programs

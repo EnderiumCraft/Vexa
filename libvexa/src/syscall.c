@@ -259,6 +259,10 @@ long vx_get_hostname(char *buffer, size_t size) {
     return syscall4(VX_SYS_HOSTNAME, (long)buffer, (long)size, 0, 0);
 }
 
+long vx_device_list(struct vx_device_info *devices, size_t count, unsigned long long *generation) {
+    return syscall3(VX_SYS_DEVICE_LIST, (long)devices, (long)count, (long)generation);
+}
+
 long vx_set_thread_pointer(void *address) {
     return syscall1(VX_SYS_SET_THREAD_POINTER, address);
 }
@@ -316,6 +320,7 @@ const char *vx_strerror(long error) {
     case VX_ENOPROTOOPT: return "no such option";
     case VX_ECONNABORTED: return "connection aborted";
     case VX_EHOSTUNREACH: return "host unreachable";
+    case VX_ENODEV: return "no such device";
     default: return "error";
     }
 }

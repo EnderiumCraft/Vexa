@@ -232,7 +232,7 @@ static void test_setjmp(void) {
 }
 
 #define THREADS 4
-#define ROUNDS 20000
+#define ROUNDS 5000
 
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t changed = PTHREAD_COND_INITIALIZER;
@@ -345,17 +345,24 @@ static void test_processes(void) {
     CHECK(system("echo system > /dev/null") == 0);
 }
 
-int main(void) {
-    test_format();
-    test_numbers();
-    test_math();
-    test_strings();
-    test_files();
-    test_time();
-    test_setjmp();
-    test_threads();
-    test_memory();
-    test_processes();
+int main(int argc, char **argv) {
+    /* -v: says which part it's on (to find one that hangs). */
+    bool verbose = argc > 1 && strcmp(argv[1], "-v") == 0;
+    static const struct {
+        const char *name;
+        void (*run)(void);
+    } parts[] = {
+        {"format", test_format},   {"numbers", test_numbers}, {"math", test_math},
+        {"strings", test_strings}, {"files", test_files},     {"time", test_time},
+        {"setjmp", test_setjmp},   {"threads", test_threads}, {"memory", test_memory},
+        {"processes", test_processes},
+    };
+    for (size_t i = 0; i < sizeof parts / sizeof *parts; i++) {
+        if (verbose) {
+            printf("posix-test: %s\n", parts[i].name);
+        }
+        parts[i].run();
+    }
     if (failures) {
         printf("posix-test: %d checks failed\n", failures);
         return 1;

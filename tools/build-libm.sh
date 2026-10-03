@@ -18,7 +18,7 @@ sed -f "$src/tools/mkalltypes.sed" "$src/arch/x86_64/bits/alltypes.h.in" \
     "$src/include/alltypes.h.in" > "$src/obj/include/bits/alltypes.h"
 cp "$src/arch/x86_64/bits/syscall.h.in" "$src/obj/include/bits/syscall.h"
 flags="-std=c99 -O2 -pipe -fPIC -ffreestanding -nostdinc -fno-stack-protector \
-    -ffp-contract=off -fexcess-precision=standard -frounding-math -fno-builtin -w \
+    -ffp-contract=off -fexcess-precision=standard -frounding-math -fno-builtin -w -Wa,--noexecstack \
     -D_XOPEN_SOURCE=700 -I$src/arch/x86_64 -I$src/arch/generic -I$src/obj/src/internal \
     -I$src/src/include -I$src/src/internal -I$src/obj/include -I$src/include"
 files=

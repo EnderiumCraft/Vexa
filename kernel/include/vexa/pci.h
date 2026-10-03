@@ -6,6 +6,8 @@
 #include <vexa/arch.h>
 #include <vexa/sched.h>
 
+struct device;
+
 struct pci_device {
     uint8_t bus, slot, function;
     uint16_t vendor_id, device_id;
@@ -14,6 +16,7 @@ struct pci_device {
     uint64_t bar_size[6];
     bool bar_is_io[6];
     volatile uint8_t *config; /* Memory-mapped config space, or NULL for port I/O. */
+    struct device *node;      /* In the device tree (its driver names it and claims it). */
     struct pci_device *next;
 };
 
@@ -40,6 +43,8 @@ uint8_t pci_find_capability(struct pci_device *device, uint8_t id, uint8_t after
 bool pci_enable_msi(struct pci_device *device, irq_handler_t handler);
 
 const char *pci_class_name(struct pci_device *device);
+/* A driver has the device: its name in the device tree, and the driver's. */
+void pci_claim(struct pci_device *device, const char *driver, const char *name);
 
 /* Waiting for a device to finish something: sleeps until its interrupt when it
  * has one, otherwise keeps checking (yielding the CPU in between). */

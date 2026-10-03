@@ -1,3 +1,4 @@
+#include <vexa/device.h>
 #include <vexa/abi.h>
 #include <vexa/arch.h>
 #include <vexa/fs.h>
@@ -596,6 +597,8 @@ static bool probe(struct pci_device *pci) {
 void hda_init(void) {
     for (struct pci_device *pci = pci_first(); pci; pci = pci->next) {
         if (pci->class_code == 0x04 && pci->subclass == 0x03 && probe(pci)) {
+            pci_claim(pci, "hda", NULL);
+            device_set_details(pci->node, "/dev/audio0, codec %u", codec);
             devfs_add("audio0", &audio_ops, NULL);
             thread_create("hda", ticker, NULL);
             kprintf("[hda] audio0: 16-bit, 44100 or 48000 Hz\n");

@@ -128,7 +128,7 @@ TYPED_COMMANDS = ([
     # Threads: four sharing a mutex, then exiting with threads still running.
     ("thread-test", "thread-test: passed", 60),
     ("thread-test exit", "exiting with threads still running", 30),
-    ("posix-test", "posix-test: passed", 90),
+    ("posix-test -v", "posix-test: passed", 180),  # (-v: which part it was on, if it hangs)
     ("sys mem", "heap ", 10),
     ("sys threads", "idle", 10),
     ("sys memtest", "memtest: passed", 180),
@@ -426,6 +426,23 @@ LINUX_COMMANDS = [
 ]
 
 # With --disks: one ext2 file system on each kind of disk.
+# With --usb: an xHCI controller with a keyboard, and a hub with a mouse on
+# it. QEMU sends keys and mouse motion to the newest keyboard and mouse, so
+# then everything typed and pointed goes through USB.
+USB_DEVICES = [
+    "-device", "qemu-xhci,id=xhci",
+    "-device", "usb-kbd,bus=xhci.0",
+    "-device", "usb-hub,bus=xhci.0",
+    "-device", "usb-mouse,bus=xhci.0,port=2.1",
+]
+
+USB_COMMANDS = [
+    ("#usb",),
+    ("devices usb", "QEMU USB Keyboard  [usb-hid]", 10),
+    ("devices -l usb", "port 1 of a hub", 10),
+    ("devices keyboard", "PS/2 keyboard", 10),
+]
+
 # On the test disks (so only with --disks): apps built with the SDK (make
 # sdk-test), opened from a new terminal at the end of the desktop checks.
 SDK_APP_COMMANDS = [
@@ -654,7 +671,10 @@ def main():
     parser.add_argument("--disks", help="directory with the test disk images")
     parser.add_argument("--iso", default="build/vexa.iso", help="ISO image to boot")
     parser.add_argument("--only", help="run only these sections (comma-separated: "
-                        "shell, network, desktop, linux, x, linux-net, disks)")
+                        "shell, network, usb, desktop, linux, x, linux-net, disks)")
+    parser.add_argument("--usb", action="store_true",
+                        help="add a USB controller with a keyboard and a mouse on a hub (typing "
+                             "and the pointer then go through USB) and run the USB checks")
     parser.add_argument("--accel", default="auto", choices=["auto", "kvm", "tcg"],
                         help="QEMU's accelerator: KVM when /dev/kvm can be opened (auto)")
     parser.add_argument("--no-linux", action="store_true",
@@ -690,6 +710,9 @@ def main():
     if not args.no_linux:
         at = next(i for i, c in enumerate(commands) if c[0] == "ps")
         commands[at:at] = LINUX_COMMANDS
+    if args.usb:
+        at = next(i for i, c in enumerate(commands) if c[0] == "#network")
+        commands[at:at] = USB_COMMANDS
     if args.disks:
         for name, qemu_args, offset in TEST_DISKS:
             copy = os.path.join(tmp, name)
@@ -718,6 +741,8 @@ def main():
     commands = [(fill(c), fill(e), *rest) for c, e, *rest in commands]
     if args.uefi:
         command += ["-bios", OVMF]
+    if args.usb:
+        command += USB_DEVICES
     if args.cpu:
         command += ["-cpu", args.cpu]
     accel = args.accel

@@ -1,5 +1,6 @@
 #include <vexa/acpi.h>
 #include <vexa/cpu.h>
+#include <vexa/device.h>
 #include <vexa/io.h>
 #include <vexa/kprintf.h>
 #include <vexa/mm.h>
@@ -144,9 +145,12 @@ static void read_bars(struct pci_device *d, int count) {
     pci_write16(d, PCI_COMMAND, command);
 }
 
-static void scan_bus(uint8_t bus, int depth);
+static void scan_bus(uint8_t bus, int depth, struct device *parent);
 
-static void probe_function(uint8_t bus, uint8_t slot, uint8_t function, int depth) {
+static unsigned pci_kind(struct pci_device *d);
+
+static void probe_function(uint8_t bus, uint8_t slot, uint8_t function, int depth,
+                           struct device *parent) {
     struct pci_device probe = {.bus = bus, .slot = slot, .function = function};
     if (ecam_base) {
         if (bus < ecam_start_bus || bus > ecam_end_bus) {
@@ -181,16 +185,29 @@ static void probe_function(uint8_t bus, uint8_t slot, uint8_t function, int dept
     *link = d;
     device_count++;
 
+    /* In the device tree: "<vendor> <what it is>" until a driver names it. */
+    char name[64];
+    const char *vendor = device_vendor_name(d->vendor_id);
+    ksnprintf(name, sizeof(name), "%s%s%s", vendor ? vendor : "", vendor ? " " : "",
+              pci_class_name(d));
+    if (!vendor) {
+        name[0] = (char)(name[0] >= 'a' && name[0] <= 'z' ? name[0] - 32 : name[0]);
+    }
+    d->node = device_add(parent, VX_BUS_PCI, pci_kind(d), name);
+    device_set_ids(d->node, d->vendor_id, d->device_id);
+    device_set_location(d->node, "PCI %02x:%02x.%x", bus, slot, function);
+    device_set_details(d->node, "class %02x.%02x.%02x", d->class_code, d->subclass, d->prog_if);
+
     /* A PCI-to-PCI bridge: the devices behind it are on its secondary bus. */
     if (d->class_code == 0x06 && d->subclass == 0x04 && header == 1 && depth < 16) {
         uint8_t secondary = pci_read8(d, PCI_SECONDARY_BUS);
         if (secondary > bus) {
-            scan_bus(secondary, depth + 1);
+            scan_bus(secondary, depth + 1, d->node);
         }
     }
 }
 
-static void scan_bus(uint8_t bus, int depth) {
+static void scan_bus(uint8_t bus, int depth, struct device *parent) {
     for (uint8_t slot = 0; slot < 32; slot++) {
         struct pci_device probe = {.bus = bus, .slot = slot};
         if (ecam_base) {
@@ -206,7 +223,7 @@ static void scan_bus(uint8_t bus, int depth) {
         }
         bool multifunction = pci_read8(&probe, PCI_HEADER_TYPE) & 0x80;
         for (uint8_t function = 0; function < (multifunction ? 8 : 1); function++) {
-            probe_function(bus, slot, function, depth);
+            probe_function(bus, slot, function, depth, parent);
         }
     }
 }
@@ -221,7 +238,7 @@ void pci_init(void) {
             ecam_end_bus = entry->end_bus;
         }
     }
-    scan_bus(0, 0);
+    scan_bus(0, 0, NULL);
     kprintf("[pci] %d devices (%s)\n", device_count,
             ecam_base ? "memory-mapped config" : "legacy config ports");
 }
@@ -295,9 +312,10 @@ const char *pci_class_name(struct pci_device *d) {
         case 0x08: return "NVMe controller";
         default: return "storage controller";
         }
-    case 0x02: return "network controller";
+    case 0x02: return d->subclass == 0x80 ? "wireless controller" : "network controller";
     case 0x03: return "display controller";
-    case 0x04: return "multimedia controller";
+    case 0x04: return d->subclass == 0x03 ? "HD Audio controller" : "multimedia controller";
+    case 0x05: return "memory controller";
     case 0x06:
         switch (d->subclass) {
         case 0x00: return "host bridge";
@@ -305,10 +323,52 @@ const char *pci_class_name(struct pci_device *d) {
         case 0x04: return "PCI bridge";
         default: return "bridge";
         }
+    case 0x07: return "communication controller";
+    case 0x08: return "system peripheral";
+    case 0x09: return "input controller";
     case 0x0c:
-        return d->subclass == 0x03 ? "USB controller" : d->subclass == 0x05 ? "SMBus controller"
-                                                                              : "serial bus controller";
+        switch (d->subclass) {
+        case 0x03:
+            switch (d->prog_if) {
+            case 0x00: return "USB controller (UHCI)";
+            case 0x10: return "USB controller (OHCI)";
+            case 0x20: return "USB controller (EHCI)";
+            case 0x30: return "USB controller (xHCI)";
+            default: return "USB controller";
+            }
+        case 0x05: return "SMBus controller";
+        default: return "serial bus controller";
+        }
+    case 0x0d: return "wireless controller";
+    case 0x10: return "encryption controller";
+    case 0x11: return "signal processing controller";
     default: return "device";
+    }
+}
+
+/* What kind of device it is, in the device tree. */
+static unsigned pci_kind(struct pci_device *d) {
+    switch (d->class_code) {
+    case 0x01: return VX_DEVICE_STORAGE;
+    case 0x02: return VX_DEVICE_NETWORK;
+    case 0x03: return VX_DEVICE_DISPLAY;
+    case 0x04: return VX_DEVICE_SOUND;
+    case 0x06: return VX_DEVICE_BRIDGE;
+    case 0x07: return VX_DEVICE_SERIAL;
+    case 0x05:
+    case 0x08: return VX_DEVICE_SYSTEM;
+    case 0x09: return VX_DEVICE_INPUT;
+    case 0x0c:
+        return d->subclass == 0x03 ? VX_DEVICE_USB_CONTROLLER : VX_DEVICE_SYSTEM;
+    case 0x0d: return VX_DEVICE_NETWORK;
+    default: return VX_DEVICE_OTHER;
+    }
+}
+
+void pci_claim(struct pci_device *d, const char *driver, const char *name) {
+    device_set_driver(d->node, driver);
+    if (name) {
+        device_set_name(d->node, name);
     }
 }
 

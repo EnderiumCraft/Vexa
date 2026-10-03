@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include <vexa/device.h>
 #include <vexa/arch.h>
 #include <vexa/input.h>
 #include <vexa/io.h>
@@ -131,6 +132,7 @@ void ps2_mouse_init(void) {
     }
     ready = true;
     isa_irq_enable(12, mouse_irq);
+    mouse_device.parent = ps2_controller_node();
     input_register(&mouse_device);
     kprintf("[mouse] PS/2 mouse ready%s\n", wheel ? ", with a scroll wheel" : "");
 }

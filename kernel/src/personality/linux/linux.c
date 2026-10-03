@@ -150,6 +150,7 @@ static const uint8_t errno_of_vx[] = {
     [VX_EALREADY] = LE_EALREADY, [VX_EMSGSIZE] = LE_EMSGSIZE,
     [VX_EDESTADDRREQ] = LE_EDESTADDRREQ, [VX_ENOPROTOOPT] = LE_ENOPROTOOPT,
     [VX_ECONNABORTED] = LE_ECONNABORTED, [VX_EHOSTUNREACH] = LE_EHOSTUNREACH,
+    [VX_ENODEV] = LE_ENODEV,
 };
 
 /* Converts a core result (negative VX_E* on failure) into a Linux one. */

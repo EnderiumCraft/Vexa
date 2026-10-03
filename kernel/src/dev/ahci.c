@@ -1,3 +1,4 @@
+#include <vexa/device.h>
 #include <vexa/abi.h>
 #include <vexa/arch.h>
 #include <vexa/block.h>
@@ -6,6 +7,8 @@
 #include <vexa/mutex.h>
 #include <vexa/pci.h>
 #include <vexa/string.h>
+
+static struct device *controller_node; /* The controller being set up. */
 
 /*
  * AHCI: the standard interface for SATA controllers. Each port with a hard
@@ -295,6 +298,8 @@ static void setup_port(volatile uint32_t *hba, int number, bool interrupts) {
         port->block.sector_size = CD_SECTOR;
         port->block.read = cd_read;
         port->block.write = NULL;
+        port->block.description = "CD/DVD drive";
+        port->block.controller = controller_node;
         kprintf("[ahci] %s: CD/DVD drive on port %d, %s\n", port->block.name, number,
                 interrupts ? "MSI interrupts" : "polling");
         block_register(&port->block);
@@ -324,6 +329,8 @@ static void setup_port(volatile uint32_t *hba, int number, bool interrupts) {
     port->block.sector_size = sector_size;
     port->block.read = ahci_read;
     port->block.write = ahci_write;
+    port->block.description = "SATA disk";
+    port->block.controller = controller_node;
     kprintf("[ahci] %s: SATA disk on port %d, %s\n", port->block.name, number,
             interrupts ? "MSI interrupts" : "polling");
     block_register(&port->block);
@@ -331,6 +338,8 @@ static void setup_port(volatile uint32_t *hba, int number, bool interrupts) {
 
 static void probe(struct pci_device *pci) {
     pci_enable(pci);
+    pci_claim(pci, "ahci", NULL);
+    controller_node = pci->node;
     volatile uint32_t *hba = pci_map_bar(pci, 5);
     if (!hba) {
         return;

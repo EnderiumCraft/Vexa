@@ -33,6 +33,7 @@ static const unsigned char errno_of_vx[] = {
     [VX_EINPROGRESS] = EINPROGRESS, [VX_EALREADY] = EALREADY, [VX_EMSGSIZE] = EMSGSIZE,
     [VX_EDESTADDRREQ] = EDESTADDRREQ, [VX_ENOPROTOOPT] = ENOPROTOOPT,
     [VX_ECONNABORTED] = ECONNABORTED, [VX_EHOSTUNREACH] = EHOSTUNREACH,
+    [VX_ENODEV] = ENODEV,
 };
 
 int __vx_errno_of(long vx_error) {

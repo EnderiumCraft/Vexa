@@ -30,6 +30,7 @@ static void mount_disks(void) {
             continue;
         }
         kprintf("[storage] mounted %s at %s\n", device->name, path);
+        block_update_details(device->parent ? device->parent : device);
         struct vx_stat stat;
         char linux_dir[40];
         ksnprintf(linux_dir, sizeof(linux_dir), "%s/linux", path);

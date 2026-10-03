@@ -2892,12 +2892,26 @@ static void pointer_input(int dx, int dy, int wheel) {
     pointer_moved(dx, dy, setting_natural_scroll ? -wheel : wheel);
 }
 
+/* A tablet's position (0 to VX_ABS_MAX across the screen), where the pointer
+ * goes: motion as it is, not at the chosen speed. */
+static void pointer_to(int abs_x, int abs_y) {
+    int x = abs_x < 0 ? pointer_x : (int)((long)abs_x * (screen.width - 1) / VX_ABS_MAX);
+    int y = abs_y < 0 ? pointer_y : (int)((long)abs_y * (screen.height - 1) / VX_ABS_MAX);
+    pointer_moved(x - pointer_x, y - pointer_y, 0);
+}
+
 static void read_input(int handle) {
     struct vx_input_event events[64];
     long n = vx_read(handle, events, sizeof(events));
-    int dx = 0, dy = 0, wheel = 0;
+    int dx = 0, dy = 0, wheel = 0, abs_x = -1, abs_y = -1;
     for (long i = 0; i < n / (long)sizeof(events[0]); i++) {
         struct vx_input_event *e = &events[i];
+        if (abs_x >= 0 || abs_y >= 0) {
+            if (e->type != VX_EV_ABS) { /* (A position comes before what it goes with.) */
+                pointer_to(abs_x, abs_y);
+                abs_x = abs_y = -1;
+            }
+        }
         if (e->type == VX_EV_KEY && e->code >= VX_BTN_LEFT && e->code <= VX_BTN_MIDDLE) {
             pointer_input(dx, dy, wheel);
             dx = dy = wheel = 0;
@@ -2915,6 +2929,12 @@ static void read_input(int handle) {
                 dy += e->value;
             } else if (e->code == VX_REL_WHEEL) {
                 wheel += e->value;
+            }
+        } else if (e->type == VX_EV_ABS) {
+            if (e->code == VX_ABS_X) {
+                abs_x = e->value;
+            } else if (e->code == VX_ABS_Y) {
+                abs_y = e->value;
             }
         } else if (e->type == VX_EV_SYN && (dx || dy || wheel)) {
             pointer_input(dx, dy, wheel);

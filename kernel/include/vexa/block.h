@@ -5,6 +5,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+struct device;
+
 /* A disk, or a partition of one. Drivers fill in the geometry and the two
  * transfer functions; buffers passed to them are in the direct map and never
  * cross more than PMM_MAX_ORDER pages. */
@@ -18,12 +20,20 @@ struct block_device {
     void *driver_data;
     struct block_device *parent; /* Partitions: the whole disk. */
     uint64_t first_sector;       /* Partitions: where they start on the disk. */
+    /* Disks, in the device tree: the driver gives what it is ("SATA disk")
+     * and the controller's device; block_register adds the disk under it. */
+    const char *description;
+    struct device *controller;
+    struct device *node;
     struct block_device *next;
 };
 
 /* Adds a disk: finds its partitions (GPT or MBR) and makes /dev entries. */
 void block_register(struct block_device *device);
 struct block_device *block_find(const char *name);
+/* Shows a disk's size and where its file systems are mounted in its device
+ * tree entry (the storage code calls it after mounting). */
+void block_update_details(struct block_device *disk);
 struct block_device *block_first(void); /* Iterate with ->next. */
 uint64_t block_size_bytes(struct block_device *device);
 

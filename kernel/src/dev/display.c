@@ -1,3 +1,4 @@
+#include <vexa/device.h>
 #include <vexa/abi.h>
 #include <vexa/console.h>
 #include <vexa/fb.h>
@@ -62,6 +63,15 @@ static void check_dispi(void) {
         return;
     }
     dispi_checked = true;
+    /* Whichever card the boot frame buffer is on: drawn on as it was set up. */
+    for (struct pci_device *d = pci_first(); d; d = d->next) {
+        for (int bar = 0; bar < 6; bar++) {
+            if (d->class_code == 0x03 && !d->bar_is_io[bar] && frame_phys >= d->bar[bar] &&
+                frame_phys < d->bar[bar] + d->bar_size[bar]) {
+                pci_claim(d, "framebuffer", NULL);
+            }
+        }
+    }
     for (struct pci_device *d = pci_first(); d; d = d->next) {
         if (d->vendor_id != 0x1234 || d->device_id != 0x1111 || d->bar_is_io[0] ||
             frame_phys < d->bar[0] || frame_phys >= d->bar[0] + d->bar_size[0]) {
@@ -76,6 +86,7 @@ static void check_dispi(void) {
             vram_size = d->bar_size[0];
         }
         dispi = true;
+        pci_claim(d, "display", "Bochs/QEMU standard VGA");
         kprintf("[display] Bochs/QEMU standard VGA: %lu MiB, modes can be set\n",
                 (unsigned long)(vram_size >> 20));
         return;

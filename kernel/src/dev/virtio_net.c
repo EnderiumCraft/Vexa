@@ -1,3 +1,4 @@
+#include <vexa/device.h>
 #include <vexa/kprintf.h>
 #include <vexa/mm.h>
 #include <vexa/net.h>
@@ -243,6 +244,10 @@ static void probe(struct pci_device *pci) {
     net->transmit = card_transmit;
     net->poll = card_poll;
     net->driver = card;
+    pci_claim(pci, "virtio-net", "Virtio network card");
+    device_set_details(pci->node, "%s, MAC %02x:%02x:%02x:%02x:%02x:%02x", net->name,
+                       net->mac[0], net->mac[1], net->mac[2], net->mac[3], net->mac[4],
+                       net->mac[5]);
     kprintf("[virtio] %s: virtio network card, %s\n", net->name,
             interrupts ? "MSI-X interrupts" : "polling");
     net_register(net);

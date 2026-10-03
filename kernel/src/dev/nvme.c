@@ -1,3 +1,4 @@
+#include <vexa/device.h>
 #include <vexa/abi.h>
 #include <vexa/arch.h>
 #include <vexa/block.h>
@@ -208,6 +209,7 @@ static void probe(struct pci_device *pci) {
         return;
     }
     pci_enable(pci);
+    pci_claim(pci, "nvme", NULL);
     struct nvme *nvme = kzalloc(sizeof(*nvme));
     if (!nvme || !(nvme->regs = pci_map_bar(pci, 0))) {
         kfree(nvme);
@@ -287,6 +289,8 @@ static void probe(struct pci_device *pci) {
     nvme->block.sector_size = sector_size;
     nvme->block.read = nvme_read;
     nvme->block.write = nvme_write;
+    nvme->block.description = "NVMe drive";
+    nvme->block.controller = pci->node;
     kprintf("[nvme] %s: NVMe drive, %s\n", nvme->block.name,
             interrupts ? "MSI-X interrupts" : "polling");
     block_register(&nvme->block);

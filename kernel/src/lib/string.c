@@ -48,6 +48,23 @@ size_t strlen(const char *s) {
     return len;
 }
 
+void *memchr(const void *s, int c, size_t n) {
+    const unsigned char *p = s;
+    for (size_t i = 0; i < n; i++) {
+        if (p[i] == (unsigned char)c) {
+            return (void *)(p + i);
+        }
+    }
+    return NULL;
+}
+
+int strncmp(const char *s1, const char *s2, size_t n) {
+    for (; n && *s1 && *s1 == *s2; n--) {
+        s1++, s2++;
+    }
+    return n == 0 ? 0 : (unsigned char)*s1 - (unsigned char)*s2;
+}
+
 int strcmp(const char *s1, const char *s2) {
     while (*s1 && *s1 == *s2) {
         s1++;

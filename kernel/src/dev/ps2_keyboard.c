@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include <vexa/device.h>
 #include <vexa/arch.h>
 #include <vexa/input.h>
 #include <vexa/io.h>
@@ -28,38 +29,14 @@
 #define KBD_ACK 0xfa
 #define KBD_RESEND 0xfe
 
-#define BUFFER_SIZE 128
 #define TIMEOUT 100000
 
-/* Scancode set 1 (what the controller produces with translation on), US layout. */
-static const char keymap_normal[0x3a] =
-    "\0\x1b" "1234567890-=\b"
-    "\tqwertyuiop[]\n"
-    "\0" "asdfghjkl;'`"
-    "\0" "\\zxcvbnm,./"
-    "\0" "*" "\0" " ";
-static const char keymap_shift[0x3a] =
-    "\0\x1b" "!@#$%^&*()_+\b"
-    "\tQWERTYUIOP{}\n"
-    "\0" "ASDFGHJKL:\"~"
-    "\0" "|ZXCVBNM<>?"
-    "\0" "*" "\0" " ";
-
-#define SC_LCTRL 0x1d
-#define SC_LSHIFT 0x2a
-#define SC_RSHIFT 0x36
-#define SC_CAPSLOCK 0x3a
 #define SC_EXTENDED 0xe0
 #define SC_RELEASED 0x80
 
-/* Ring buffer filled by the interrupt handler, drained by keyboard_read(). */
-static volatile int buffer[BUFFER_SIZE];
-static volatile uint32_t buffer_head, buffer_tail;
+static bool extended;
 
-static bool shift_left, shift_right, ctrl, caps_lock, extended;
-static struct wait_queue key_waiters = WAIT_QUEUE_INIT;
-
-/* Keys also go out as input events (/dev/input/event0), with Linux's key
+/* Keys go to the keyboards' shared part (core/keyboard.c) with Linux's key
  * codes: for the keys of scancode set 1, the code is the scancode itself;
  * extended (E0) keys have their own. */
 static int set_repeat(const struct vx_key_repeat *repeat);
@@ -106,8 +83,7 @@ static void report_key(uint16_t keycode, bool released) {
     } else {
         keys_down[keycode / 8] |= (uint8_t)(1 << (keycode % 8));
     }
-    input_report(&keyboard_device, VX_EV_KEY, keycode, value);
-    input_sync(&keyboard_device);
+    keyboard_key(&keyboard_device, keycode, value);
 }
 
 static bool wait_input_empty(void) {
@@ -172,43 +148,14 @@ static int set_repeat(const struct vx_key_repeat *repeat) {
     return 0;
 }
 
-static void (*consumer)(int key);
-
-void keyboard_set_consumer(void (*function)(int key)) {
-    consumer = function;
-}
-
-static void push_key(int key) {
-    if (input_grabbed(&keyboard_device)) {
-        return; /* A program (the desktop) has the keyboard to itself. */
+struct device *ps2_controller_node(void) {
+    static struct device *node;
+    if (!node) {
+        node = device_add(NULL, VX_BUS_PLATFORM, VX_DEVICE_SYSTEM, "PS/2 controller");
+        device_set_driver(node, "ps2");
+        device_set_location(node, "ports 0x60, 0x64");
     }
-    if (consumer) {
-        consumer(key);
-        return;
-    }
-    uint32_t next = (buffer_head + 1) % BUFFER_SIZE;
-    if (next != buffer_tail) { /* Drop keys when the buffer is full. */
-        buffer[buffer_head] = key;
-        buffer_head = next;
-    }
-}
-
-static void handle_extended(uint8_t code, bool released) {
-    if (code == SC_LCTRL) { /* Right Ctrl. */
-        ctrl = !released;
-        return;
-    }
-    if (released) {
-        return;
-    }
-    switch (code) {
-    case 0x48: push_key(KEY_UP); break;
-    case 0x50: push_key(KEY_DOWN); break;
-    case 0x4b: push_key(KEY_LEFT); break;
-    case 0x4d: push_key(KEY_RIGHT); break;
-    case 0x1c: push_key('\n'); break; /* Keypad Enter. */
-    case 0x35: push_key('/'); break;  /* Keypad slash. */
-    }
+    return node;
 }
 
 static void handle_scancode(uint8_t scancode) {
@@ -226,38 +173,10 @@ static void handle_scancode(uint8_t scancode) {
         if (code != 0x2a && code != 0x36) { /* Fake shifts around some E0 keys. */
             report_key(extended_keycode(code), released);
         }
-        handle_extended(code, released);
         return;
     }
     /* 0x54: SysRq, PrintScreen with Alt held. */
     report_key(code == 0x54 ? 99 : code < 0x59 ? code : 0, released);
-
-    switch (code) {
-    case SC_LSHIFT: shift_left = !released; return;
-    case SC_RSHIFT: shift_right = !released; return;
-    case SC_LCTRL: ctrl = !released; return;
-    case SC_CAPSLOCK:
-        if (!released) {
-            caps_lock = !caps_lock;
-        }
-        return;
-    }
-    if (released || code >= sizeof(keymap_normal)) {
-        return;
-    }
-
-    bool shift = shift_left || shift_right;
-    char c = shift ? keymap_shift[code] : keymap_normal[code];
-    if (!c) {
-        return;
-    }
-    if (caps_lock && ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'))) {
-        c ^= 0x20; /* Caps Lock flips the case of letters only. */
-    }
-    if (ctrl && ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'))) {
-        c &= 0x1f; /* Ctrl+A = 1 ... Ctrl+Z = 26, as on a terminal. */
-    }
-    push_key(c);
 }
 
 /* Both PS/2 interrupts drain the controller: a byte goes to the keyboard or
@@ -277,9 +196,6 @@ void ps2_drain(void) {
 static void keyboard_irq(struct interrupt_frame *frame) {
     (void)frame;
     ps2_drain();
-    if (!consumer && buffer_head != buffer_tail) {
-        wait_queue_wake_all(&key_waiters);
-    }
 }
 
 bool keyboard_init(void) {
@@ -314,31 +230,8 @@ bool keyboard_init(void) {
 
     isa_irq_enable(1, keyboard_irq);
     kprintf("[kbd] PS/2 keyboard ready\n");
+    keyboard_device.parent = ps2_controller_node();
     input_register(&keyboard_device);
     ps2_mouse_init();
     return true;
-}
-
-static bool key_waiting(void *unused) {
-    (void)unused;
-    return buffer_head != buffer_tail;
-}
-
-int keyboard_read_blocking(void) {
-    for (;;) {
-        int key = keyboard_read();
-        if (key >= 0) {
-            return key;
-        }
-        wait_queue_wait(&key_waiters, key_waiting, NULL);
-    }
-}
-
-int keyboard_read(void) {
-    if (buffer_tail == buffer_head) {
-        return -1;
-    }
-    int key = buffer[buffer_tail];
-    buffer_tail = (buffer_tail + 1) % BUFFER_SIZE;
-    return key;
 }

@@ -1,10 +1,12 @@
 #include <vexa/abi.h>
 #include <vexa/block.h>
+#include <vexa/device.h>
 #include <vexa/fs.h>
 #include <vexa/kprintf.h>
 #include <vexa/mm.h>
 #include <vexa/mutex.h>
 #include <vexa/string.h>
+#include <vexa/vfs.h>
 
 /*
  * Block devices and the block cache.
@@ -276,10 +278,30 @@ static void scan_mbr(struct block_device *disk) {
     }
 }
 
+void block_update_details(struct block_device *disk) {
+    char text[128];
+    uint64_t mib = block_size_bytes(disk) / (1024 * 1024);
+    size_t n = mib >= 10240 ? ksnprintf(text, sizeof(text), "%lu GiB", mib / 1024)
+                            : ksnprintf(text, sizeof(text), "%lu MiB", mib);
+    vfs_lock();
+    for (struct mount *m = vfs_mounts(); m && n < sizeof(text) - 1; m = m->next) {
+        struct block_device *source = block_find(m->source);
+        if (source && (source == disk || source->parent == disk)) {
+            n += ksnprintf(text + n, sizeof(text) - n, ", %s at %s", m->source, m->path);
+        }
+    }
+    vfs_unlock();
+    device_set_details(disk->node, "%s", text);
+}
+
 void block_register(struct block_device *device) {
     kprintf("[block] %s: %lu MiB (%u-byte sectors)\n", device->name,
             block_size_bytes(device) / (1024 * 1024), device->sector_size);
     add_device(device);
+    device->node = device_add(device->controller, VX_BUS_VIRTUAL, VX_DEVICE_DISK,
+                              device->description ? device->description : "Disk");
+    device_set_location(device->node, "/dev/%s", device->name);
+    block_update_details(device);
     if (device->sector_size == 2048) {
         return; /* A CD or DVD: its ISO's hybrid partition tables aren't for us. */
     }

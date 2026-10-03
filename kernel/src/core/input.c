@@ -1,3 +1,4 @@
+#include <vexa/device.h>
 #include <vexa/arch.h>
 #include <vexa/fs.h>
 #include <vexa/input.h>
@@ -14,7 +15,7 @@
  * doesn't keep up loses its oldest events.
  */
 
-#define MAX_DEVICES 16
+#define MAX_DEVICES 64
 #define CLIENT_EVENTS 512
 
 struct input_client {
@@ -27,6 +28,27 @@ struct input_client {
 
 static struct input_device *devices[MAX_DEVICES];
 static int device_count;
+
+/* event0 and event1: every keyboard's and every pointer's events. */
+static struct input_device all_keyboards = {
+    .name = "All keyboards",
+    .capabilities = VX_INPUT_KEYS,
+    .merged = true,
+    .set_repeat = keyboard_set_repeat,
+};
+static struct input_device all_pointers = {
+    .name = "All pointers",
+    .capabilities = VX_INPUT_POINTER | VX_INPUT_ABSOLUTE,
+    .merged = true,
+};
+
+struct input_device *input_all_keyboards(void) {
+    return &all_keyboards;
+}
+
+struct input_device *input_all_pointers(void) {
+    return &all_pointers;
+}
 
 struct input_device *input_device_at(int index) {
     return index >= 0 && index < device_count ? devices[index] : NULL;
@@ -42,6 +64,17 @@ static void push(struct input_client *client, const struct vx_input_event *event
 }
 
 void input_report(struct input_device *device, uint16_t type, uint16_t code, int32_t value) {
+    if (!device->connected) {
+        return;
+    }
+    if (!device->merged) {
+        if (device->capabilities & VX_INPUT_KEYS) {
+            input_report(&all_keyboards, type, code, value);
+        }
+        if (device->capabilities & VX_INPUT_POINTER) {
+            input_report(&all_pointers, type, code, value);
+        }
+    }
     struct vx_input_event event = {timer_ms(), type, code, value};
     uint64_t flags = spin_lock_irqsave(&device->lock);
     struct input_client *woken[8];
@@ -193,8 +226,31 @@ struct input_device *input_file_device(struct file *file) {
     return file->vnode->ops == &event_ops ? devfs_data(file->vnode) : NULL;
 }
 
+static void add_node(struct input_device *device) {
+    if (device->merged) {
+        return; /* (Not a device of its own.) */
+    }
+    unsigned kind = device->capabilities & VX_INPUT_KEYS      ? VX_DEVICE_KEYBOARD
+                    : device->capabilities & VX_INPUT_POINTER ? VX_DEVICE_POINTER
+                                                              : VX_DEVICE_INPUT;
+    device->node = device_add(device->parent, VX_BUS_VIRTUAL, kind, device->name);
+    device_set_location(device->node, "/dev/input/event%d", device->index);
+}
+
 void input_register(struct input_device *device) {
+    if (device_count == 0 && !device->merged) {
+        input_register(&all_keyboards);
+        input_register(&all_pointers);
+    }
+    bool again = device->index < device_count && devices[device->index] == device;
+    device->connected = true;
+    if (again) { /* An unplugged device's slot, for a new one (input_reuse). */
+        add_node(device);
+        return;
+    }
     if (device_count == MAX_DEVICES) {
+        device->connected = false;
+        kprintf("[input] too many input devices for %s\n", device->name);
         return;
     }
     device->index = device_count;
@@ -202,4 +258,22 @@ void input_register(struct input_device *device) {
     char path[32];
     ksnprintf(path, sizeof(path), "input/event%d", device->index);
     devfs_add(path, &event_ops, device);
+    add_node(device);
+}
+
+void input_unregister(struct input_device *device) {
+    device->connected = false;
+    device->repeat_key = 0;
+    device_remove(device->node);
+    device->node = NULL;
+}
+
+struct input_device *input_reuse(uint32_t capabilities) {
+    for (int i = 0; i < device_count; i++) {
+        struct input_device *d = devices[i];
+        if (!d->connected && !d->merged && d->capabilities == capabilities) {
+            return d;
+        }
+    }
+    return NULL;
 }
