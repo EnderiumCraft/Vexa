@@ -5,6 +5,7 @@
 #   vexa-cc -O2 -c hello.c          compile (as for any C compiler)
 #   vexa-cc hello.o -o hello        link a program for /lib/vexa-ld.so
 #   vexa-cc -static hello.o -o h    link libvexa in (no loader needed)
+#   vexa-cc -shared x.o -o libx.so  a shared library (for /lib, or dlopen)
 #
 # -lm, -lpthread, -lrt, -ldl and -lc are accepted: all of it is in libvexa.
 set -e
@@ -13,10 +14,12 @@ HOST_CC=${VEXA_HOST_CC:-cc}
 
 link=yes
 static=no
+shared=no
 for arg in "$@"; do
     case $arg in
     -c | -S | -E | -M | -MM) link=no ;;
     -static) static=yes ;;
+    -shared) shared=yes ;;
     --version | -v | -dumpversion | -dumpmachine | -print-*) exec "$HOST_CC" "$@" ;;
     esac
 done
@@ -40,6 +43,10 @@ if [ $static = yes ]; then
     # shellcheck disable=SC2086
     exec "$HOST_CC" $COMMON -Wl,--no-dynamic-linker -T "$SDK/lib/program.ld" \
         "$SDK/lib/crt0.o" "$@" "$SDK/lib/libvexa.a" "$LIBGCC"
+fi
+if [ $shared = yes ]; then
+    # shellcheck disable=SC2086
+    exec "$HOST_CC" $COMMON "$@" "$SDK/lib/libvexa.so" "$LIBGCC"
 fi
 # shellcheck disable=SC2086
 exec "$HOST_CC" $COMMON -pie -Wl,-dynamic-linker,/lib/vexa-ld.so \

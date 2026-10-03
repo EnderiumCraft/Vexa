@@ -2,9 +2,10 @@
  * printf and scanf with floats, libm, strings and numbers, stdio files
  * (seeking, ungetc, getline), directories, stat, time, setjmp, pthreads
  * (mutexes, condition variables, keys, once, per-thread errno), semaphores,
- * mmap, popen, dup and dup2, and posix_spawn with waitpid. Prints
+ * mmap, popen, dup and dup2, posix_spawn with waitpid, and dlopen. Prints
  * "posix-test: passed" or what failed. */
 #include <dirent.h>
+#include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -402,6 +403,26 @@ static void test_spawn(void) {
     CHECK(posix_spawnp(&pid, "no-such-program", NULL, NULL, missing, NULL) == ENOENT);
 }
 
+static void test_dlopen(void) {
+    void *library = dlopen("libvexa-test.so", RTLD_NOW);
+    CHECK(library != NULL);
+    if (!library) {
+        printf("posix-test: dlopen: %s\n", dlerror());
+        return;
+    }
+    int (*add)(int, int) = (int (*)(int, int))dlsym(library, "vexa_test_add");
+    int (*length)(const char *) = (int (*)(const char *))dlsym(library, "vexa_test_length");
+    int *loaded = dlsym(library, "vexa_test_loaded");
+    CHECK(add && add(40, 2) == 42);
+    CHECK(length && length("seven!!") == 7); /* (It calls libvexa's strlen.) */
+    CHECK(loaded && *loaded == 42);          /* (Its initializer ran.) */
+    CHECK(dlopen("libvexa-test.so", RTLD_NOW) == library);
+    CHECK(dlsym(library, "no_such_symbol") == NULL && dlerror() != NULL);
+    CHECK(dlsym(RTLD_DEFAULT, "printf") == (void *)printf);
+    CHECK(dlopen("libno-such-library.so", RTLD_NOW) == NULL && dlerror() != NULL);
+    CHECK(dlclose(library) == 0);
+}
+
 int main(int argc, char **argv) {
     /* -v: says which part it's on (to find one that hangs). */
     bool verbose = argc > 1 && strcmp(argv[1], "-v") == 0;
@@ -413,6 +434,7 @@ int main(int argc, char **argv) {
         {"strings", test_strings}, {"files", test_files},     {"time", test_time},
         {"setjmp", test_setjmp},   {"threads", test_threads}, {"memory", test_memory},
         {"processes", test_processes}, {"spawn", test_spawn},
+        {"dlopen", test_dlopen},
     };
     for (size_t i = 0; i < sizeof parts / sizeof *parts; i++) {
         if (verbose) {

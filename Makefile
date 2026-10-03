@@ -245,6 +245,13 @@ $(LIBVEXA_SO): $(filter-out $(CRT0),$(LIBVEXA_OBJS)) $(LIBM)
 	$(LD) $(USER_LDFLAGS) -shared -Bsymbolic -soname libvexa.so \
 		$(filter %.o,$^) --whole-archive $(LIBM) --no-whole-archive -o $@
 
+# A shared library for posix-test's dlopen checks, in /lib.
+DLTEST_SO := $(BUILD)/lib/libvexa-test.so
+$(DLTEST_SO): tests/dltest/dltest.c $(LIBVEXA_SO)
+	@mkdir -p $(BUILD)/dltest
+	$(CC) $(USER_CFLAGS) -c $< -o $(BUILD)/dltest/dltest.o
+	$(LD) $(USER_LDFLAGS) -shared -soname libvexa-test.so $(BUILD)/dltest/dltest.o $(LIBVEXA_SO) -o $@
+
 $(MUSL_TARBALL):
 	$(call fetch,$(MUSL_URL),$(MUSL_SHA256))
 
@@ -432,7 +439,7 @@ LINUX_ON_CD := bin lib sbin usr
 # The starting root file system: rootfs/ plus the programs in /bin and the
 # apps in /apps, as a tar archive (ustar, with fixed owners and times so
 # builds are reproducible).
-$(INITRAMFS): $(PROGRAM_BINS) $(LIBVEXA_SO) $(VEXA_LD) $(ROOTFS_FILES) $(APP_FILES) $(LINUX_TREE) \
+$(INITRAMFS): $(PROGRAM_BINS) $(LIBVEXA_SO) $(VEXA_LD) $(DLTEST_SO) $(ROOTFS_FILES) $(APP_FILES) $(LINUX_TREE) \
 		docs/USER-GUIDE.md $(DOOM_PROGRAM)
 	rm -rf $(BUILD)/rootfs
 	mkdir -p $(BUILD)/rootfs/bin $(BUILD)/rootfs/lib
@@ -441,7 +448,7 @@ $(INITRAMFS): $(PROGRAM_BINS) $(LIBVEXA_SO) $(VEXA_LD) $(ROOTFS_FILES) $(APP_FIL
 	mkdir -p $(BUILD)/rootfs/share/help
 	cp docs/USER-GUIDE.md $(BUILD)/rootfs/share/help/
 	cp $(PROGRAM_BINS) $(DOOM_PROGRAM) $(BUILD)/rootfs/bin/
-	cp $(LIBVEXA_SO) $(VEXA_LD) $(BUILD)/rootfs/lib/
+	cp $(LIBVEXA_SO) $(VEXA_LD) $(DLTEST_SO) $(BUILD)/rootfs/lib/
 	# Apps (.vxapp bundles): each app's program moves into its bundle, and
 	# /bin keeps a link to it for the command line.
 	cp -R apps $(BUILD)/rootfs/apps

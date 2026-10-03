@@ -301,7 +301,7 @@ native track in 0.12.0; in 0.13.0, X and `xterm` run in a window on it.
       version (0.26.0)
 - [x] SDL 2 with Vexa's own video (desktop windows, input, the clipboard) and audio
       (`/dev/audio0`) drivers, in the SDK, with a demo (0.26.0)
-- [ ] `fork`-free process creation for ports (`posix_spawn`), `dup`, and `dlopen` for
+- [x] `fork`-free process creation for ports (`posix_spawn`), `dup`, and `dlopen` for
       shared libraries beyond libvexa
 - [ ] OpenGL for native programs (Mesa's llvmpipe, built against libvexa)
 

@@ -12,6 +12,10 @@
  * It uses nothing but system calls: it runs before libvexa is there. It
  * supports what x86_64 position-independent code produces (RELATIVE, 64,
  * GLOB_DAT, JUMP_SLOT relocations); no thread-local storage or lazy binding.
+ *
+ * It stays, for dlopen: libvexa's dlopen, dlsym, dlclose and dlerror call
+ * __vx_dlopen and the rest here (the loader is the last of the objects
+ * symbols are looked up in, so libvexa finds them).
  */
 #include <stddef.h>
 #include <stdint.h>
@@ -121,7 +125,7 @@ __attribute__((noreturn)) static void fail(const char *what, const char *detail)
 
 /* ---- Loaded objects ---- */
 
-#define MAX_OBJECTS 16
+#define MAX_OBJECTS 32
 
 struct object {
     uint64_t base; /* Added to every address in the file. */
@@ -132,7 +136,30 @@ struct object {
     const Phdr *phdrs;
     uint16_t phnum;
     const char *name;
+    int references; /* dlopen's. */
+    int is_loader;
+    char path[128];
 };
+
+/* dlopen's errors: kept for dlerror, instead of stopping the program. */
+static int soft_errors;
+static char error_text[200];
+
+static void set_error(const char *what, const char *detail) {
+    size_t n = 0;
+    for (const char *p = what; *p && n < sizeof(error_text) - 1; p++) {
+        error_text[n++] = *p;
+    }
+    if (detail) {
+        for (const char *p = ": "; *p && n < sizeof(error_text) - 1; p++) {
+            error_text[n++] = *p;
+        }
+        for (const char *p = detail; *p && n < sizeof(error_text) - 1; p++) {
+            error_text[n++] = *p;
+        }
+    }
+    error_text[n] = '\0';
+}
 
 static uint64_t dyn_value(const struct object *o, int64_t tag) {
     for (Dyn *d = o->dynamic; d && d->tag != DT_NULL; d++) {
@@ -188,27 +215,39 @@ static long read_at(int fd, void *buffer, uint64_t size, uint64_t offset) {
 /* Library headers are kept here (the loader has no allocator). */
 static Phdr phdr_store[MAX_OBJECTS][16];
 
-static void load_library(struct object *o, int index, const char *name) {
-    char path[256] = "/lib/";
-    size_t n = length(name);
-    if (n + 6 > sizeof(path)) {
-        fail("library name too long", name);
+/* Loads a library (by name from /lib, or a path): 0, or -1 with the error set. */
+static int load_library(struct object *o, int index, const char *name) {
+    char *path = o->path;
+    size_t n = length(name), at = 0;
+    int has_slash = 0;
+    for (size_t i = 0; i < n; i++) {
+        has_slash |= name[i] == '/';
+    }
+    if (!has_slash) {
+        for (const char *p = "/lib/"; *p; p++) {
+            path[at++] = *p;
+        }
+    }
+    if (at + n + 1 > sizeof(o->path)) {
+        set_error("library name too long", name);
+        return -1;
     }
     for (size_t i = 0; i <= n; i++) {
-        path[5 + i] = name[i];
+        path[at + i] = name[i];
     }
     int fd = (int)syscall4(VX_SYS_OPEN, (long)path, (long)length(path), VX_OPEN_READ, 0);
     if (fd < 0) {
-        fail("library not found", path);
+        set_error("library not found", path);
+        return -1;
     }
     Ehdr header;
-    if (read_at(fd, &header, sizeof(header), 0) || header.phnum > 16 ||
-        header.phentsize != sizeof(Phdr)) {
-        fail("not a library", path);
-    }
     Phdr *phdrs = phdr_store[index];
-    if (read_at(fd, phdrs, header.phnum * sizeof(Phdr), header.phoff)) {
-        fail("can't read", path);
+    if (read_at(fd, &header, sizeof(header), 0) || header.phnum > 16 ||
+        header.phentsize != sizeof(Phdr) ||
+        read_at(fd, phdrs, header.phnum * sizeof(Phdr), header.phoff)) {
+        syscall4(VX_SYS_CLOSE, fd, 0, 0, 0);
+        set_error("not a library", path);
+        return -1;
     }
     uint64_t low = ~0ULL, high = 0;
     for (int i = 0; i < header.phnum; i++) {
@@ -219,28 +258,37 @@ static void load_library(struct object *o, int index, const char *name) {
             high = end > high ? end : high;
         }
     }
-    if (low >= high) {
-        fail("nothing to load in", path);
-    }
-    long mapped = syscall4(VX_SYS_MAP, (long)(high - low), VX_MAP_WRITE, 0, 0);
+    long mapped = low < high ? syscall4(VX_SYS_MAP, (long)(high - low), VX_MAP_WRITE, 0, 0) : -1;
     if (mapped < 0) {
-        fail("out of memory loading", path);
+        syscall4(VX_SYS_CLOSE, fd, 0, 0, 0);
+        set_error(low < high ? "out of memory loading" : "nothing to load in", path);
+        return -1;
     }
     o->base = (uint64_t)mapped - low;
+    o->dynamic = 0;
     for (int i = 0; i < header.phnum; i++) {
         if (phdrs[i].type == PT_LOAD &&
             read_at(fd, (void *)(o->base + phdrs[i].vaddr), phdrs[i].filesz, phdrs[i].offset)) {
-            fail("can't read", path);
+            syscall4(VX_SYS_CLOSE, fd, 0, 0, 0);
+            set_error("can't read", path);
+            return -1;
         }
         if (phdrs[i].type == PT_DYNAMIC) {
             o->dynamic = (Dyn *)(o->base + phdrs[i].vaddr);
         }
     }
     syscall4(VX_SYS_CLOSE, fd, 0, 0, 0);
+    if (!o->dynamic) {
+        set_error("not a shared library", path);
+        return -1;
+    }
     o->phdrs = phdrs;
     o->phnum = header.phnum;
-    o->name = name;
+    o->name = path;
+    o->references = 1;
+    o->is_loader = 0;
     read_dynamic(o);
+    return 0;
 }
 
 static struct object objects[MAX_OBJECTS];
@@ -259,6 +307,11 @@ static uint64_t lookup(const char *name, int weak, const char *user) {
         }
     }
     if (!weak) {
+        if (soft_errors) {
+            set_error("undefined symbol", name);
+            soft_errors = 2; /* (Something wasn't found.) */
+            return 0;
+        }
         say("vexa-ld: ");
         say(user);
         fail(": undefined symbol", name);
@@ -281,7 +334,13 @@ static void relocate(const struct object *o, Rela *rela, uint64_t size) {
         case R_X86_64_64: *where = symbol + rela[i].addend; break;
         case R_X86_64_GLOB_DAT:
         case R_X86_64_JUMP_SLOT: *where = symbol; break;
-        default: fail("unsupported relocation in", o->name);
+        default:
+            if (soft_errors) {
+                set_error("unsupported relocation in", o->name);
+                soft_errors = 2;
+                return;
+            }
+            fail("unsupported relocation in", o->name);
         }
     }
 }
@@ -342,31 +401,167 @@ uint64_t loader_main(uint64_t *stack) {
     /* Its libraries (not theirs in turn: libvexa needs none). */
     for (Dyn *d = program->dynamic; d->tag != DT_NULL; d++) {
         if (d->tag == DT_NEEDED) {
-            if (object_count == MAX_OBJECTS) {
+            if (object_count == MAX_OBJECTS - 1) {
                 fail("too many libraries", 0);
             }
-            load_library(&objects[object_count], object_count, program->strings + d->value);
+            if (load_library(&objects[object_count], object_count, program->strings + d->value)) {
+                fail(error_text, 0);
+            }
             object_count++;
         }
     }
+    /* The loader itself, last: what it offers libvexa (dlopen). */
+    struct object *loader = &objects[object_count++];
+    extern Dyn _DYNAMIC[] __attribute__((visibility("hidden")));
+    loader->base = base;
+    loader->dynamic = _DYNAMIC;
+    loader->name = "vexa-ld.so";
+    loader->is_loader = 1;
+    read_dynamic(loader);
 
     /* Libraries first, so their data is ready; then the program. */
     for (int i = object_count - 1; i >= 0; i--) {
         struct object *o = &objects[i];
+        if (!o->is_loader) {
+            relocate(o, (Rela *)(o->base + dyn_value(o, DT_RELA)), dyn_value(o, DT_RELASZ));
+            relocate(o, (Rela *)(o->base + dyn_value(o, DT_JMPREL)), dyn_value(o, DT_PLTRELSZ));
+        }
+    }
+    for (int i = 1; i < object_count; i++) {
+        if (!objects[i].is_loader) {
+            protect(&objects[i]);
+        }
+    }
+    for (int i = object_count - 1; i >= 1; i--) {
+        const struct object *o = &objects[i];
+        uint64_t array = dyn_value(o, DT_INIT_ARRAY), size = dyn_value(o, DT_INIT_ARRAYSZ);
+        for (uint64_t j = 0; !o->is_loader && array && j < size / sizeof(uint64_t); j++) {
+            ((void (*)(void))((uint64_t *)(o->base + array))[j])();
+        }
+    }
+    return entry;
+}
+
+/* ---- dlopen and the rest (called by libvexa) ---- */
+
+#define EXPORT __attribute__((visibility("default")))
+
+static const char *base_name(const char *path) {
+    const char *base = path;
+    for (const char *p = path; *p; p++) {
+        if (*p == '/') {
+            base = p + 1;
+        }
+    }
+    return base;
+}
+
+static struct object *loaded(const char *file) {
+    for (int i = 1; i < object_count; i++) {
+        struct object *o = &objects[i];
+        if (!o->is_loader && (same(o->name, file) || same(base_name(o->name), file))) {
+            return o;
+        }
+    }
+    return 0;
+}
+
+EXPORT void *__vx_dlopen(const char *file, int flags) {
+    (void)flags; /* (Everything is bound at once, and visible to everything.) */
+    if (!file) {
+        return &objects[0]; /* The program (and everything it has). */
+    }
+    struct object *already = loaded(file);
+    if (already) {
+        already->references++;
+        return already;
+    }
+    int first = object_count;
+    soft_errors = 1;
+    /* It, then what it needs that isn't here yet (and so on). */
+    if (object_count == MAX_OBJECTS || load_library(&objects[object_count], object_count, file)) {
+        if (object_count == MAX_OBJECTS) {
+            set_error("too many libraries", file);
+        }
+        soft_errors = 0;
+        return 0;
+    }
+    object_count++;
+    for (int i = first; i < object_count; i++) {
+        for (Dyn *d = objects[i].dynamic; d->tag != DT_NULL; d++) {
+            const char *needed = objects[i].strings + d->value;
+            if (d->tag != DT_NEEDED || loaded(needed)) {
+                continue;
+            }
+            if (object_count == MAX_OBJECTS ||
+                load_library(&objects[object_count], object_count, needed)) {
+                object_count = first;
+                soft_errors = 0;
+                return 0;
+            }
+            object_count++;
+        }
+    }
+    for (int i = object_count - 1; i >= first && soft_errors == 1; i--) {
+        struct object *o = &objects[i];
         relocate(o, (Rela *)(o->base + dyn_value(o, DT_RELA)), dyn_value(o, DT_RELASZ));
         relocate(o, (Rela *)(o->base + dyn_value(o, DT_JMPREL)), dyn_value(o, DT_PLTRELSZ));
     }
-    for (int i = 1; i < object_count; i++) {
+    if (soft_errors != 1) {
+        object_count = first; /* (Its memory stays; it isn't used.) */
+        soft_errors = 0;
+        return 0;
+    }
+    soft_errors = 0;
+    for (int i = first; i < object_count; i++) {
         protect(&objects[i]);
     }
-    for (int i = object_count - 1; i >= 1; i--) {
+    for (int i = object_count - 1; i >= first; i--) {
         const struct object *o = &objects[i];
         uint64_t array = dyn_value(o, DT_INIT_ARRAY), size = dyn_value(o, DT_INIT_ARRAYSZ);
         for (uint64_t j = 0; array && j < size / sizeof(uint64_t); j++) {
             ((void (*)(void))((uint64_t *)(o->base + array))[j])();
         }
     }
-    return entry;
+    return &objects[first];
+}
+
+EXPORT void *__vx_dlsym(void *handle, const char *name) {
+    struct object *only = handle && handle != &objects[0] ? handle : 0;
+    if (only) {
+        for (uint32_t s = 1; s < only->symbol_count; s++) {
+            const Sym *sym = &only->symbols[s];
+            if (sym->shndx != 0 && (sym->info >> 4) != 0 && same(only->strings + sym->name, name)) {
+                return (void *)(only->base + sym->value);
+            }
+        }
+    }
+    /* (Then, or for the program, everything loaded.) */
+    uint64_t address = lookup(name, 1, 0);
+    if (!address) {
+        set_error("undefined symbol", name);
+    }
+    return (void *)address;
+}
+
+EXPORT int __vx_dlclose(void *handle) {
+    struct object *o = handle;
+    if (o && o != &objects[0] && o->references > 0) {
+        o->references--; /* (Libraries stay loaded: other code may point into them.) */
+    }
+    return 0;
+}
+
+EXPORT const char *__vx_dlerror(void) {
+    if (!error_text[0]) {
+        return 0;
+    }
+    static char last[sizeof(error_text)];
+    for (size_t i = 0; i < sizeof(error_text); i++) {
+        last[i] = error_text[i];
+    }
+    error_text[0] = '\0';
+    return last;
 }
 
 /* The compiler may call these even here (for large copies and zeroing). */

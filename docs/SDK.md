@@ -103,8 +103,12 @@ as they are:
 - **Strings and numbers**: `<string.h>`, `<strings.h>`, `strtod`, `<wchar.h>`, UTF-8
   multibyte functions, `getopt`, `setjmp`.
 
-What isn't there: `fork` and `exec*` (Vexa starts programs with `vx_spawn`), `dup`, user
-and group IDs beyond stubs, locales other than "C", and `dlopen`. Signal handlers set
+Programs start others with `posix_spawn` (`<spawn.h>`, with file actions for the new
+program's standard handles) and wait for them with `waitpid`; `dup` and `dup2` work;
+`dlopen` loads shared libraries (`vexa-cc -shared -o libfoo.so foo.c`, from `/lib` or a
+path) in dynamically linked programs. What isn't there: `fork` (and `exec*` only
+approximately: they start the program, wait for it and exit with its code), user and
+group IDs beyond stubs, and locales other than "C". Signal handlers set
 with `signal`/`sigaction` run for `raise`; signals from outside can be ignored or stop
 the program, as for any Vexa program.
 
