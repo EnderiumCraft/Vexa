@@ -155,10 +155,10 @@ jobs:
           Run it with: \`qemu-system-x86_64 -M q35 -m 512M -cdrom vexa-${VERSION}.iso\`
 
           The sources of its GPL and LGPL parts are attached."
-          git tag -f nightly
-          git push -f origin refs/tags/nightly
-          gh release delete nightly --yes 2>/dev/null || true
-          gh release create nightly \
+          # (Through the releases API: the workflow's token may not move a tag with
+          # git across commits that change workflow files.)
+          gh release delete nightly --yes --cleanup-tag 2>/dev/null || true
+          gh release create nightly --target "$GITHUB_SHA" \
             --title "Nightly (${VERSION}, ${short_sha}, untested)" \
             --notes "$notes" --prerelease --latest=false \
             "vexa-${VERSION}.iso" "vexa-${VERSION}.iso.sha256" busybox-*-source.tar.gz bash-*.tar.xz coreutils-*.tar.xz alsa-*.tar.bz2 gtk-and-lgpl-sources-*.tar
@@ -226,10 +226,10 @@ jobs:
 
           The ISO includes BusyBox (GPL-2.0), GNU bash and coreutils (GPL-3.0), and GTK 3 with the LGPL libraries under it; their sources are attached."
           # Move the tag to this commit, then replace the release and its files.
-          git tag -f latest-build
-          git push -f origin refs/tags/latest-build
-          gh release delete latest-build --yes 2>/dev/null || true
-          gh release create latest-build \
+          # (Through the releases API: the workflow's token may not move a tag with
+          # git across commits that change workflow files.)
+          gh release delete latest-build --yes --cleanup-tag 2>/dev/null || true
+          gh release create latest-build --target "$GITHUB_SHA" \
             --title "Latest build (${VERSION}, ${short_sha})" \
             --notes "$notes" --prerelease --latest=false \
             "vexa-${VERSION}.iso" "vexa-${VERSION}.iso.sha256" busybox-*-source.tar.gz bash-*.tar.xz coreutils-*.tar.xz alsa-*.tar.bz2 gtk-and-lgpl-sources-*.tar
