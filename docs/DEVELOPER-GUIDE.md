@@ -356,6 +356,10 @@ with musl. What's in the ISO is built from source with musl by the Makefile and
   `hashlib` use that OpenSSL. The root certificates,
   `tools/linux-files/ca-certificates.crt`, are made from Mozilla's `certdata.txt` by
   `tools/make-ca-bundle.py` (run it again to update them)
+- OpenGL (`tools/build-mesa.sh`, target `mesa`): LLVM's C++ runtime (libc++,
+  libc++abi, libunwind) for musl, which C++ programs with exceptions and the standard
+  library need (`tools/musl-libcxx-wrapper.sh` is the compiler for them), LLVM, and
+  Mesa with llvmpipe. CI keeps the result between runs, like the X build
 - the X and GTK stack (`tools/build-x11.sh`, sources in `third_party/x11-sources.txt`),
   with `tools/musl-cc-wrapper.sh` and `tools/musl-cxx-wrapper.sh` for the compilers
 - `tools/make-linux-root.sh` puts it all together into `build/linux-root`, which

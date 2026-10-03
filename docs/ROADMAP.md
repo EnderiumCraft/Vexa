@@ -270,8 +270,9 @@ native track in 0.12.0; in 0.13.0, X and `xterm` run in a window on it.
       with TrueType fonts (0.14.0)
 - [x] Linux: the GTK 3 demo (`gtk3-demo`) runs, from the Vexa menu (0.14.0): GLib,
       cairo, Pango, HarfBuzz, gdk-pixbuf, ATK and GTK 3 built with musl
-- [ ] Linux: Mesa's software renderer (llvmpipe) for OpenGL, since Firefox's WebRender
-      can fall back to software rendering anyway
+- [x] Linux: Mesa's software renderer (llvmpipe) for OpenGL, since Firefox's WebRender
+      can fall back to software rendering anyway: Mesa 24.0 on LLVM 18, with LLVM's C++
+      runtime (libc++) built for musl; GLX on Xlib for X programs, and OSMesa (0.24.0)
 - [x] Run X11 windows inside the Vexa compositor: Xvexa is rootless, and each X window
       is a desktop window next to the native ones (0.14.0)
 - [ ] Audio (optional for first light): Intel HDA driver, a native audio interface,

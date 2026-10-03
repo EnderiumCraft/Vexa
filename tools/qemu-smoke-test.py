@@ -336,11 +336,14 @@ LINUX_COMMANDS = [
     ("@type printf 'echo pasted-%s-in-xterm > /dev/console' 42 > /run/clipboard", None, 3),
     ("@sendkey shift-insert", None, 3),
     ("@sendkey ret", "pasted-42-in-xterm", 20),
+    # OpenGL in an X window: Mesa's llvmpipe through GLX (the window is
+    # window 3; it closes itself).
+    ("@type gl-test x > /dev/console 2>&1", "gl-test: passed", 180),
     ("@mouse_move 53 -150", None, 5),
     ("@mouse_move 53 -150", None, 5),
     ("@mouse_button 1", "desktop: asked window 2 to close", 10),
     ("@mouse_button 0", 'desktop: closed window 2 "xterm"', 30),
-    # GTK 3: gtk3-demo from the Vexa menu (at 144,138, with GTK's own title
+    # GTK 3: gtk3-demo from the Vexa menu (window 4, at 144,138, with GTK's own title
     # bar); a click on "Change Display" in its list shows that demo, which is
     # its title then.
     ("@mouse_move -357 -43", None, 5),
@@ -350,16 +353,16 @@ LINUX_COMMANDS = [
     ("@mouse_move 0 163", None, 5),
     ("@mouse_move 0 163", None, 5),
     ("@mouse_button 1", "desktop: left button at 31,339", 10),
-    ("@mouse_button 0", "desktop: window 3", 300),
+    ("@mouse_button 0", "desktop: window 4", 300),
     ("@mouse_move 181 -31", None, 10),
     ("@mouse_button 1", "desktop: left button at 212,308", 10),
-    ("@mouse_button 0", 'desktop: window 3 is now called "Change Display"', 60),
+    ("@mouse_button 0", 'desktop: window 4 is now called "Change Display"', 60),
     # GTK draws its own title bar (the desktop draws none for it); its
     # maximize button asks the desktop, through Xvexa, like a window manager.
     ("@mouse_move 337 -72", None, 5),
     ("@mouse_move 338 -72", None, 5),
     ("@mouse_button 1", "desktop: left button at 887,164", 10),
-    ("@mouse_button 0", "desktop: maximized window 3", 30),
+    ("@mouse_button 0", "desktop: maximized window 4", 30),
     ("@sendkey ctrl-alt-q", "desktop: asking before leaving", 30),
     ("@sendkey ret", "desktop: back to the console", 30),
     ("#linux-net",),
@@ -394,6 +397,8 @@ LINUX_COMMANDS = [
     # reads the grabbed keyboard through evdev.
     ("drm-test", "drm-test: press a key", 60),
     ("@sendkey a", "drm-test: passed", 30),
+    # OpenGL without X: Mesa's llvmpipe (shaders compiled by LLVM) into memory.
+    ("gl-test", "gl-test: passed", 180),
     ("#shell",),
 ]
 

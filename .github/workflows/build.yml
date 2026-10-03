@@ -23,7 +23,8 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             build-essential xorriso qemu-system-x86 ovmf python3 e2fsprogs \
             musl-tools linux-libc-dev ninja-build pkg-config bison gperf \
-            libglib2.0-dev-bin gtk-update-icon-cache python3-packaging
+            libglib2.0-dev-bin gtk-update-icon-cache python3-packaging \
+            cmake flex python3-mako
           # X.Org's packages want a newer Meson than Ubuntu's. GLib's build
           # looks for Python's "packaging" module in Meson's own environment.
           pipx install meson==1.12.1
@@ -43,6 +44,32 @@ jobs:
       - name: Mark the restored X build as up to date
         if: steps.x11-cache.outputs.cache-hit == 'true'
         run: touch build/x11/.done
+
+      # OpenGL (Mesa on LLVM, tools/build-mesa.sh) takes even longer: keep the
+      # result until the versions or the build script change.
+      - name: Read the LLVM and Mesa versions
+        id: mesa-versions
+        run: |
+          echo "llvm=$(sed -n 's/^LLVM_VERSION := //p' Makefile)" >> "$GITHUB_OUTPUT"
+          echo "mesa=$(sed -n 's/^MESA_VERSION := //p' Makefile)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the OpenGL build
+        id: mesa-cache
+        uses: actions/cache@v4
+        with:
+          path: build/mesa-root
+          key: mesa-${{ steps.mesa-versions.outputs.llvm }}-${{ steps.mesa-versions.outputs.mesa }}-${{ hashFiles('tools/build-mesa.sh', 'tools/musl-libcxx-wrapper.sh', 'tools/musl-cc-wrapper.sh', 'third_party/x11-sources.txt') }}
+
+      - name: Mark the restored OpenGL build as up to date
+        if: steps.mesa-cache.outputs.cache-hit == 'true'
+        run: |
+          # Old, empty stand-ins for the source tarballs, which Make would
+          # otherwise download just to compare their dates with the build's.
+          mkdir -p third_party
+          touch -d '2000-01-01' \
+            "third_party/llvm-project-${{ steps.mesa-versions.outputs.llvm }}.src.tar.xz" \
+            "third_party/mesa-${{ steps.mesa-versions.outputs.mesa }}.tar.gz"
+          touch build/mesa-root/.done
 
       - name: Build ISO (with BusyBox, bash, coreutils, Python and X, built from source)
         run: make && make busybox-source

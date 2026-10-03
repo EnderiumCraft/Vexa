@@ -172,7 +172,7 @@ windows you can drag, resize, maximize and minimize, and X programs run on it as
 of their own: Ctrl+Alt+X opens an `xterm`.
 Linux programs also get the kernel's display and input interfaces, DRM with "dumb
 buffers" on `/dev/dri/card0` and evdev on `/dev/input`, so they can draw on the whole
-screen without X. Next: Mesa's software OpenGL. See [docs/ROADMAP.md](docs/ROADMAP.md) for the
+screen without X, and OpenGL through Mesa's llvmpipe (in X windows, or into memory). See [docs/ROADMAP.md](docs/ROADMAP.md) for the
 full plan from here to Firefox.
 
 ## Download
@@ -301,7 +301,9 @@ The X Window System in the ISO (the X.Org server 21.1 with Xvexa, libX11, libxcb
 the other X libraries, pixman, xkbcomp and xkeyboard-config, Xft and fontconfig with
 expat, xterm 330 and ncurses 6.6) is under the MIT license and similar permissive
 licenses. So are cairo (MPL-1.1 or LGPL-2.1, used under the MPL), HarfBuzz, fribidi
-(LGPL-2.1), pixman, libpng, libepoxy, libffi and PCRE2 (BSD); GTK 3, GLib, Pango,
+(LGPL-2.1), pixman, libpng, libepoxy, libffi and PCRE2 (BSD), and
+[Mesa](https://mesa3d.org) 24.0.5 (MIT), with [LLVM](https://llvm.org) 18.1.8 and its
+libc++, libc++abi and libunwind (Apache-2.0 with LLVM exceptions); GTK 3, GLib, Pango,
 gdk-pixbuf, ATK and at-spi2-core are under the LGPL-2.1 (or later), and D-Bus under the
 AFL-2.1 or GPL-2.0; they are linked dynamically and unmodified, and every release
 carries their sources. The exact upstream tarballs of all of these are listed in

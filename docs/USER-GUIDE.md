@@ -530,6 +530,15 @@ GTK 3 programs appear in the Vexa menu (from the `.desktop` files in
 Icon Browser**. GTK windows draw their own title bars; their buttons (minimize,
 maximize, close) and dragging work through Xvexa, which stands in for a window manager.
 
+### OpenGL
+
+Linux programs have OpenGL (4.5, and OpenGL ES) through Mesa's **llvmpipe**, which
+draws on the processor: LLVM compiles the shaders to machine code, using every core.
+X programs use it through GLX (`libGL`), in their windows on the desktop; programs that
+draw into memory use OSMesa, without X. `gl-test` draws a triangle with a shader and
+checks the result (`xrun gl-test x` does it in an X window). It isn't fast, but it's
+enough for programs that need OpenGL to run.
+
 ## Network
 
 With a network card (QEMU's `virtio-net-pci`), Vexa gets an address by DHCP when it

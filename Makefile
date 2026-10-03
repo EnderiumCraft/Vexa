@@ -148,6 +148,20 @@ X11 := $(X11_SYSROOT)/.done
 X11_SOURCES := third_party/x11-sources.txt
 XCLIPBOARD := $(BUILD)/xclipboard/xclipboard
 
+# OpenGL: Mesa with llvmpipe, on LLVM and LLVM's C++ runtime for musl, all
+# built from source by tools/build-mesa.sh.
+LLVM_VERSION := 18.1.8
+LLVM_URL := https://github.com/llvm/llvm-project/releases/download/llvmorg-$(LLVM_VERSION)/llvm-project-$(LLVM_VERSION).src.tar.xz
+LLVM_SHA256 := 0b58557a6d32ceee97c8d533a59b9212d87e0fc4d2833924eb6c611247db2f2a
+LLVM_TARBALL := third_party/llvm-project-$(LLVM_VERSION).src.tar.xz
+MESA_VERSION := 24.0.5
+MESA_URL := https://archive.ubuntu.com/ubuntu/pool/main/m/mesa/mesa_$(MESA_VERSION).orig.tar.gz
+MESA_SHA256 := 5fd81faf83923fbd5c860c77f9709f82c8e9bb8b91cb4c972ce8b64ec1006b67
+MESA_TARBALL := third_party/mesa-$(MESA_VERSION).tar.gz
+MESA_ROOT := $(BUILD)/mesa-root
+MESA := $(MESA_ROOT)/.done
+GL_TEST := $(BUILD)/gl-test/gl-test
+
 # Everything under /linux: the Linux programs and what they need.
 LINUX_ROOT := $(BUILD)/linux-root
 ifeq ($(LINUX_COMPAT),1)
@@ -164,7 +178,7 @@ MY_DISK := $(BUILD)/my-disk.img
 USER_OBJS := $(LIBVEXA_OBJS) \
 	$(patsubst %,$(BUILD)/%.o,$(wildcard $(addsuffix /*.c,$(addprefix userland/,$(PROGRAMS)))))
 
-.PHONY: all openssl curl kernel programs iso run run-disk run-nographic test test-disks clean distclean \
+.PHONY: all openssl curl mesa kernel programs iso run run-disk run-nographic test test-disks clean distclean \
 	busybox busybox-source bash coreutils python x11 test-native test-quick native-iso \
 	test-bios test-uefi test-safe test-native-boot
 
@@ -446,8 +460,29 @@ $(X11): $(X11_SOURCES) tools/build-x11.sh $(wildcard third_party/xvexa/*) | $(BU
 
 x11: $(X11)
 
+$(LLVM_TARBALL):
+	$(call fetch,$(LLVM_URL),$(LLVM_SHA256))
+
+$(MESA_TARBALL):
+	$(call fetch,$(MESA_URL),$(MESA_SHA256))
+
+$(MESA): $(LLVM_TARBALL) $(MESA_TARBALL) tools/build-mesa.sh tools/musl-libcxx-wrapper.sh \
+		$(X11) | $(BUILD)/linux-headers
+	tools/build-mesa.sh $(LLVM_TARBALL) $(MESA_TARBALL) $(BUILD)/mesa-work $(X11_SYSROOT) \
+		$(MESA_ROOT) $(BUILD)/linux-headers
+	touch $@
+
+mesa: $(MESA)
+
+# gl-test: draws with OpenGL (through OSMesa, or GLX in an X window).
+$(GL_TEST): tests/gl/gl-test.c $(MESA)
+	@mkdir -p $(dir $@)
+	$(MUSL_CC) -O2 -Wall -Wextra -Werror -I$(MESA_ROOT)/usr/include -I$(X11_SYSROOT)/usr/include \
+		-L$(MESA_ROOT)/usr/lib -L$(X11_SYSROOT)/usr/lib -Wl,-rpath-link,$(MESA_ROOT)/usr/lib \
+		-Wl,-rpath-link,$(X11_SYSROOT)/usr/lib $< -o $@ -lOSMesa -lGL -lX11 -lunwind
+
 $(LINUX_ROOT)/.done: $(BUSYBOX) $(BASH) $(COREUTILS) $(PYTHON) $(X11) $(MUSL_LIBC) $(LINUX_TESTS) \
-		$(XCLIPBOARD) $(OPENSSL) $(CURL) tools/make-linux-root.sh \
+		$(XCLIPBOARD) $(OPENSSL) $(CURL) $(MESA) $(GL_TEST) tools/make-linux-root.sh \
 		$(wildcard tools/linux-files/* tools/linux-files/applications/*)
 	tools/make-linux-root.sh $(LINUX_ROOT) $(MUSL_LIBC) $(BUSYBOX) \
 		$(BUSYBOX_BUILD)/busybox.links $(BASH) $(COREUTILS) $(COREUTILS_BUILD)/programs.txt \
@@ -463,6 +498,15 @@ $(LINUX_ROOT)/.done: $(BUSYBOX) $(BASH) $(COREUTILS) $(PYTHON) $(X11) $(MUSL_LIB
 	cp tools/linux-files/ca-certificates.crt $(LINUX_ROOT)/etc/ssl/certs/
 	ln -sf certs/ca-certificates.crt $(LINUX_ROOT)/etc/ssl/cert.pem
 	cp $(OPENSSL_BUILD)/apps/openssl.cnf $(LINUX_ROOT)/etc/ssl/
+	# OpenGL (tools/build-mesa.sh): Mesa's libraries, LLVM, LLVM's C++ runtime.
+	cp -a $(MESA_ROOT)/usr/lib/libc++.so.1* $(MESA_ROOT)/usr/lib/libc++abi.so.1* \
+		$(MESA_ROOT)/usr/lib/libunwind.so.1* $(MESA_ROOT)/usr/lib/libLLVM*.so* \
+		$(MESA_ROOT)/usr/lib/libGL.so* $(MESA_ROOT)/usr/lib/libOSMesa.so* \
+		$(MESA_ROOT)/usr/lib/libglapi.so* $(MESA_ROOT)/usr/lib/libGLESv2.so* $(LINUX_ROOT)/usr/lib/
+	find $(LINUX_ROOT)/usr/lib -maxdepth 1 \( -name 'libLLVM*' -o -name 'libGL*' -o \
+		-name 'libOSMesa*' -o -name 'libglapi*' -o -name 'libc++*' -o -name 'libunwind*' \) \
+		-type f -exec strip --strip-unneeded {} +
+	install -s $(GL_TEST) $(LINUX_ROOT)/usr/bin/
 	touch $@
 
 # xclipboard: the clipboard between X programs and Vexa's (an X program,
