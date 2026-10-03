@@ -1,8 +1,10 @@
-/* A new ext2 file system, as `mke2fs -t ext2 -b 4096 -I 128` would make it:
+/* A new ext3 file system, as `mke2fs -t ext3 -b 4096 -I 128` would make it:
  * 4 KiB blocks in groups of 32768, an inode for every 64 KiB, superblock
- * copies in groups 0, 1 and the powers of 3, 5 and 7 ("sparse super"), and
- * an empty root directory with lost+found. Only the features Vexa's ext2
- * driver reads (typed directory entries, sparse superblocks, large files). */
+ * copies in groups 0, 1 and the powers of 3, 5 and 7 ("sparse super"), an
+ * empty root directory with lost+found, and a journal (inode 8: 16 MiB, or
+ * 32 MiB from 1 GiB up), which makes it crash-proof. Only the features
+ * Vexa's ext2 driver knows (typed directory entries, sparse superblocks,
+ * large files, the journal). */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,7 +16,8 @@
 #define BLOCKS_PER_GROUP 32768
 #define INODE_SIZE 128
 #define BYTES_PER_INODE 65536
-#define FIRST_INODE 11 /* Below it, reserved: 2 is the root directory. */
+#define FIRST_INODE 11 /* Below it, reserved: 2 is the root directory, 8 the journal. */
+#define JOURNAL_INODE 8
 
 static int fd;
 static uint8_t block[BLOCK];
@@ -70,6 +73,87 @@ static void put_inode_dir(uint8_t *p, uint16_t mode, uint16_t links, uint32_t da
     put32(p + 40, data_block);
 }
 
+static void put32be(uint8_t *p, uint32_t v) {
+    p[0] = (uint8_t)(v >> 24);
+    p[1] = (uint8_t)(v >> 16);
+    p[2] = (uint8_t)(v >> 8);
+    p[3] = (uint8_t)v;
+}
+
+/* The journal: its blocks (zeroed, the first its superblock), and the block
+ * map pointing at them (indirect blocks after them). Fills in its inode. */
+static void make_journal(uint32_t first, uint32_t count, uint32_t maps, const uint8_t uuid[16],
+                         uint8_t *inode, uint32_t now) {
+    memset(block, 0, BLOCK);
+    for (uint32_t b = 1; b < count; b++) {
+        write_block(first + b, block);
+    }
+    put32be(block + 0, 0xc03b3998); /* JBD2's magic. */
+    put32be(block + 4, 4);          /* Superblock, version 2. */
+    put32be(block + 12, BLOCK);
+    put32be(block + 16, count);
+    put32be(block + 20, 1);         /* The log starts after it. */
+    put32be(block + 24, 1);         /* Its first transaction's number. */
+    memcpy(block + 48, uuid, 16);
+    put32be(block + 64, 1);         /* One file system uses it... */
+    memcpy(block + 0x100, uuid, 16); /* ...this one. */
+    write_block(first, block);
+
+    memset(inode, 0, INODE_SIZE);
+    put16(inode + 0, 0100600);
+    put32(inode + 4, count * BLOCK);
+    put32(inode + 8, now);
+    put32(inode + 12, now);
+    put32(inode + 16, now);
+    put16(inode + 26, 1);
+    put32(inode + 28, (count + maps) * (BLOCK / 512));
+    uint32_t per = BLOCK / 4, next_map = first + count;
+    for (uint32_t i = 0; i < 12 && i < count; i++) {
+        put32(inode + 40 + 4 * i, first + i);
+    }
+    uint32_t done = 12;
+    if (done < count) { /* Single indirect. */
+        uint32_t single = next_map++;
+        put32(inode + 40 + 48, single);
+        memset(block, 0, BLOCK);
+        for (uint32_t i = 0; i < per && done < count; i++, done++) {
+            put32(block + 4 * i, first + done);
+        }
+        write_block(single, block);
+    }
+    if (done < count) { /* Double indirect. */
+        uint32_t dbl = next_map++;
+        put32(inode + 40 + 52, dbl);
+        uint8_t *top = calloc(1, BLOCK);
+        if (!top) {
+            fail("out of memory");
+        }
+        for (uint32_t j = 0; j < per && done < count; j++) {
+            uint32_t ind = next_map++;
+            put32(top + 4 * j, ind);
+            memset(block, 0, BLOCK);
+            for (uint32_t i = 0; i < per && done < count; i++, done++) {
+                put32(block + 4 * i, first + done);
+            }
+            write_block(ind, block);
+        }
+        write_block(dbl, top);
+        free(top);
+    }
+}
+
+/* How many indirect blocks a file of `count` blocks needs (up to double). */
+static uint32_t map_blocks(uint32_t count) {
+    uint32_t per = BLOCK / 4;
+    if (count <= 12) {
+        return 0;
+    }
+    if (count <= 12 + per) {
+        return 1;
+    }
+    return 2 + (count - 12 - per + per - 1) / per;
+}
+
 static int put_entry(uint8_t *p, uint32_t inode, uint16_t rec_len, const char *name) {
     size_t n = strlen(name);
     put32(p, inode);
@@ -112,7 +196,9 @@ void make_ext2(int partition, uint64_t bytes, const char *label, uint8_t uuid[16
     if (!gdt) {
         fail("out of memory");
     }
-    uint32_t free_blocks = 0, root_block = 0, lost_block = 0;
+    uint32_t journal_blocks = blocks >= 262144 ? 8192 : 4096;
+    uint32_t journal_maps = map_blocks(journal_blocks);
+    uint32_t free_blocks = 0, root_block = 0, lost_block = 0, journal_first = 0;
     for (uint32_t g = 0; g < groups; g++) {
         uint32_t start = g * BLOCKS_PER_GROUP;
         uint32_t size = g == groups - 1 ? blocks - start : BLOCKS_PER_GROUP;
@@ -121,7 +207,11 @@ void make_ext2(int partition, uint64_t bytes, const char *label, uint8_t uuid[16
         if (g == 0) {
             root_block = start + used;
             lost_block = root_block + 1;
-            used += 2;
+            journal_first = lost_block + 1;
+            used += 2 + journal_blocks + journal_maps;
+            if (used + 64 > size) {
+                fail("the partition is too small for a file system");
+            }
         }
         uint8_t *d = gdt + g * 32;
         put32(d + 0, start + meta);           /* Block bitmap. */
@@ -151,11 +241,14 @@ void make_ext2(int partition, uint64_t bytes, const char *label, uint8_t uuid[16
         progress((int)((uint64_t)(g + 1) * 100 / groups));
     }
 
-    /* The root directory (inode 2) and lost+found (inode 11). */
+    /* The journal (inode 8), the root directory (2) and lost+found (11). */
     uint32_t itable0 = (has_super(0) ? 1 + gdt_blocks : 0) + 2;
+    uint8_t journal_inode[INODE_SIZE];
+    make_journal(journal_first, journal_blocks, journal_maps, uuid, journal_inode, now);
     memset(block, 0, BLOCK);
     put_inode_dir(block + (2 - 1) * INODE_SIZE, 040755, 3, root_block, now);
     put_inode_dir(block + (FIRST_INODE - 1) * INODE_SIZE, 040700, 2, lost_block, now);
+    memcpy(block + (JOURNAL_INODE - 1) * INODE_SIZE, journal_inode, INODE_SIZE);
     write_block(itable0, block);
     memset(block, 0, BLOCK);
     int at = put_entry(block, 2, 12, ".");
@@ -190,10 +283,16 @@ void make_ext2(int partition, uint64_t bytes, const char *label, uint8_t uuid[16
     put32(super + 76, 1);       /* Revision 1 ("dynamic"). */
     put32(super + 84, FIRST_INODE);
     put16(super + 88, INODE_SIZE);
+    put32(super + 92, 0x0004);  /* A journal. */
     put32(super + 96, 0x0002);  /* Typed directory entries. */
     put32(super + 100, 0x0003); /* Sparse superblocks, large files. */
     memcpy(super + 104, uuid, 16);
     strncpy((char *)super + 120, label, 16);
+    put32(super + 224, JOURNAL_INODE);
+    super[253] = 1; /* A copy of the journal inode's block map, for e2fsck: */
+    memcpy(super + 268, journal_inode + 40, 15 * 4);
+    put32(super + 268 + 15 * 4, 0);                    /* (Size, high.) */
+    put32(super + 268 + 16 * 4, journal_blocks * BLOCK); /* (Size.) */
     for (uint32_t g = 0; g < groups; g++) {
         if (!has_super(g)) {
             continue;

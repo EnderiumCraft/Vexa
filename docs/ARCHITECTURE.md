@@ -165,7 +165,11 @@ underneath it:
 - `tmpfs`: in memory; the root file system, filled from `initramfs.tar` at boot (or,
   started from an installed disk, only `/tmp` and `/run`)
 - `devfs`: `/dev`, with `null`, `zero`, `console` and every disk and partition
-- `ext2`: disks, mounted at `/mnt/<disk>`
+- `ext2`: disks, mounted at `/mnt/<disk>`; ext3's journal too (`fs/journal.c`, JBD2):
+  an operation's metadata changes are gathered in memory (`meta_read` and `meta_write`
+  go through them), written to the journal with a commit block, then to their places,
+  and the journal is marked empty; file data is written first. A journal holding
+  committed transactions (Linux's too, with revoke records) is replayed at mount
 - `iso9660`: CDs (read-only, with Rock Ridge names, permissions and links), mounted at
   `/mnt/cd0`...; the first with a `linux` directory, normally the boot CD, is also
   `/cdrom`. The Linux subsystem's programs and libraries live there: in the initramfs,

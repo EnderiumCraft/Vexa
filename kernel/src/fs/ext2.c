@@ -6,6 +6,8 @@
 #include <vexa/string.h>
 #include <vexa/vfs.h>
 
+#include "journal.h"
+
 /*
  * ext2, read and write.
  *
@@ -16,18 +18,27 @@
  * unknown "read-only compatible" ones make it read-only.
  *
  * Everything runs under the VFS lock and writes go straight to the disk, so
- * the file system on disk is always complete (though not crash-proof: that
- * needs a journal, which ext2 doesn't have).
+ * the file system on disk is always complete between operations.
+ *
+ * ext3 (ext2 with a journal, which Vexa's installer makes too) is crash-proof
+ * as well: the metadata an operation changes (inodes, bitmaps, directories,
+ * block maps, the superblock and group descriptors) is gathered in memory as
+ * one transaction (reads see it), written to the journal and committed, and
+ * only then to its places (fs/journal.c); file data is written first. A
+ * journal left with a committed transaction is replayed when it's mounted.
  */
 
 #define SUPERBLOCK_OFFSET 1024
 #define EXT2_MAGIC 0xef53
 #define ROOT_INODE 2
 
+#define COMPAT_HAS_JOURNAL 0x0004
 #define INCOMPAT_FILETYPE 0x0002
+#define INCOMPAT_RECOVER 0x0004 /* The journal may need replaying. */
 #define RO_COMPAT_SPARSE_SUPER 0x0001
 #define RO_COMPAT_LARGE_FILE 0x0002
-#define SUPPORTED_INCOMPAT INCOMPAT_FILETYPE
+#define SUPPORTED_INCOMPAT (INCOMPAT_FILETYPE | INCOMPAT_RECOVER)
+#define SB_JOURNAL_INODE 120 /* In the superblock's rest: s_journal_inum. */
 #define SUPPORTED_RO_COMPAT (RO_COMPAT_SPARSE_SUPER | RO_COMPAT_LARGE_FILE)
 
 #define MODE_TYPE_MASK 0xf000
@@ -93,6 +104,11 @@ struct ext2 {
     uint32_t inode_size;
     bool file_types; /* Directory entries carry the file type. */
     struct ext2_node *open_nodes;
+    /* ext3: the journal, and the transaction being gathered. */
+    struct journal *journal;
+    uint32_t tx_depth, tx_count, tx_capacity;
+    uint32_t *tx_numbers;
+    uint8_t **tx_data;
 };
 
 struct ext2_node {
@@ -113,25 +129,123 @@ static struct ext2_node *node_of(struct vnode *vnode) {
     return (struct ext2_node *)vnode;
 }
 
-/* ---- Raw access ---- */
+/* ---- Raw access, and the transaction ---- */
+
+static int tx_find(struct ext2 *fs, uint32_t block) {
+    for (uint32_t i = 0; i < fs->tx_count; i++) {
+        if (fs->tx_numbers[i] == block) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+/* Writes the transaction gathered so far (through the journal). */
+static void tx_flush(struct ext2 *fs) {
+    if (!fs->tx_count) {
+        return;
+    }
+    int error = journal_commit(fs->journal, fs->tx_numbers, fs->tx_data, fs->tx_count);
+    if (error) {
+        kprintf("[ext2] %s: writing a transaction failed (%s)\n", fs->device->name,
+                vfs_error_name(error));
+    }
+    for (uint32_t i = 0; i < fs->tx_count; i++) {
+        kfree(fs->tx_data[i]);
+    }
+    fs->tx_count = 0;
+}
+
+/* An operation that changes the file system: one transaction. */
+static void tx_begin(struct ext2 *fs) {
+    if (fs->journal) {
+        fs->tx_depth++;
+    }
+}
+
+static void tx_end(struct ext2 *fs) {
+    if (fs->journal && --fs->tx_depth == 0) {
+        tx_flush(fs);
+    }
+}
+
+/* A block that becomes file data (written directly): out of the transaction. */
+static void tx_forget(struct ext2 *fs, uint32_t block) {
+    int i = tx_find(fs, block);
+    if (i >= 0) {
+        kfree(fs->tx_data[i]);
+        fs->tx_count--;
+        fs->tx_numbers[i] = fs->tx_numbers[fs->tx_count];
+        fs->tx_data[i] = fs->tx_data[fs->tx_count];
+    }
+}
+
+/* Metadata: through the transaction (if there is one). */
+static int meta_read(struct ext2 *fs, uint64_t offset, void *buffer, size_t size) {
+    if (!fs->tx_count) {
+        return block_read_bytes(fs->device, offset, buffer, size);
+    }
+    for (size_t done = 0; done < size;) {
+        uint32_t block = (uint32_t)((offset + done) / fs->block_size);
+        uint32_t within = (uint32_t)((offset + done) % fs->block_size);
+        size_t n = fs->block_size - within < size - done ? fs->block_size - within : size - done;
+        int i = tx_find(fs, block);
+        if (i >= 0) {
+            memcpy((uint8_t *)buffer + done, fs->tx_data[i] + within, n);
+        } else if (block_read_bytes(fs->device, offset + done, (uint8_t *)buffer + done, n)) {
+            return -VX_EIO;
+        }
+        done += n;
+    }
+    return 0;
+}
+
+static int meta_write(struct ext2 *fs, uint64_t offset, const void *buffer, size_t size) {
+    if (!fs->journal || !fs->tx_depth) {
+        return block_write_bytes(fs->device, offset, buffer, size);
+    }
+    for (size_t done = 0; done < size;) {
+        uint32_t block = (uint32_t)((offset + done) / fs->block_size);
+        uint32_t within = (uint32_t)((offset + done) % fs->block_size);
+        size_t n = fs->block_size - within < size - done ? fs->block_size - within : size - done;
+        int i = tx_find(fs, block);
+        if (i < 0) {
+            if (fs->tx_count == fs->tx_capacity) {
+                tx_flush(fs); /* (A big operation: in more than one transaction.) */
+            }
+            uint8_t *copy = kmalloc(fs->block_size);
+            if (!copy ||
+                block_read_bytes(fs->device, (uint64_t)block * fs->block_size, copy, fs->block_size)) {
+                kfree(copy);
+                return -VX_EIO;
+            }
+            i = (int)fs->tx_count++;
+            fs->tx_numbers[i] = block;
+            fs->tx_data[i] = copy;
+        }
+        memcpy(fs->tx_data[i] + within, (const uint8_t *)buffer + done, n);
+        done += n;
+    }
+    return 0;
+}
 
 static int read_block(struct ext2 *fs, uint32_t block, void *buffer) {
-    return block_read_bytes(fs->device, (uint64_t)block * fs->block_size, buffer, fs->block_size);
+    return meta_read(fs, (uint64_t)block * fs->block_size, buffer, fs->block_size);
 }
 
 static int write_block(struct ext2 *fs, uint32_t block, const void *buffer) {
-    return block_write_bytes(fs->device, (uint64_t)block * fs->block_size, buffer, fs->block_size);
+    return meta_write(fs, (uint64_t)block * fs->block_size, buffer, fs->block_size);
 }
 
 static int write_superblock(struct ext2 *fs) {
     fs->sb.write_time = (uint32_t)time_now();
-    return block_write_bytes(fs->device, SUPERBLOCK_OFFSET, &fs->sb, sizeof(fs->sb));
+    return meta_write(fs, SUPERBLOCK_OFFSET, &fs->sb, sizeof(fs->sb));
 }
 
 static int write_group(struct ext2 *fs, uint32_t group) {
     uint64_t table = (uint64_t)(fs->sb.first_data_block + 1) * fs->block_size;
-    return block_write_bytes(fs->device, table + group * sizeof(struct group_descriptor),
-                             &fs->groups[group], sizeof(struct group_descriptor));
+    return meta_write(fs, table + group * sizeof(struct group_descriptor), &fs->groups[group],
+                      sizeof(struct group_descriptor));
 }
 
 static uint64_t inode_offset(struct ext2 *fs, uint32_t number) {
@@ -144,12 +258,11 @@ static int read_inode(struct ext2 *fs, uint32_t number, struct inode *inode) {
     if (number == 0 || number > fs->sb.inodes_count) {
         return -VX_EIO;
     }
-    return block_read_bytes(fs->device, inode_offset(fs, number), inode, sizeof(*inode));
+    return meta_read(fs, inode_offset(fs, number), inode, sizeof(*inode));
 }
 
 static int write_inode(struct ext2 *fs, struct ext2_node *node) {
-    return block_write_bytes(fs->device, inode_offset(fs, node->number), &node->inode,
-                             sizeof(node->inode));
+    return meta_write(fs, inode_offset(fs, node->number), &node->inode, sizeof(node->inode));
 }
 
 static uint64_t inode_size(const struct inode *inode) {
@@ -225,9 +338,11 @@ static uint32_t alloc_block(struct ext2 *fs, uint32_t near) {
         write_group(fs, group);
         write_superblock(fs);
         uint32_t block = fs->sb.first_data_block + group * fs->sb.blocks_per_group + bit;
+        /* (Zeroed directly: it was free, so nothing on the disk needs it.) */
+        tx_forget(fs, block);
         uint8_t *zeros = kzalloc(fs->block_size);
         if (zeros) {
-            write_block(fs, block, zeros);
+            block_write_bytes(fs->device, (uint64_t)block * fs->block_size, zeros, fs->block_size);
             kfree(zeros);
         }
         return block;
@@ -292,12 +407,12 @@ static void free_inode(struct ext2 *fs, uint32_t number, bool directory) {
 
 static uint32_t read_pointer(struct ext2 *fs, uint32_t block, uint32_t index) {
     uint32_t value = 0;
-    block_read_bytes(fs->device, (uint64_t)block * fs->block_size + index * 4, &value, 4);
+    meta_read(fs, (uint64_t)block * fs->block_size + index * 4, &value, 4);
     return value;
 }
 
 static int write_pointer(struct ext2 *fs, uint32_t block, uint32_t index, uint32_t value) {
-    return block_write_bytes(fs->device, (uint64_t)block * fs->block_size + index * 4, &value, 4);
+    return meta_write(fs, (uint64_t)block * fs->block_size + index * 4, &value, 4);
 }
 
 /* Returns the disk block holding file block `logical`, or 0 for a hole. With
@@ -1045,22 +1160,136 @@ static void ext2_statfs(struct mount *mount, uint64_t *total, uint64_t *free) {
     *free = (uint64_t)fs->sb.free_blocks_count * fs->block_size;
 }
 
+/* Each operation that changes the file system is one transaction. */
+
+static int ext2_create_tx(struct vnode *dir, const char *name, size_t length, uint32_t type,
+                          struct vnode **out) {
+    tx_begin(fs_of(dir));
+    int result = ext2_create(dir, name, length, type, out);
+    tx_end(fs_of(dir));
+    return result;
+}
+
+static int ext2_link_tx(struct vnode *dir, const char *name, size_t length, struct vnode *target) {
+    tx_begin(fs_of(dir));
+    int result = ext2_link(dir, name, length, target);
+    tx_end(fs_of(dir));
+    return result;
+}
+
+static int ext2_remove_tx(struct vnode *dir, const char *name, size_t length) {
+    tx_begin(fs_of(dir));
+    int result = ext2_remove(dir, name, length);
+    tx_end(fs_of(dir));
+    return result;
+}
+
+static int ext2_rename_tx(struct vnode *old_dir, const char *old_name, size_t old_length,
+                          struct vnode *new_dir, const char *new_name, size_t new_length) {
+    tx_begin(fs_of(old_dir));
+    int result = ext2_rename(old_dir, old_name, old_length, new_dir, new_name, new_length);
+    tx_end(fs_of(old_dir));
+    return result;
+}
+
+static int64_t ext2_write_tx(struct vnode *vnode, const void *buffer, size_t size, uint64_t offset) {
+    tx_begin(fs_of(vnode));
+    int64_t result = ext2_write(vnode, buffer, size, offset);
+    tx_end(fs_of(vnode));
+    return result;
+}
+
+static int ext2_truncate_tx(struct vnode *vnode, uint64_t size) {
+    tx_begin(fs_of(vnode));
+    int result = ext2_truncate(vnode, size);
+    tx_end(fs_of(vnode));
+    return result;
+}
+
+static int ext2_set_mode_tx(struct vnode *vnode) {
+    tx_begin(fs_of(vnode));
+    int result = ext2_set_mode(vnode);
+    tx_end(fs_of(vnode));
+    return result;
+}
+
+static void ext2_release_tx(struct vnode *vnode) {
+    struct ext2 *fs = fs_of(vnode);
+    tx_begin(fs);
+    ext2_release(vnode);
+    tx_end(fs);
+}
+
 static const struct vnode_ops ext2_ops = {
     .lookup = ext2_lookup,
-    .create = ext2_create,
-    .remove = ext2_remove,
-    .link = ext2_link,
-    .rename = ext2_rename,
+    .create = ext2_create_tx,
+    .remove = ext2_remove_tx,
+    .link = ext2_link_tx,
+    .rename = ext2_rename_tx,
     .read_dir = ext2_read_dir,
     .read = ext2_read,
-    .write = ext2_write,
-    .truncate = ext2_truncate,
-    .set_mode = ext2_set_mode,
+    .write = ext2_write_tx,
+    .truncate = ext2_truncate_tx,
+    .set_mode = ext2_set_mode_tx,
     .statfs = ext2_statfs,
-    .release = ext2_release,
+    .release = ext2_release_tx,
 };
 
 /* ---- Mounting ---- */
+
+static int read_groups(struct ext2 *fs) {
+    return block_read_bytes(fs->device, (uint64_t)(fs->sb.first_data_block + 1) * fs->block_size,
+                            fs->groups, fs->group_count * sizeof(struct group_descriptor));
+}
+
+/* ext3: the journal (in its inode), replayed if it needs to be. */
+static int open_journal(struct ext2 *fs) {
+    uint32_t number;
+    memcpy(&number, fs->sb.rest + SB_JOURNAL_INODE, 4);
+    struct ext2_node node = {0};
+    node.number = number;
+    if (!number || read_inode(fs, number, &node.inode)) {
+        return -VX_EINVAL;
+    }
+    uint64_t count = inode_size(&node.inode) / fs->block_size;
+    if (count < 16 || count > (1U << 20)) {
+        return -VX_EINVAL;
+    }
+    uint32_t *blocks = kmalloc(count * sizeof(uint32_t));
+    if (!blocks) {
+        return -VX_ENOMEM;
+    }
+    for (uint32_t i = 0; i < count; i++) {
+        blocks[i] = map_block(fs, &node, i, false);
+        if (!blocks[i]) {
+            kfree(blocks);
+            return -VX_EINVAL;
+        }
+    }
+    bool replayed;
+    int error;
+    struct journal *journal = journal_open(fs->device, fs->block_size, blocks, (uint32_t)count,
+                                           &replayed, &error);
+    if (replayed) {
+        /* (The superblock and group descriptors may be among what it wrote.) */
+        int e = block_read_bytes(fs->device, SUPERBLOCK_OFFSET, &fs->sb, sizeof(fs->sb));
+        if (e || read_groups(fs)) {
+            error = -VX_EIO;
+        }
+    }
+    if (!journal) {
+        kfree(blocks);
+        return error;
+    }
+    fs->tx_capacity = journal_capacity(journal);
+    fs->tx_numbers = kmalloc(fs->tx_capacity * sizeof(uint32_t));
+    fs->tx_data = kmalloc(fs->tx_capacity * sizeof(uint8_t *));
+    if (!fs->tx_numbers || !fs->tx_data) {
+        return -VX_ENOMEM;
+    }
+    fs->journal = journal;
+    return 0;
+}
 
 static int ext2_mount(struct mount *mount, struct block_device *device) {
     if (!device) {
@@ -1093,17 +1322,40 @@ static int ext2_mount(struct mount *mount, struct block_device *device) {
     fs->group_count = (fs->sb.blocks_count - fs->sb.first_data_block + fs->sb.blocks_per_group - 1) /
                       fs->sb.blocks_per_group;
     fs->groups = kmalloc(fs->group_count * sizeof(struct group_descriptor));
-    if (!fs->groups ||
-        block_read_bytes(device, (uint64_t)(fs->sb.first_data_block + 1) * fs->block_size,
-                         fs->groups, fs->group_count * sizeof(struct group_descriptor))) {
+    if (!fs->groups || read_groups(fs)) {
         kfree(fs->groups);
         kfree(fs);
         return -VX_EIO;
     }
-    mount->read_only = !device->write || (fs->sb.feature_ro_compat & ~SUPPORTED_RO_COMPAT);
+    bool journal_unwritable = false;
+    if ((fs->sb.feature_compat & COMPAT_HAS_JOURNAL) && device->write) {
+        error = open_journal(fs);
+        if (error && (error != -VX_EINVAL || (fs->sb.feature_incompat & INCOMPAT_RECOVER))) {
+            kprintf("[ext2] %s: its journal couldn't be replayed (%s)\n", device->name,
+                    vfs_error_name(error));
+            kfree(fs->groups);
+            kfree(fs);
+            return error;
+        }
+        journal_unwritable = error != 0;
+    } else if (fs->sb.feature_incompat & INCOMPAT_RECOVER) {
+        kprintf("[ext2] %s: its journal needs replaying, which a read-only disk can't have\n",
+                device->name);
+        kfree(fs->groups);
+        kfree(fs);
+        return -VX_EINVAL;
+    }
+    mount->read_only = !device->write || (fs->sb.feature_ro_compat & ~SUPPORTED_RO_COMPAT) ||
+                       journal_unwritable;
+    if (fs->journal && !mount->read_only) {
+        /* Mounted: the journal may hold a transaction at any time (as Linux marks it). */
+        fs->sb.feature_incompat |= INCOMPAT_RECOVER;
+        write_superblock(fs);
+        kprintf("[ext2] %s: ext3, with a journal\n", device->name);
+    }
     if (mount->read_only && device->write) {
-        kprintf("[ext2] %s: mounting read-only (unsupported features %x)\n", device->name,
-                fs->sb.feature_ro_compat & ~SUPPORTED_RO_COMPAT);
+        kprintf("[ext2] %s: mounting read-only (%s)\n", device->name,
+                journal_unwritable ? "a journal Vexa can't write" : "unsupported features");
     }
     mount->data = fs;
     error = get_node(fs, ROOT_INODE, &mount->root);

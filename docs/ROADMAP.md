@@ -103,8 +103,9 @@ registers survive being interrupted.
 - [x] USB storage (0.27.0)
 - [x] Installing on a disk and starting from it: the Installer app and `install`
       (GPT, FAT32 ESP, ext2 root, Limine for BIOS and UEFI), `root=UUID=` (0.28.0)
-- [ ] Moved to later phases: ext4, a journal or
-      another crash-safe file system, finer-grained VFS locking
+- [x] A journal: ext3 (JBD2, Linux's format), replayed at mount; the installer makes
+      ext3 (0.29.0)
+- [ ] Moved to later phases: ext4 (extents and the rest), finer-grained VFS locking
 
 **Milestone:** boot from a disk image and read files from it. Reached: disks are
 mounted under `/mnt`, and `run /mnt/vda1/hello-world` runs a program from one. `make test`

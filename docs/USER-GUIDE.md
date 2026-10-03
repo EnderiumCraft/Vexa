@@ -88,8 +88,9 @@ qemu-system-x86_64 -M q35 -m 2G -drive file=vexa-disk.img,if=virtio,format=raw
 ```
 
 Started from the disk, `/tmp` and `/run` are still emptied at each start (they're in
-memory), and there's no `/cdrom`. ext2 has no journal: turning the computer off
-without shutting down can leave the file system needing a check (`e2fsck`, on Linux).
+memory), and there's no `/cdrom`. The system's file system is ext3, with a journal:
+turning the computer off in the middle of writing loses at most what was being
+written, and the next start puts the file system back in order by itself.
 
 ## The shell
 
@@ -678,10 +679,13 @@ virtio disk's first partition), `/mnt/sda1` (SATA), `/mnt/nvme0n1` (NVMe), `/mnt
 It drives virtio-blk, AHCI (SATA disks and CD/DVD drives), NVMe and IDE (older PCs'
 disks and CD drives as `hda`, `hdb`... and `cd0`, and VirtualBox's CD drive as it comes),
 reads GPT and MBR
-partition tables, reads and writes **ext2**, and reads CDs (ISO 9660 with Rock Ridge).
-ext4 disks are refused (their extra features aren't supported yet). ext2 has no journal:
-turning the machine off in the middle of writing can leave a disk that needs `e2fsck`
-(on Linux).
+partition tables, reads and writes **ext2** and **ext3** (ext2 with a journal; disks
+made with `mke2fs -t ext3` on Linux work, and Linux reads what Vexa writes), and reads CDs
+(ISO 9660 with Rock Ridge). On ext3, each change is written to the journal first, so
+turning the machine off in the middle of writing can't leave the disk inconsistent: the
+next mount (Vexa's, or Linux's) finishes or forgets the last change. ext2 has no journal,
+and may need `e2fsck` (on Linux) after that. ext4 disks are refused (their extra
+features, such as extents, aren't supported yet).
 
 A disk to try, on Linux:
 

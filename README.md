@@ -185,9 +185,9 @@ qemu-system-x86_64 -M q35 -m 512M -cdrom build/vexa.iso -boot d \
     -drive file=disk.img,if=virtio,format=raw
 ```
 
-ext4 disks are refused (Vexa doesn't support their extra features yet), and ext2 has no
-journal, so pulling the plug mid-write can leave the disk needing a check with
-`e2fsck` on Linux.
+ext3 disks (`mke2fs -t ext3`) have a journal, which Vexa keeps: pulling the plug
+mid-write can't leave them inconsistent. ext4 disks are refused (Vexa doesn't support
+their extra features yet).
 
 Phase 8 is under way: Vexa has a graphical desktop of its own (`desktop`), with terminal
 windows you can drag, resize, maximize and minimize, and X programs run on it as windows
