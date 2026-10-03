@@ -426,12 +426,19 @@ LINUX_COMMANDS = [
 ]
 
 # With --disks: one ext2 file system on each kind of disk.
-# On the test disks (so only with --disks): an app built with the SDK
-# (make sdk-test), opened from a new terminal at the end of the desktop checks.
+# On the test disks (so only with --disks): apps built with the SDK (make
+# sdk-test), opened from a new terminal at the end of the desktop checks.
 SDK_APP_COMMANDS = [
     ("@sendkey ctrl-alt-t", "term: tab 1 of 1", 20),
     ("@type open /mnt/vda1/HelloSDK.vxapp", '"Hello SDK" (420x220)', 20),
     ("@sendkey alt-f4", "desktop: asked window", 10),
+    # The SDL demo (SDL 2 with Vexa's drivers): a window drawn with SDL's
+    # renderer, its chime through SDL's audio, Space (pauses: a new title)
+    # and Escape (quits) through SDL's events.
+    ("@type open /mnt/vda1/SDLDemo.vxapp", '"SDL Demo" (640x400)', 30),
+    ("@sound 660", None, 10),
+    ("@sendkey spc", 'is now called "SDL Demo (paused)"', 10),
+    ("@sendkey esc", "desktop: closed window", 10),
     ("@type exit", None, 5),
 ]
 
@@ -690,7 +697,10 @@ def main():
             command += [a.format(copy) for a in qemu_args]
             disks.append((copy, offset))
         commands[-1:-1] = DISK_COMMANDS
-        at = next(i for i, c in enumerate(commands) if c[0] == "@sendkey ctrl-alt-q")
+        # (Before the desktop section's Ctrl+Alt+Q: the X section has one too.)
+        desktop = next(i for i, c in enumerate(commands) if c[0] == "#desktop")
+        at = next(i for i, c in enumerate(commands)
+                  if i > desktop and c[0] == "@sendkey ctrl-alt-q")
         commands[at:at] = SDK_APP_COMMANDS
     # Sections: ("#name",) markers; --only keeps some of them.
     only = set(args.only.split(",")) if args.only else None

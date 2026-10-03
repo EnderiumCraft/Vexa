@@ -22,10 +22,12 @@ for arg in "$@"; do
 done
 
 # The compiler's own headers (stdint.h, stdarg.h...) and libvexa's; nothing
-# from the build machine's C library.
+# from the build machine's C library. The compiler is Linux's, so its
+# __linux__ goes (Vexa is __vexa__; __unix__ stays, for POSIX code).
 set -- -ffreestanding -fno-stack-protector -fPIC -fno-asynchronous-unwind-tables \
     -fno-plt -m64 -march=x86-64 -D__vexa__=1 -D_REENTRANT \
-    -nostdinc -isystem "$("$HOST_CC" -print-file-name=include)" -isystem "$SDK/include" "$@"
+    -U__linux__ -U__linux -Ulinux -U__gnu_linux__ \
+    -nostdinc -isystem "$SDK/include" -isystem "$("$HOST_CC" -print-file-name=include)" "$@"
 
 if [ $link = no ]; then
     exec "$HOST_CC" "$@"

@@ -299,24 +299,49 @@ $(SDK_DIR)/.done: $(SDK_FILES) $(LIBVEXA_SO) $(LIBVEXA_A) $(CRT0) libvexa/progra
 	echo "$(VEXA_VERSION)" > $(SDK_DIR)/VERSION
 	touch $@
 
-$(SDK_TARBALL): $(SDK_DIR)/.done
+# SDL 2, built with the SDK (only again when its sources, Vexa's drivers or
+# libvexa's headers change) and added to it.
+SDL2_VERSION := 2.30.12
+SDL2_URL := https://github.com/libsdl-org/SDL/releases/download/release-$(SDL2_VERSION)/SDL2-$(SDL2_VERSION).tar.gz
+SDL2_SHA256 := ac356ea55e8b9dd0b2d1fa27da40ef7e238267ccf9324704850d5d47375b48ea
+SDL2_TARBALL := third_party/SDL2-$(SDL2_VERSION).tar.gz
+SDL2_PREFIX := $(BUILD)/sdl2
+SDL2 := $(SDL2_PREFIX)/lib/libSDL2.a
+
+$(SDL2_TARBALL):
+	$(call fetch,$(SDL2_URL),$(SDL2_SHA256))
+
+$(SDL2): $(SDL2_TARBALL) tools/build-sdl2.sh $(shell find sdk/sdl2 -type f) sdk/bin/vexa-cc \
+		$(shell find libvexa/include -type f) | $(SDK_DIR)/.done
+	tools/build-sdl2.sh $(SDL2_TARBALL) $(BUILD)/sdl2-work $(SDK_DIR) $(SDL2_PREFIX)
+
+$(SDK_DIR)/.complete: $(SDK_DIR)/.done $(SDL2)
+	cp -R $(SDL2_PREFIX)/. $(SDK_DIR)/
+	touch $@
+
+$(SDK_TARBALL): $(SDK_DIR)/.complete
 	tar -C $(dir $(SDK_DIR)) --owner=0 --group=0 --numeric-owner --sort=name \
-		--exclude=.done --transform 's,^vexa-sdk,vexa-sdk-$(VEXA_VERSION),' -czf $@ vexa-sdk
+		--exclude=.done --exclude=.complete --transform 's,^vexa-sdk,vexa-sdk-$(VEXA_VERSION),' \
+		-czf $@ vexa-sdk
 
 sdk: $(SDK_TARBALL)
 
-# The SDK's own check: a new app from the template (built here and put on
-# the test disks, where the smoke test opens it), and a CMake build.
+# The SDK's own check: a new app from the template and the SDL demo (built
+# here and put on the test disks, where the smoke test opens them), and a
+# CMake build with SDL.
 SDK_TEST := $(BUILD)/sdk-test
 SDK_HELLO := $(SDK_TEST)/hello-app/build/HelloSDK.vxapp/.done
-$(SDK_HELLO): $(SDK_DIR)/.done
+SDK_SDL_DEMO := $(SDK_TEST)/sdl-demo/build/SDLDemo.vxapp
+$(SDK_HELLO): $(SDK_DIR)/.complete
 	rm -rf $(SDK_TEST)
 	mkdir -p $(SDK_TEST)
 	cd $(SDK_TEST) && $(abspath $(SDK_DIR))/bin/vexa-new-app "Hello SDK" hello-app
 	$(MAKE) -C $(SDK_TEST)/hello-app
-	printf 'cmake_minimum_required(VERSION 3.13)\nproject(t C)\nadd_executable(t t.c)\ntarget_link_libraries(t m pthread)\n' \
+	cp -R $(SDK_DIR)/examples/sdl-demo $(SDK_TEST)/sdl-demo
+	$(MAKE) -C $(SDK_TEST)/sdl-demo SDK=$(abspath $(SDK_DIR))
+	printf 'cmake_minimum_required(VERSION 3.13)\nproject(t C)\nfind_package(SDL2 REQUIRED)\nadd_executable(t t.c)\ntarget_link_libraries(t SDL2::SDL2 m pthread)\n' \
 		> $(SDK_TEST)/CMakeLists.txt
-	printf '#include <math.h>\n#include <stdio.h>\nint main(void) { printf("%%g\\n", sqrt(2.0)); return 0; }\n' \
+	printf '#include <SDL.h>\n#include <math.h>\nint main(void) { SDL_Log("%%g", sqrt(2.0)); return SDL_Init(0); }\n' \
 		> $(SDK_TEST)/t.c
 	cmake -S $(SDK_TEST) -B $(SDK_TEST)/cmake -DCMAKE_TOOLCHAIN_FILE=$(abspath $(SDK_DIR))/cmake/vexa.cmake >/dev/null
 	cmake --build $(SDK_TEST)/cmake >/dev/null
@@ -660,7 +685,7 @@ $(BUILD)/disk-content: $(DISK_CONTENT_FILES) $(BUILD)/programs/hello-world $(SDK
 	rm -rf $@
 	cp -R tests/disk-content $@
 	cp $(BUILD)/programs/hello-world $@/
-	cp -R $(SDK_TEST)/hello-app/build/HelloSDK.vxapp $@/
+	cp -R $(SDK_TEST)/hello-app/build/HelloSDK.vxapp $(SDK_SDL_DEMO) $@/
 	rm -f $@/HelloSDK.vxapp/.done
 
 $(BUILD)/disks/virtio-gpt.img: $(BUILD)/disk-content tools/make-disk.py
