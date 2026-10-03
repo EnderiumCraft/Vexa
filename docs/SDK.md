@@ -14,11 +14,12 @@ vexa-sdk/
     bin/vexa-new-app     starts an app from the template
     bin/sdl2-config      SDL's flags
     include/             libvexa's headers (and SDL2/)
-    lib/                 libvexa.so, libvexa.a, crt0.o, libSDL2.a, libSDL2_mixer.a, pkgconfig/, cmake/
+    lib/                 libvexa.so, libvexa.a, crt0.o, libSDL2.a, libSDL2_mixer.a, libSDL2_net.a,
+                         pkgconfig/, cmake/
     cmake/vexa.cmake     a CMake toolchain file
     template/            the app template
     examples/sdl-demo/   an SDL program as an app
-    licenses/            musl's (libm), SDL's and SDL_mixer's
+    licenses/            musl's (libm), SDL's, SDL_mixer's and SDL_net's
 ```
 
 ## A first app
@@ -141,9 +142,16 @@ carries). Link with `-lSDL2_mixer` (before SDL), pkg-config (`SDL2_mixer`) or CM
 own synthesizer: Doom's (Chocolate Doom, in Vexa's Doom app) uses SDL_mixer's music
 hook with an OPL emulator.
 
+## SDL_net
+
+SDL_net 2 (2.2), for TCP and UDP (over libvexa's BSD sockets, which programs can use
+directly too: `<sys/socket.h>`, `<netdb.h>` and the rest, IPv4). Link with
+`-lSDL2_net`, pkg-config (`SDL2_net`) or CMake (`find_package(SDL2_net)` and
+`SDL2_net::SDL2_net`). Doom's network games use it.
+
 ## Licenses
 
 libvexa is part of Vexa (see the repository). Programs built with the SDK carry libm
 from musl (MIT, `licenses/musl-libm.txt`) in libvexa, and SDL (zlib,
-`licenses/SDL2.txt`) and SDL_mixer (zlib, `licenses/SDL2_mixer.txt`) when they use
-them; Vexa's SDL drivers are under SDL's license.
+`licenses/SDL2.txt`), SDL_mixer (zlib, `licenses/SDL2_mixer.txt`) and SDL_net (zlib,
+`licenses/SDL2_net.txt`) when they use them; Vexa's SDL drivers are under SDL's license.

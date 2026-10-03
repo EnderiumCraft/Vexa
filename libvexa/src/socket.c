@@ -3,6 +3,7 @@
  * older calls) through vx_resolve. */
 #include <arpa/inet.h>
 #include <errno.h>
+#include <net/if.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <poll.h>
@@ -255,8 +256,50 @@ int ioctl(int fd, unsigned long request, ...) {
         *argument = 0;
         return 0;
     }
+    if (request == SIOCGIFCONF && argument) {
+        /* The interfaces with an IPv4 address. */
+        struct ifconf *conf = (struct ifconf *)argument;
+        struct vx_net_interface interfaces[8];
+        long n = vx_net_info(interfaces, 8);
+        int room = conf->ifc_len / (int)sizeof(struct ifreq), used = 0;
+        for (long i = 0; i < n && used < room; i++) {
+            if (!interfaces[i].address) {
+                continue;
+            }
+            struct ifreq *r = &conf->ifc_req[used++];
+            memset(r, 0, sizeof(*r));
+            snprintf(r->ifr_name, IFNAMSIZ, "%s", interfaces[i].name);
+            struct sockaddr_in *in = (struct sockaddr_in *)&r->ifr_addr;
+            in->sin_family = AF_INET;
+            in->sin_addr.s_addr = interfaces[i].address;
+        }
+        conf->ifc_len = used * (int)sizeof(struct ifreq);
+        return 0;
+    }
     errno = ENOTTY;
     return -1;
+}
+
+unsigned int if_nametoindex(const char *name) {
+    struct vx_net_interface interfaces[8];
+    long n = vx_net_info(interfaces, 8);
+    for (long i = 0; i < n; i++) {
+        if (strcmp(interfaces[i].name, name) == 0) {
+            return (unsigned int)i + 1;
+        }
+    }
+    return 0;
+}
+
+char *if_indextoname(unsigned int index, char *name) {
+    struct vx_net_interface interfaces[8];
+    long n = vx_net_info(interfaces, 8);
+    if (index == 0 || index > (unsigned long)n) {
+        errno = ENXIO;
+        return NULL;
+    }
+    snprintf(name, IFNAMSIZ, "%s", interfaces[index - 1].name);
+    return name;
 }
 
 /* ---- select ---- */

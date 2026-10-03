@@ -15,4 +15,7 @@ struct timezone {
 
 int gettimeofday(struct timeval *tv, void *tz);
 
+/* (fd_set and select, as other systems' <sys/time.h> give them too.) */
+#include <sys/select.h>
+
 #endif

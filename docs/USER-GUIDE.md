@@ -397,6 +397,11 @@ Arrow keys move, Ctrl fires, Space opens doors, Shift runs, 1 to 7 choose a weap
 Tab shows the map and Escape the menu (where Options sets the mouse, the sound and the
 keys). Its settings and saved games are kept in `/home/.local/share/chocolate-doom`.
 
+Network games: one player starts `chocolate-doom -server` at a terminal (it waits for
+the others; Escape there starts the game), the others `chocolate-doom -connect
+10.0.2.15` with the first one's address (on the same network, or another Vexa or Linux
+machine with Chocolate Doom). `-deathmatch` makes it a deathmatch.
+
 It also plays other Doom WAD files: `chocolate-doom -iwad /path/to/doom2.wad` at a
 terminal (with your own copy of Doom or Doom II, say), and `-file` adds levels made for
 them. `chocolate-doom -timedemo demo1` plays the first demo as fast as it can and says

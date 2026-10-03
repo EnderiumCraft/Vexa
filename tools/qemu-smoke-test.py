@@ -307,6 +307,19 @@ TYPED_COMMANDS = ([
     # Enter closes.
     ("@type chocolate-doom -iwad missing.wad", '"Chocolate Doom 3.1.0" (460x', 60),
     ("@sendkey ret", "desktop: closed window", 20),
+    # A network game (SDL_net, over libvexa's sockets) on this machine: a
+    # server with a player, and another player joining it; then both quit.
+    ("@type chocolate-doom -server -nodes 2 -nosound -nogui > /dev/console 2> /dev/console &",
+     "NET_Init", 120),
+    ("@sendkey ctrl-alt-t", None, 10),
+    ("@type chocolate-doom -connect 127.0.0.1 -nosound -nogui > /dev/console 2> /dev/console",
+     "player 2 of 2 (2 nodes)", 300),
+    ("@sendkey shift", "player 1 of 2 (2 nodes)", 120),
+    ("@sendkey alt-f4", None, 5),
+    ("@sendkey y", None, 20),
+    ("@sendkey alt-f4", None, 5),
+    ("@sendkey y", None, 20),
+    ("@type exit", None, 5),
     ("@type exit", None, 5),
     ("@sendkey ctrl-alt-q", "desktop: asking before leaving", 20),
     ("@sendkey ret", "desktop: back to the console", 20),

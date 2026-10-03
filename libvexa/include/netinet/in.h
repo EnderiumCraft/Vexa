@@ -51,6 +51,11 @@ struct sockaddr_in6 {
 #define IP_MULTICAST_TTL 33
 #define IP_ADD_MEMBERSHIP 35
 
+struct ip_mreq {
+    struct in_addr imr_multiaddr;
+    struct in_addr imr_interface;
+};
+
 #define INET_ADDRSTRLEN 16
 #define INET6_ADDRSTRLEN 46
 

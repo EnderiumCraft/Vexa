@@ -344,9 +344,25 @@ $(SDL2_MIXER): $(SDL2_MIXER_TARBALL) tools/build-sdl2-mixer.sh $(SDL2)
 	tools/build-sdl2-mixer.sh $(SDL2_MIXER_TARBALL) $(BUILD)/sdl2-mixer-work $(SDK_DIR) \
 		$(SDL2_PREFIX) $(SDL2_MIXER_PREFIX)
 
-$(SDK_DIR)/.complete: $(SDK_DIR)/.done $(SDL2) $(SDL2_MIXER)
+# SDL_net 2 (TCP and UDP, over libvexa's sockets), likewise.
+SDL2_NET_VERSION := 2.2.0
+SDL2_NET_URL := https://github.com/libsdl-org/SDL_net/releases/download/release-$(SDL2_NET_VERSION)/SDL2_net-$(SDL2_NET_VERSION).tar.gz
+SDL2_NET_SHA256 := 4e4a891988316271974ff4e9585ed1ef729a123d22c08bd473129179dc857feb
+SDL2_NET_TARBALL := third_party/SDL2_net-$(SDL2_NET_VERSION).tar.gz
+SDL2_NET_PREFIX := $(BUILD)/sdl2-net
+SDL2_NET := $(SDL2_NET_PREFIX)/lib/libSDL2_net.a
+
+$(SDL2_NET_TARBALL):
+	$(call fetch,$(SDL2_NET_URL),$(SDL2_NET_SHA256))
+
+$(SDL2_NET): $(SDL2_NET_TARBALL) tools/build-sdl2-net.sh $(SDL2) $(shell find libvexa/include -type f)
+	tools/build-sdl2-net.sh $(SDL2_NET_TARBALL) $(BUILD)/sdl2-net-work $(SDK_DIR) \
+		$(SDL2_PREFIX) $(SDL2_NET_PREFIX)
+
+$(SDK_DIR)/.complete: $(SDK_DIR)/.done $(SDL2) $(SDL2_MIXER) $(SDL2_NET)
 	cp -R $(SDL2_PREFIX)/. $(SDK_DIR)/
 	cp -R $(SDL2_MIXER_PREFIX)/. $(SDK_DIR)/
+	cp -R $(SDL2_NET_PREFIX)/. $(SDK_DIR)/
 	touch $@
 
 $(SDK_TARBALL): $(SDK_DIR)/.complete
