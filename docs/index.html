@@ -1,0 +1,307 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Vexa OS - Official Homepage</title>
+<meta name="description" content="Vexa: a hobby operating system for x86-64 PCs, with its own kernel, desktop and apps, and Linux programs on the side." />
+<style type="text/css">
+body {
+  margin: 0;
+  padding: 0;
+  background: #1b2a4a url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='4' height='4'><rect width='4' height='4' fill='%231b2a4a'/><rect width='2' height='2' fill='%23213459'/></svg>");
+  font-family: Verdana, Tahoma, Arial, sans-serif;
+  font-size: 12px;
+  color: #222;
+}
+a { color: #0b4fae; }
+a:hover { color: #e8590c; }
+#page {
+  width: 900px;
+  max-width: 100%;
+  margin: 18px auto;
+  background: #fff;
+  border: 1px solid #0a1630;
+  box-shadow: 0 0 18px #000;
+}
+#header {
+  height: 110px;
+  background: linear-gradient(to bottom, #6a8fd8 0%, #2c55a8 48%, #17377a 52%, #1d4796 100%);
+  border-bottom: 3px solid #f2a33a;
+  position: relative;
+  overflow: hidden;
+}
+#header h1 {
+  margin: 0;
+  position: absolute;
+  left: 24px;
+  top: 14px;
+  font-family: "Trebuchet MS", Verdana, sans-serif;
+  font-size: 54px;
+  font-style: italic;
+  letter-spacing: -2px;
+  color: #fff;
+  text-shadow: 2px 2px 0 #0a1f4d, 0 0 14px #9cc3ff;
+}
+#header h1 span { color: #ffc35c; }
+#header .tagline {
+  position: absolute;
+  left: 30px;
+  top: 78px;
+  color: #d9e6ff;
+  font-size: 11px;
+  letter-spacing: 1px;
+}
+#header .version {
+  position: absolute;
+  right: 20px;
+  top: 22px;
+  background: linear-gradient(#fff6c8, #ffd04a);
+  border: 1px solid #a8740f;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-weight: bold;
+  color: #6b3d00;
+  transform: rotate(4deg);
+  box-shadow: 2px 2px 0 rgba(0,0,0,.35);
+}
+#nav {
+  background: linear-gradient(#f4f4f4, #d6d6d6);
+  border-bottom: 1px solid #999;
+  padding: 0 10px;
+}
+#nav a {
+  display: inline-block;
+  padding: 7px 12px;
+  font-weight: bold;
+  font-size: 11px;
+  color: #333;
+  text-decoration: none;
+  border-right: 1px solid #bbb;
+  border-left: 1px solid #fff;
+}
+#nav a:hover { background: #fff; color: #0b4fae; }
+#ticker {
+  background: #fffbe6;
+  border-bottom: 1px dashed #e0c060;
+  padding: 4px 10px;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+#ticker span { display: inline-block; padding-left: 100%; animation: scroll 28s linear infinite; }
+@keyframes scroll { to { transform: translateX(-100%); } }
+#columns { display: flex; }
+#main { flex: 1; padding: 14px 18px; min-width: 0; }
+#side {
+  width: 210px;
+  background: #eef3fb;
+  border-left: 1px solid #c4d2ea;
+  padding: 14px 12px;
+  font-size: 11px;
+}
+h2 {
+  font-family: "Trebuchet MS", Verdana, sans-serif;
+  font-size: 17px;
+  color: #17377a;
+  border-bottom: 2px solid #f2a33a;
+  padding-bottom: 3px;
+  margin: 18px 0 8px;
+}
+h2:first-child { margin-top: 0; }
+.box {
+  background: #fff;
+  border: 1px solid #9fb4d8;
+  margin-bottom: 14px;
+}
+.box h3 {
+  margin: 0;
+  padding: 4px 8px;
+  font-size: 11px;
+  color: #fff;
+  background: linear-gradient(#5a82cf, #2c55a8);
+  border-bottom: 1px solid #1d3d80;
+}
+.box div { padding: 7px 8px; }
+.download {
+  display: block;
+  text-align: center;
+  margin: 4px 0 14px;
+  padding: 12px 8px;
+  border: 1px solid #2f7a12;
+  border-radius: 8px;
+  background: linear-gradient(#a9ec6a 0%, #63c22b 50%, #4aa619 51%, #6ccf32 100%);
+  color: #fff;
+  font-size: 15px;
+  font-weight: bold;
+  text-decoration: none;
+  text-shadow: 1px 1px 0 #2a5f0d;
+  box-shadow: inset 0 1px 0 #d8ffb4, 0 2px 3px rgba(0,0,0,.3);
+}
+.download small { display: block; font-size: 10px; font-weight: normal; }
+.download:hover { color: #fff; filter: brightness(1.08); }
+.shot { border: 1px solid #555; max-width: 100%; height: auto; box-shadow: 3px 3px 0 #c9d4e6; }
+.shots { display: flex; gap: 10px; flex-wrap: wrap; }
+.shots div { flex: 1; min-width: 200px; text-align: center; font-size: 10px; color: #555; }
+ul.features { padding-left: 0; list-style: none; }
+ul.features li {
+  padding: 3px 0 3px 22px;
+  background: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14'><circle cx='7' cy='7' r='6' fill='%23f2a33a' stroke='%23b06d0c'/><path d='M4 7l2 2 4-4' stroke='white' stroke-width='2' fill='none'/></svg>") no-repeat 0 5px;
+}
+table.news { width: 100%; border-collapse: collapse; }
+table.news td { padding: 4px 6px; border-bottom: 1px dotted #ccc; vertical-align: top; }
+table.news td.v { white-space: nowrap; font-weight: bold; color: #e8590c; width: 60px; }
+.new { background: #e8000d; color: #fff; font-size: 9px; font-weight: bold; padding: 1px 3px; margin-left: 4px; }
+pre {
+  background: #000;
+  color: #5cff5c;
+  font-family: "Courier New", monospace;
+  padding: 8px;
+  border: 2px inset #888;
+  overflow-x: auto;
+  font-size: 11px;
+}
+.badges { text-align: center; margin-top: 10px; }
+.badge {
+  display: inline-block;
+  width: 86px;
+  height: 29px;
+  margin: 2px;
+  border: 1px solid #000;
+  font: bold 9px/1.15 Verdana, sans-serif;
+  text-align: center;
+  overflow: hidden;
+  vertical-align: middle;
+}
+.badge b { display: block; padding-top: 4px; font-size: 10px; }
+.b1 { background: linear-gradient(#ff8a00, #c73a00); color: #fff; }
+.b2 { background: linear-gradient(#ffffff, #c8c8c8); color: #0b4fae; }
+.b3 { background: linear-gradient(#3a3a3a, #000); color: #5cff5c; }
+.b4 { background: linear-gradient(#7aa7ff, #1d4796); color: #fff; }
+.counter {
+  display: inline-block;
+  background: #000;
+  color: #ff3b3b;
+  font-family: "Courier New", monospace;
+  font-size: 14px;
+  letter-spacing: 3px;
+  padding: 2px 5px;
+  border: 2px inset #777;
+}
+#footer {
+  background: linear-gradient(#e6e6e6, #c9c9c9);
+  border-top: 1px solid #999;
+  text-align: center;
+  font-size: 10px;
+  color: #555;
+  padding: 10px;
+}
+@media (max-width: 700px) {
+  #columns { flex-direction: column; }
+  #side { width: auto; border-left: none; border-top: 1px solid #c4d2ea; }
+  #header h1 { font-size: 40px; }
+  #header .version { display: none; }
+  #page { margin: 0; }
+}
+</style>
+</head>
+<body>
+<div id="page">
+
+  <div id="header">
+    <h1>Vexa<span>OS</span></h1>
+    <div class="tagline">YOUR OWN OPERATING SYSTEM &middot; FROM THE KERNEL UP</div>
+    <div class="version">NEW! v0.29.0</div>
+  </div>
+
+  <div id="nav">
+    <a href="#about">Home</a><a href="#features">Features</a><a href="#screenshots">Screenshots</a><a href="#download">Download</a><a href="#news">News</a><a href="https://github.com/EnderiumCraft/Vexa">Source Code</a><a href="https://github.com/EnderiumCraft/Vexa/blob/main/docs/USER-GUIDE.md">Help</a>
+  </div>
+
+  <div id="ticker"><span>+++ Vexa 0.29.0 is out: Doom runs natively, and USB works on older PCs (EHCI, UHCI, OHCI) +++ Install Vexa on a disk with the new Installer +++ Intel and Realtek network cards supported +++ Free and open source +++</span></div>
+
+  <div id="columns">
+    <div id="main">
+
+      <h2 id="about">Welcome to Vexa!</h2>
+      <p><b>Vexa</b> is a hobby operating system for x86-64 PCs, written from scratch. It has its
+      own kernel, its own C library and its own desktop with apps, and it runs
+      <b>Linux programs</b> on the side: bash, Python, X11 and GTK 3. It boots from a CD image
+      with BIOS or UEFI, in a virtual machine or on a real PC, and now installs itself on a disk.</p>
+
+      <h2 id="features">Features</h2>
+      <ul class="features">
+        <li><b>A real desktop</b>: windows, a menu, search, notifications, snapping and Alt+Tab</li>
+        <li><b>Apps</b>: Terminal, Files, Text Editor, Settings, Paint, Calculator, Device Manager and more</li>
+        <li><b>Doom!</b> Chocolate Doom with Freedoom, built with the Vexa SDK <span class="new">NEW</span></li>
+        <li><b>Linux programs</b>: bash, coreutils, Python 3.12, curl with HTTPS, X11, GTK 3, OpenGL</li>
+        <li><b>Hardware</b>: SATA, NVMe, USB 1 to 3, sound, Intel and Realtek network cards <span class="new">NEW</span></li>
+        <li><b>Installs on a disk</b>, and keeps your files and settings</li>
+        <li><b>An SDK</b> with SDL 2 and SDL_mixer, to build your own apps on Linux</li>
+      </ul>
+
+      <h2 id="screenshots">Screenshots</h2>
+      <div class="shots">
+        <div><a href="desktop-screenshot.png"><img class="shot" src="desktop-screenshot.png" alt="The Vexa desktop" width="320" height="200" /></a><br />The desktop</div>
+        <div><a href="files-screenshot.png"><img class="shot" src="files-screenshot.png" alt="Files, the file manager" width="296" height="200" /></a><br />Files</div>
+      </div>
+
+      <h2 id="try">Try it in 30 seconds</h2>
+      <p>Download the ISO, then start it in QEMU:</p>
+      <pre>qemu-system-x86_64 -M q35 -m 2G -cdrom vexa.iso</pre>
+      <p>At the prompt, type <b>desktop</b>. Or install it: <b>Install Vexa</b> in the menu.</p>
+
+      <h2 id="news">Latest News</h2>
+      <table class="news">
+        <tr><td class="v">0.29.0</td><td>Doom (Chocolate Doom + Freedoom) and SDL_mixer in the SDK. USB on older PCs: EHCI, UHCI and OHCI controllers. <span class="new">NEW</span></td></tr>
+        <tr><td class="v">0.28.0</td><td>Install Vexa on a disk and start from it. Intel e1000/e1000e and Realtek network drivers.</td></tr>
+        <tr><td class="v">0.27.0</td><td>USB: xHCI, hubs, keyboards, mice, tablets and USB sticks. Device Manager.</td></tr>
+        <tr><td class="v">0.26.0</td><td>The Vexa SDK, a POSIX layer and SDL 2 for native apps.</td></tr>
+      </table>
+
+    </div>
+
+    <div id="side">
+      <a class="download" id="download" href="https://github.com/EnderiumCraft/Vexa/releases/latest">&#9660; Download Vexa<small>ISO image, BIOS &amp; UEFI</small></a>
+
+      <div class="box">
+        <h3>System Requirements</h3>
+        <div>x86-64 CPU<br />512 MB RAM (2 GB for Linux programs)<br />BIOS or UEFI<br />CD, USB stick or a VM</div>
+      </div>
+
+      <div class="box">
+        <h3>Links</h3>
+        <div>
+          &raquo; <a href="https://github.com/EnderiumCraft/Vexa">GitHub project</a><br />
+          &raquo; <a href="https://github.com/EnderiumCraft/Vexa/blob/main/docs/USER-GUIDE.md">User guide</a><br />
+          &raquo; <a href="https://github.com/EnderiumCraft/Vexa/blob/main/docs/DEVELOPER-GUIDE.md">Developer guide</a><br />
+          &raquo; <a href="https://github.com/EnderiumCraft/Vexa/blob/main/docs/SDK.md">SDK</a><br />
+          &raquo; <a href="https://github.com/EnderiumCraft/Vexa/blob/main/docs/ROADMAP.md">Roadmap</a><br />
+          &raquo; <a href="https://github.com/EnderiumCraft/Vexa/issues">Report a bug</a>
+        </div>
+      </div>
+
+      <div class="box">
+        <h3>Coming Soon</h3>
+        <div>Firefox, Wi-Fi, ext4 and more. See the roadmap!</div>
+      </div>
+
+      <div class="badges">
+        <span class="badge b1"><b>VEXA</b>POWERED</span>
+        <span class="badge b2"><b>VALID</b>XHTML 1.0</span>
+        <span class="badge b3"><b>OPEN</b>SOURCE</span>
+        <span class="badge b4"><b>GET IT</b>ON GITHUB</span>
+      </div>
+
+      <p style="text-align:center;margin-top:14px">You are visitor<br /><span class="counter">000042</span></p>
+    </div>
+  </div>
+
+  <div id="footer">
+    &copy; The Vexa project &middot; Best viewed at 1024&times;768 in any browser &middot;
+    <a href="https://github.com/EnderiumCraft/Vexa">Source on GitHub</a>
+  </div>
+
+</div>
+</body>
+</html>
