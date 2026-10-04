@@ -5,11 +5,13 @@
  * text is UTF-8. */
 #include <stdarg.h>
 #include <stddef.h>
+#include <bits/types/mbstate_t.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 typedef unsigned int wint_t;
-typedef struct {
-    unsigned int pending; /* (UTF-8 is decoded whole: nothing is kept.) */
-} mbstate_t;
 
 #define WEOF 0xffffffffu
 #ifndef WCHAR_MIN
@@ -42,5 +44,9 @@ size_t wcsrtombs(char *out, const wchar_t **s, size_t n, mbstate_t *state);
 wint_t btowc(int c);
 int wctob(wint_t c);
 int wcwidth(wchar_t c);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

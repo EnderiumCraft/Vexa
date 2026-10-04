@@ -1,6 +1,10 @@
 #ifndef LIBVEXA_ERRNO_H
 #define LIBVEXA_ERRNO_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* errno: each thread has its own. The numbers are Linux's (what ported code
  * may expect); libvexa turns the native VX_E* errors into them. */
 int *__errno_location(void);
@@ -69,5 +73,9 @@ int *__errno_location(void);
 #define EALREADY 114
 #define EINPROGRESS 115
 #define ECANCELED 125
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

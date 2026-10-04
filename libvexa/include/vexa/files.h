@@ -3,6 +3,10 @@
 
 #include <stddef.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /*
  * Whole files and folders: what a file manager (or cp -r, rm -r) does.
  * Each returns 0 or a negative VX_E* error, and stops at the first error.
@@ -22,5 +26,9 @@ unsigned long long vx_tree_size(const char *path, long *files);
 void vx_unique_name(const char *dir, const char *name, char *out, size_t size);
 /* "dir/name" (one slash). */
 void vx_join_path(char *out, size_t size, const char *dir, const char *name);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

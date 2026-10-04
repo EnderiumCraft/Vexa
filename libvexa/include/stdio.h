@@ -5,6 +5,10 @@
 #include <stddef.h>
 #include <sys/types.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef struct vx_file FILE;
 
 extern FILE *stdin, *stdout, *stderr;
@@ -97,5 +101,9 @@ void funlockfile(FILE *file);
 #define putc_unlocked fputc
 #define getchar_unlocked getchar
 #define putchar_unlocked putchar
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

@@ -1,8 +1,8 @@
 # The Vexa SDK
 
 The SDK builds native Vexa programs and apps on another machine: an x86-64 Linux
-computer with GCC (or Clang). It's libvexa (Vexa's C library, with its POSIX layer),
-a compiler wrapper, an app template, and SDL 2, so you can write apps for Vexa or port
+computer with GCC (or Clang; C++ needs Clang). It's libvexa (Vexa's C library, with its
+POSIX layer), LLVM's C++ library, compiler wrappers, an app template, and SDL 2, so you can write apps for Vexa or port
 ones written for other systems.
 
 Each release has it as `vexa-sdk-<version>.tar.gz`. From a Vexa checkout, `make sdk`
@@ -11,15 +11,16 @@ builds it in `build/sdk/vexa-sdk` (and the tarball in `build/`).
 ```
 vexa-sdk/
     bin/vexa-cc          the C compiler, set up for Vexa
+    bin/vexa-c++         the C++ compiler (Clang), with libc++
     bin/vexa-new-app     starts an app from the template
     bin/sdl2-config      SDL's flags
-    include/             libvexa's headers (and SDL2/)
-    lib/                 libvexa.so, libvexa.a, crt0.o, libSDL2.a, libSDL2_mixer.a, libSDL2_net.a,
-                         pkgconfig/, cmake/
+    include/             libvexa's headers (and SDL2/, c++/v1/)
+    lib/                 libvexa.so, libvexa.a, crt0.o, libc++.a, libc++abi.a, libSDL2.a,
+                         libSDL2_mixer.a, libSDL2_net.a, pkgconfig/, cmake/
     cmake/vexa.cmake     a CMake toolchain file
     template/            the app template
     examples/sdl-demo/   an SDL program as an app
-    licenses/            musl's (libm), SDL's, SDL_mixer's and SDL_net's
+    licenses/            musl's (libm), libc++'s, SDL's, SDL_mixer's and SDL_net's
 ```
 
 ## A first app
@@ -69,7 +70,7 @@ vexa-cc hello.o -o hello          # a program for Vexa
 vexa-cc -static hello.o -o hello  # with libvexa linked in
 ```
 
-- It's C (C11 and GNU extensions); there's no C++ library.
+- It's C (C11 and GNU extensions); for C++, see vexa-c++ below.
 - `-lm`, `-lpthread`, `-lrt`, `-ldl` and `-lc` are accepted, and are empty: it's all in
   libvexa.
 - It defines `__vexa__` and `__unix__`, and not `__linux__`.
@@ -77,7 +78,27 @@ vexa-cc -static hello.o -o hello  # with libvexa linked in
   in statically (`.a` archives built with `vexa-cc` and `ar`).
 - `VEXA_HOST_CC=clang` uses Clang instead of `cc`.
 
-For a Makefile project, `make CC=/path/to/vexa-sdk/bin/vexa-cc` usually does. A
+## vexa-c++
+
+`vexa-c++` is Clang's `clang++` set up the same way, with LLVM's libc++ and libc++abi
+(built for libvexa, and linked in statically):
+
+```sh
+vexa-c++ -O2 -std=c++17 game.cpp -o game
+```
+
+- The standard library is there: containers, strings, algorithms, smart pointers,
+  `<functional>`, `<optional>`, `<variant>`, `<thread>`, `<mutex>`,
+  `<condition_variable>`, `<atomic>`, `<chrono>`, virtual functions and RTTI, and
+  static objects (constructed before `main`, destroyed after it).
+- There are no exceptions: it builds with `-fno-exceptions`, and what would throw
+  (`new` out of memory, `at()` out of range) aborts the program instead.
+- There are no locales or iostreams (`<iostream>`, `<fstream>`, `<sstream>`): use
+  `<cstdio>`, or `std::to_string` and friends.
+- It needs Clang (libc++'s headers do); `VEXA_HOST_CXX` picks another `clang++`.
+
+For a Makefile project, `make CC=/path/to/vexa-sdk/bin/vexa-cc` usually does
+(`CXX=/path/to/vexa-sdk/bin/vexa-c++` for C++). A
 configure script may need to be told it's cross-compiling, and that the program can't
 run here, in its own way. With CMake:
 

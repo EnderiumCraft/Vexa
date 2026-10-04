@@ -3,6 +3,10 @@
 
 #include <stdint.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* The console's bitmap font (Spleen 8x16), for drawing text: printable ASCII
  * 0x20-0x7e, one byte per row, most significant bit on the left. */
 #define FONT_WIDTH 8
@@ -11,5 +15,9 @@
 #define FONT_GLYPH_COUNT 95
 
 extern const uint8_t font_glyphs[FONT_GLYPH_COUNT][FONT_HEIGHT];
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

@@ -18,10 +18,11 @@ src="$work/$(basename "$tarball" .tar.xz)"
 rm -rf "$src" "$work/build"
 # Only the parts the runtimes' build needs.
 tar -xJf "$tarball" -C "$work" --wildcards \
-    '*/runtimes/*' '*/libcxx/*' '*/libcxxabi/*' '*/libunwind/*' '*/cmake/*' \
-    '*/llvm/cmake/*' '*/llvm/utils/llvm-lit/*' '*/llvm/utils/lit/*'
+    '*/runtimes/*' '*/libcxx/*' '*/libcxxabi/*' '*/libunwind/*' '*/cmake/*' '*/llvm/utils/*'
 
 export VEXA_CXX_BOOTSTRAP=1
+# Clang: libc++'s headers then skip what the C library lacks (using_if_exists).
+export VEXA_HOST_CC=clang VEXA_HOST_CXX=clang++
 cmake -G Ninja -S "$src/runtimes" -B "$work/build" \
     -DCMAKE_TOOLCHAIN_FILE="$sdk/cmake/vexa.cmake" \
     -DCMAKE_CXX_COMPILER="$sdk/bin/vexa-c++" -DCMAKE_CXX_COMPILER_WORKS=1 \

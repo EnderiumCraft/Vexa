@@ -1,15 +1,20 @@
 /* Program entry point, linked into every program (also those that use
  * libvexa.so). The kernel, or the dynamic loader, starts us with rsp pointing
  * at argc, then argv[], NULL, envp[], NULL (the System V layout).
- * __libvexa_start(stack, main) does the rest in C. */
+ * __libvexa_start_init(stack, main, the program's .init_array and
+ * .fini_array) does the rest in C. */
 .text
 .globl _start
 _start:
     xorl %ebp, %ebp
     movq %rsp, %rdi
     leaq main(%rip), %rsi
+    leaq __init_array_start(%rip), %rdx
+    leaq __init_array_end(%rip), %rcx
+    leaq __fini_array_start(%rip), %r8
+    leaq __fini_array_end(%rip), %r9
     andq $-16, %rsp
-    call __libvexa_start
+    call __libvexa_start_init
     ud2
 
 /* C++: this module's handle, for __cxa_atexit (normally in crtbegin.o). */

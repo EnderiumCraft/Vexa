@@ -5,6 +5,10 @@
  * vx_net_info. */
 #include <sys/socket.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define IFNAMSIZ 16
 #define IF_NAMESIZE IFNAMSIZ
 
@@ -42,5 +46,9 @@ struct ifconf {
 
 unsigned int if_nametoindex(const char *name);
 char *if_indextoname(unsigned int index, char *name);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

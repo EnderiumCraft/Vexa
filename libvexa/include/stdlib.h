@@ -3,6 +3,10 @@
 
 #include <stddef.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define EXIT_SUCCESS 0
 #define EXIT_FAILURE 1
 
@@ -74,5 +78,9 @@ int mbtowc(wchar_t *out, const char *s, size_t n);
 int wctomb(char *out, wchar_t c);
 size_t mbstowcs(wchar_t *out, const char *s, size_t n);
 size_t wcstombs(char *out, const wchar_t *s, size_t n);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

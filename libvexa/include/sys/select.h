@@ -4,6 +4,10 @@
 #include <sys/time.h>
 #include <sys/types.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define FD_SETSIZE 1024
 
 typedef struct {
@@ -18,5 +22,9 @@ typedef struct {
 #define FD_ISSET(fd, set) (((set)->bits[__FD_WORD(fd)] & __FD_BIT(fd)) != 0)
 
 int select(int count, fd_set *read, fd_set *write, fd_set *except, struct timeval *timeout);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

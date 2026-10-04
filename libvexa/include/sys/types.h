@@ -4,6 +4,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef long ssize_t;
 typedef long off_t;
 typedef long off64_t;
@@ -27,5 +31,9 @@ typedef unsigned char u_char;
 typedef unsigned short u_short;
 typedef unsigned long u_long;
 typedef char *caddr_t;
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

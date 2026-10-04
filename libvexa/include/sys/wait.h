@@ -3,6 +3,10 @@
 
 #include <sys/types.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define WNOHANG 1
 #define WEXITSTATUS(s) (((s)&0xff00) >> 8)
 #define WIFEXITED(s) (((s)&0x7f) == 0)
@@ -12,5 +16,9 @@
 /* Children started with posix_spawn (or system). */
 pid_t waitpid(pid_t pid, int *status, int options);
 pid_t wait(int *status);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

@@ -4,6 +4,10 @@
 #include <stdint.h>
 #include <vexa/syscall.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* Networking helpers on top of the socket system calls. IPv4 addresses are
  * in network byte order, as in struct vx_inet_address; IPv6 ones are 16
  * bytes, as in struct vx_inet6_address. */
@@ -35,5 +39,9 @@ long vx_resolve6(const char *name, uint8_t address[16]);
  * an IPv4 address, else by IPv6; returns the socket handle or a negative
  * VX_E* error. */
 int vx_connect_to(const char *host, uint16_t port);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

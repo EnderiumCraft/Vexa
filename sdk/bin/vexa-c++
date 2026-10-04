@@ -1,5 +1,6 @@
 #!/bin/sh
-# vexa-c++: the build machine's g++ (or clang++, with VEXA_HOST_CXX=clang++),
+# vexa-c++: the build machine's clang++ (libc++'s headers need it: they skip
+# what libvexa lacks; VEXA_HOST_CXX picks another),
 # set up like vexa-cc for C++ programs and libraries, with LLVM's libc++ and
 # libc++abi built for Vexa (in the SDK's include/c++/v1 and lib/).
 #
@@ -9,7 +10,7 @@
 # <atomic>...) is there.
 set -e
 SDK=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-HOST_CXX=${VEXA_HOST_CXX:-g++}
+HOST_CXX=${VEXA_HOST_CXX:-clang++}
 
 link=yes
 static=no
@@ -30,7 +31,7 @@ if [ -z "${VEXA_CXX_BOOTSTRAP:-}" ]; then
     CXX_INCLUDE="-isystem $SDK/include/c++/v1"
 fi
 # shellcheck disable=SC2086
-set -- -nostdinc++ $CXX_INCLUDE -fno-exceptions -ffreestanding -fno-stack-protector -fPIC \
+set -- -nostdinc++ $CXX_INCLUDE -fno-exceptions -fno-stack-protector -fPIC \
     -fno-asynchronous-unwind-tables -fno-plt -m64 -march=x86-64 -D__vexa__=1 -D_REENTRANT \
     -U__linux__ -U__linux -Ulinux -U__gnu_linux__ \
     -nostdinc -isystem "$SDK/include" -isystem "$("$HOST_CXX" -print-file-name=include)" "$@"

@@ -6,6 +6,10 @@
 #include <stddef.h>
 #include <sys/types.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define STDIN_FILENO 0
 #define STDOUT_FILENO 1
 #define STDERR_FILENO 2
@@ -76,5 +80,9 @@ int execvp(const char *file, char *const argv[]);
 extern char *optarg;
 extern int optind, opterr, optopt;
 int getopt(int argc, char *const argv[], const char *options);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

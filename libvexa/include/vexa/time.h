@@ -3,6 +3,10 @@
 
 #include <stdbool.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /*
  * Dates and time zones. Vexa's clock (vx_time) is UTC; a zone gives the
  * local time: a city, its offset from UTC, and when it has summer time
@@ -40,5 +44,9 @@ void vx_local_now(struct vx_date *date);
 
 extern const char *const vx_month_names[12];   /* "January"... */
 extern const char *const vx_weekday_names[7];  /* "Sunday"... */
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

@@ -3,7 +3,11 @@
 
 #include <stddef.h>
 
-void *memcpy(void *restrict dest, const void *restrict src, size_t n);
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+void *memcpy(void *__restrict dest, const void *__restrict src, size_t n);
 void *memmove(void *dest, const void *src, size_t n);
 void *memset(void *s, int c, size_t n);
 int memcmp(const void *s1, const void *s2, size_t n);
@@ -42,5 +46,9 @@ char *strcasestr(const char *haystack, const char *needle);
 char *strsignal(int signal);
 int strcasecmp(const char *a, const char *b);
 int strncasecmp(const char *a, const char *b, size_t n);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

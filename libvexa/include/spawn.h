@@ -7,6 +7,10 @@
 #include <signal.h>
 #include <sys/types.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define POSIX_SPAWN_RESETIDS 0x01
 #define POSIX_SPAWN_SETPGROUP 0x02
 #define POSIX_SPAWN_SETSIGDEF 0x04
@@ -49,5 +53,9 @@ int posix_spawnattr_setsigmask(posix_spawnattr_t *attributes, const sigset_t *ma
 int posix_spawnattr_getsigmask(const posix_spawnattr_t *attributes, sigset_t *mask);
 int posix_spawnattr_setsigdefault(posix_spawnattr_t *attributes, const sigset_t *defaults);
 int posix_spawnattr_getsigdefault(const posix_spawnattr_t *attributes, sigset_t *defaults);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

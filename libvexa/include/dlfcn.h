@@ -1,6 +1,10 @@
 #ifndef LIBVEXA_DLFCN_H
 #define LIBVEXA_DLFCN_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* Loading shared libraries while a program runs (through Vexa's loader,
  * /lib/vexa-ld.so; not in statically linked programs). Every symbol is bound
  * at once and every library is visible to the others, whatever the flags. */
@@ -18,5 +22,9 @@ void *dlopen(const char *file, int flags);
 void *dlsym(void *handle, const char *name);
 int dlclose(void *handle);
 char *dlerror(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

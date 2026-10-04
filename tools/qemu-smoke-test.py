@@ -134,6 +134,9 @@ TYPED_COMMANDS = ([
     ("thread-test", "thread-test: passed", 60),
     ("thread-test exit", "exiting with threads still running", 30),
     ("posix-test -v", "posix-test: passed", 180),  # (-v: which part it was on, if it hangs)
+    # C++ (libc++ on libvexa, built with the SDK's vexa-c++); its static
+    # object's destructor runs after main.
+    ("cxx-test", "cxx-test: passed\r\ncxx-test: static destructor ran", 60),
     ("sys mem", "heap ", 10),
     ("sys threads", "idle", 10),
     ("sys memtest", "memtest: passed", 180),

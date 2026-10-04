@@ -90,7 +90,7 @@ runs X programs such as `xterm` in windows of their own on it. The kernel:
 - has its own system call interface and C library, `libvexa`, with much of POSIX
   (files, directories, pthreads, time, `mmap`, `poll`, the whole of `stdio` and musl's
   libm) for programs ported to it
-- has an SDK for building native programs and apps on Linux: `vexa-cc`, an app template
+- has an SDK for building native programs and apps on Linux: `vexa-cc` and `vexa-c++` (with libc++), an app template
   (`vexa-new-app`), a CMake toolchain file, and SDL 2 with Vexa drivers (each SDL
   window a desktop window, sound on the HD Audio device), and SDL_mixer; each release
   carries it

@@ -3,6 +3,10 @@
 
 #include <time.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 struct sched_param {
     int sched_priority;
 };
@@ -13,5 +17,9 @@ struct sched_param {
 int sched_yield(void);
 int sched_get_priority_min(int policy);
 int sched_get_priority_max(int policy);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

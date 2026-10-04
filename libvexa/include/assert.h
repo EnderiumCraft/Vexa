@@ -3,10 +3,13 @@
 #ifdef NDEBUG
 #define assert(x) ((void)0)
 #else
+#ifdef __cplusplus
+extern "C"
+#endif
 __attribute__((noreturn)) void __assert_fail(const char *expression, const char *file, int line,
                                              const char *function);
 #define assert(x) ((x) ? (void)0 : __assert_fail(#x, __FILE__, __LINE__, __func__))
 #endif
-#ifndef static_assert
+#if !defined(static_assert) && !defined(__cplusplus)
 #define static_assert _Static_assert
 #endif

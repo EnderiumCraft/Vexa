@@ -4,6 +4,10 @@
 #include <stddef.h>
 #include <sys/types.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define CLOCKS_PER_SEC 1000000L
 #define CLOCK_REALTIME 0
 #define CLOCK_MONOTONIC 1
@@ -48,5 +52,9 @@ void tzset(void);
 extern char *tzname[2];
 extern long timezone;
 extern int daylight;
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

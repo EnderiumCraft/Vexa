@@ -3,6 +3,10 @@
 
 #include <time.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef struct {
     volatile unsigned value;
     volatile unsigned waiters;
@@ -15,5 +19,9 @@ int sem_trywait(sem_t *sem);
 int sem_timedwait(sem_t *sem, const struct timespec *deadline);
 int sem_post(sem_t *sem);
 int sem_getvalue(sem_t *sem, int *value);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

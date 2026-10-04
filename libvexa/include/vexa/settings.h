@@ -4,6 +4,10 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /*
  * Settings: "key=value" files in /etc (desktop.conf, apps.conf...).
  *
@@ -57,5 +61,9 @@ int vx_settings_restore(void);
  * itself. (A simple hash: it keeps the password from being read in the
  * file, not from a determined attacker.) */
 void vx_password_hash(const char *password, char out[17]);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

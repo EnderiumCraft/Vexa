@@ -4,6 +4,10 @@
 /* Anonymous memory (and shared mappings of files and devices). */
 #include <sys/types.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define PROT_NONE 0
 #define PROT_READ 1
 #define PROT_WRITE 2
@@ -18,5 +22,9 @@
 void *mmap(void *address, size_t size, int protection, int flags, int fd, off_t offset);
 int munmap(void *address, size_t size);
 int mprotect(void *address, size_t size, int protection);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

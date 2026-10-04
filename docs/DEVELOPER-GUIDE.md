@@ -162,7 +162,7 @@ kernel/               the kernel (see ARCHITECTURE.md)
 abi/vexa/abi.h        system call numbers, structures and errors: kernel and libvexa share it
 libvexa/              Vexa's C library (libvexa.so) and dynamic loader (ld/)
 kernel/src/dev/usb/   USB: the xHCI, EHCI, UHCI and OHCI drivers, the core, hubs, HID and mass storage
-sdk/                  the SDK's own files: vexa-cc, vexa-new-app, the app template,
+sdk/                  the SDK's own files: vexa-cc, vexa-c++, vexa-new-app, the app template,
                       the CMake toolchain file, SDL's configuration and Vexa drivers
                       (sdl2/), and the SDL demo (examples/)
 userland/<name>/      Vexa's programs, one directory each, built into /bin
@@ -186,7 +186,7 @@ files are handles from `vx_open`, programs start with `vx_spawn`, and errors are
 negative `VX_E*` numbers. Vexa's programs use those; ported ones can stay with POSIX.
 
 The programs here are built by the tree's Makefile. To build programs and apps outside
-it, on any x86-64 Linux machine, use the [SDK](SDK.md) (`make sdk`): `vexa-cc`, an app
+it, on any x86-64 Linux machine, use the [SDK](SDK.md) (`make sdk`): `vexa-cc`, `vexa-c++`, an app
 template, and SDL 2.
 
 To add a program, make a directory in `userland/` with its C files:

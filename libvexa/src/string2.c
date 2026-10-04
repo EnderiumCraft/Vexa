@@ -200,3 +200,7 @@ int ffs(int value) {
 void bzero(void *p, size_t n) {
     memset(p, 0, n);
 }
+
+int bcmp(const void *a, const void *b, size_t n) {
+    return memcmp(a, b, n);
+}

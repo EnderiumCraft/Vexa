@@ -1,6 +1,10 @@
 #ifndef LIBVEXA_LIMITS_H
 #define LIBVEXA_LIMITS_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include_next <limits.h> /* The compiler's: CHAR_BIT, INT_MAX... */
 
 #define PATH_MAX 1024
@@ -14,5 +18,9 @@
 #define PTHREAD_KEYS_MAX 128
 #define _POSIX_PATH_MAX 256
 #define NL_ARGMAX 9
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

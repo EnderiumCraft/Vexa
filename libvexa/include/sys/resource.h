@@ -3,6 +3,10 @@
 
 #include <sys/types.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* Priorities: nice values, -20 (first) to 19 (last). A process group or a
  * user means this process (there's one user). */
 #define PRIO_PROCESS 0
@@ -12,5 +16,9 @@
 
 int getpriority(int which, id_t who);
 int setpriority(int which, id_t who, int value);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

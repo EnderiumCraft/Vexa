@@ -5,6 +5,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /*
  * Drawing, and windows on the Vexa desktop.
  *
@@ -273,5 +277,9 @@ bool vx_save_dialog(const char *title, const char *folder, const char *name, cha
 
 /* Writes a surface as a PNG file: 0, or a negative error. */
 int vx_image_save_png(const char *path, const struct vx_surface *surface);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

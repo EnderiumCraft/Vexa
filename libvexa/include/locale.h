@@ -1,6 +1,10 @@
 #ifndef LIBVEXA_LOCALE_H
 #define LIBVEXA_LOCALE_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* One locale: "C" (with UTF-8 text). */
 #define LC_CTYPE 0
 #define LC_NUMERIC 1
@@ -20,5 +24,9 @@ struct lconv {
 
 char *setlocale(int category, const char *locale);
 struct lconv *localeconv(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

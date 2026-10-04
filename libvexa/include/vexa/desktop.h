@@ -3,6 +3,10 @@
 
 #include <stdint.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /*
  * The desktop protocol: what programs and the desktop (the compositor) say to
  * each other over the local socket DESKTOP_SOCKET, as fixed-size messages.
@@ -112,5 +116,9 @@ static const struct desktop_wallpaper desktop_wallpapers[] = {
     {"graphite", "Graphite", 0x3a3d45, 0x111216},
 };
 #define DESKTOP_WALLPAPER_COUNT (int)(sizeof(desktop_wallpapers) / sizeof(desktop_wallpapers[0]))
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

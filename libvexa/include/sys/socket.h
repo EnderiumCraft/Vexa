@@ -6,6 +6,10 @@
 #include <stddef.h>
 #include <sys/types.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef unsigned int socklen_t;
 typedef unsigned short sa_family_t;
 
@@ -108,5 +112,9 @@ int getsockname(int fd, struct sockaddr *address, socklen_t *length);
 int getpeername(int fd, struct sockaddr *address, socklen_t *length);
 int setsockopt(int fd, int level, int name, const void *value, socklen_t length);
 int getsockopt(int fd, int level, int name, void *value, socklen_t *length);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

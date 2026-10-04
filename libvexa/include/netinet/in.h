@@ -4,6 +4,10 @@
 #include <stdint.h>
 #include <sys/socket.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef uint32_t in_addr_t;
 typedef uint16_t in_port_t;
 
@@ -93,5 +97,9 @@ static inline uint16_t htons(uint16_t v) { return __builtin_bswap16(v); }
 static inline uint16_t ntohs(uint16_t v) { return __builtin_bswap16(v); }
 static inline uint32_t htonl(uint32_t v) { return __builtin_bswap32(v); }
 static inline uint32_t ntohl(uint32_t v) { return __builtin_bswap32(v); }
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

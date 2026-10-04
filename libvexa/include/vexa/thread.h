@@ -1,6 +1,10 @@
 #ifndef VEXA_THREAD_H
 #define VEXA_THREAD_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* Threads and locks for Vexa programs.
  *
  *     struct vx_thread *t = vx_thread_create(work, arg);
@@ -25,5 +29,9 @@ struct vx_mutex {
 
 void vx_mutex_lock(struct vx_mutex *mutex);
 void vx_mutex_unlock(struct vx_mutex *mutex);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

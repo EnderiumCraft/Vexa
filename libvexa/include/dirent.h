@@ -3,6 +3,10 @@
 
 #include <sys/types.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define DT_UNKNOWN 0
 #define DT_FIFO 1
 #define DT_CHR 2
@@ -25,5 +29,9 @@ struct dirent *readdir(DIR *dir);
 int closedir(DIR *dir);
 void rewinddir(DIR *dir);
 int dirfd(DIR *dir);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

@@ -1,6 +1,10 @@
 #ifndef LIBVEXA_CTYPE_H
 #define LIBVEXA_CTYPE_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 static inline int isdigit(int c) { return c >= '0' && c <= '9'; }
 static inline int islower(int c) { return c >= 'a' && c <= 'z'; }
 static inline int isupper(int c) { return c >= 'A' && c <= 'Z'; }
@@ -17,5 +21,9 @@ static inline int isascii(int c) { return c >= 0 && c < 0x80; }
 static inline int toascii(int c) { return c & 0x7f; }
 static inline int tolower(int c) { return isupper(c) ? c + 32 : c; }
 static inline int toupper(int c) { return islower(c) ? c - 32 : c; }
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

@@ -5,6 +5,10 @@
 #include <netinet/in.h>
 #include <sys/socket.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 struct hostent {
     char *h_name;
     char **h_aliases;
@@ -71,5 +75,9 @@ void freeaddrinfo(struct addrinfo *list);
 const char *gai_strerror(int error);
 int getnameinfo(const struct sockaddr *address, socklen_t length, char *host, socklen_t host_size,
                 char *service, socklen_t service_size, int flags);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

@@ -6,6 +6,10 @@
  * (raise() calls it, though). */
 #include <sys/types.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef int sig_atomic_t;
 typedef void (*sighandler_t)(int);
 typedef unsigned long sigset_t;
@@ -70,5 +74,9 @@ int sigaddset(sigset_t *set, int signal);
 int sigdelset(sigset_t *set, int signal);
 int sigismember(const sigset_t *set, int signal);
 int sigprocmask(int how, const sigset_t *set, sigset_t *old);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

@@ -3,6 +3,10 @@
 
 #include <stdint.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define PRId8 "d"
 #define PRId16 "d"
 #define PRId32 "d"
@@ -39,5 +43,9 @@
 
 intmax_t strtoimax(const char *text, char **end, int base);
 uintmax_t strtoumax(const char *text, char **end, int base);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

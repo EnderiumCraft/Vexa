@@ -5,6 +5,10 @@
 #include <stdint.h>
 #include <vexa/abi.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* Native Vexa system calls. Each returns a negative VX_E* value on error. */
 
 __attribute__((noreturn)) void vx_exit(int code);
@@ -115,5 +119,9 @@ long vx_kernel_command(const char *command);
 
 /* A short description of a (negative) VX_E* error. */
 const char *vx_strerror(long error);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

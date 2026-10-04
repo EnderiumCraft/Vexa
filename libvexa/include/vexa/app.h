@@ -3,6 +3,10 @@
 
 #include <stdbool.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /*
  * Apps: bundles, as on macOS. An app is a folder named "Name.vxapp",
  * normally in /apps:
@@ -60,5 +64,9 @@ int vx_app_for_file(const char *path, struct vx_app *app);
 /* Starts an app, with a file to open (or NULL): a process handle, or a
  * negative error. */
 int vx_app_open(const struct vx_app *app, const char *file);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif
