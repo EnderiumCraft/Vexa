@@ -426,12 +426,12 @@ RTL8111/8168, with descriptor rings). Each registers with `net_register` under t
 
 **Scheduling** (`core/sched.c`). Each CPU has a run queue with three priority bands,
 from the thread's nice value (its process's, -20 to 19: below 0 high, 0 normal, above
-0 low; kernel threads are high). A CPU runs the first thread of its highest non-empty
+0 low; kernel threads are normal). A CPU runs the first thread of its highest non-empty
 band, but one that has waited over 100 ms goes first whatever its band, so nothing
 starves; a CPU with nothing to do takes work from the busiest one. A woken thread goes
 back to the CPU it ran on last, or to an idle CPU (woken by an IPI) if that one is
 busy, and it preempts a lower-band thread at once. Within a band it's round robin with
-10 ms slices. One lock still covers the queues, wait queues and sleepers: it's held
+10 ms slices; a thread that yields (polling for something) goes behind every band. One lock still covers the queues, wait queues and sleepers: it's held
 across a context switch, so no CPU picks up a thread whose stack is still in use.
 
 A process has a list of threads, all sharing its address space and handle table. Each

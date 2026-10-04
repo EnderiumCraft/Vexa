@@ -41,7 +41,11 @@ void usb_queue_work(void (*fn)(void *arg), void *arg) {
         queue[queue_head] = (struct work){fn, arg};
         queue_head = next;
     } else {
-        kprintf("[usb] too much to do: a change was dropped\n");
+        static uint64_t complained;
+        if (timer_ms() - complained > 5000 || !complained) {
+            complained = timer_ms();
+            kprintf("[usb] too much to do: a change was dropped\n");
+        }
     }
     spin_unlock_irqrestore(&queue_lock, flags);
     wait_queue_wake_all(&queue_waiters);
@@ -434,6 +438,9 @@ static void root_port_work(void *arg) {
     struct usb_hc *hc = change->hc;
     int port = change->port;
     kfree(change);
+    if (port >= 1 && port <= 64) {
+        hc->port_queued[port - 1] = false; /* (A change from now on queues another look.) */
+    }
     bool connected = hc->ops->port_connected(hc, port);
     struct usb_device *existing = hc->root[port - 1];
     if (existing && !connected) {
@@ -448,6 +455,12 @@ static void root_port_work(void *arg) {
 }
 
 void usb_port_changed(struct usb_hc *hc, int port) {
+    /* One look at a port at a time: a port that keeps changing (a device that
+     * keeps dropping off, say) doesn't fill the queue. */
+    if (port >= 1 && port <= 64 &&
+        __atomic_exchange_n(&hc->port_queued[port - 1], true, __ATOMIC_ACQ_REL)) {
+        return;
+    }
     struct port_change *change = kzalloc(sizeof(*change));
     if (change) {
         change->hc = hc;

@@ -132,6 +132,7 @@ struct usb_device {
     struct device *node;
     bool gone;                /* Unplugged: transfers fail. */
     struct usb_device *children[16]; /* Hubs: what's on each port (index port - 1). */
+    volatile bool check_queued;       /* Hubs: a look at the ports is already waiting. */
 };
 
 struct usb_driver {
@@ -198,6 +199,7 @@ struct usb_hc {
     int ports;
     struct device *node;
     struct usb_device *root[64]; /* What's on each root port (index port - 1). */
+    volatile bool port_queued[64]; /* A check of that port is already waiting. */
 };
 
 /* A root port changed (connected or disconnected): checked from the "usb" thread. */

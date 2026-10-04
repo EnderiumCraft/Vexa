@@ -80,6 +80,13 @@ static void parse_report_descriptor(struct hid *hid, const uint8_t *p, int lengt
     int usage_count = 0;
     uint32_t usage_min = 0, usage_max = 0;
     uint16_t offsets[256] = {0}; /* Bits used so far, per report ID. */
+    /* Push and Pop: a stack of the global items. */
+    struct globals {
+        uint32_t usage_page, report_size, report_count;
+        int32_t logical_min, logical_max;
+        uint8_t report_id;
+    } stack[4];
+    int depth = 0;
     const uint8_t *end = p + length;
     while (p < end) {
         uint8_t prefix = *p++;
@@ -153,6 +160,23 @@ static void parse_report_descriptor(struct hid *hid, const uint8_t *p, int lengt
         case 0xb0: /* Feature: (their bits are in other reports) */
             usage_count = 0;
             usage_min = usage_max = 0;
+            break;
+        case 0xa4: /* Push */
+            if (depth < 4) {
+                stack[depth++] = (struct globals){usage_page, report_size, report_count,
+                                                  logical_min, logical_max, report_id};
+            }
+            break;
+        case 0xb4: /* Pop */
+            if (depth > 0) {
+                struct globals *g = &stack[--depth];
+                usage_page = g->usage_page;
+                report_size = g->report_size;
+                report_count = g->report_count;
+                logical_min = g->logical_min;
+                logical_max = g->logical_max;
+                report_id = g->report_id;
+            }
             break;
         case 0xa0: /* Collection */
         case 0xc0: /* End Collection */
@@ -319,6 +343,12 @@ static bool hid_probe(struct usb_interface *interface) {
     if (keyboard) {
         usb_control(usb, request, REQ_SET_PROTOCOL, 0, interface->number, NULL, 0); /* Boot. */
     } else {
+        /* The report protocol, which its report descriptor describes: the
+         * firmware may have left a mouse in the boot protocol (3 or 4 bytes,
+         * another layout) for its own use. */
+        if (interface->subclass == 1) {
+            usb_control(usb, request, REQ_SET_PROTOCOL, 1, interface->number, NULL, 0);
+        }
         uint16_t length = report_descriptor_length(interface);
         if (length == 0 || length > 1024) {
             kfree(hid);

@@ -22,7 +22,8 @@
  * than STARVE_MS goes first whatever its band; a CPU with nothing to run
  * takes work from the busiest other one. A higher-band thread becoming ready
  * preempts a lower-band one at once. Within a band, a thread runs until it
- * blocks, sleeps, yields, or uses up its time slice. Each CPU has an idle
+ * blocks, sleeps, yields (which puts it behind every band), or uses up its
+ * time slice. Kernel threads are in the normal band. Each CPU has an idle
  * thread (the code that booted it) for when nothing else is ready.
  *
  * One lock, sched_lock, still covers the run queues, wait queues and
@@ -36,7 +37,7 @@
 #define TIME_SLICE_MS 10
 #define BANDS 3        /* High, normal, low. */
 #define STARVE_MS 100  /* Waited this long: runs next, whatever its band. */
-#define KERNEL_NICE -5 /* Kernel threads: in the high band (short bursts of work). */
+#define KERNEL_NICE 0 /* Kernel threads: the normal band, like programs. */
 #define KERNEL_STACK_SIZE (64 * 1024)
 #define STACK_CACHE_SIZE 64
 
@@ -92,7 +93,8 @@ static bool cpu_idle(const struct cpu *cpu) {
 
 static void push(uint32_t cpu, struct thread *thread) {
     struct run_queue *q = &queues[cpu];
-    int band = band_of(thread);
+    /* A thread that yields goes behind everyone, whatever its band. */
+    int band = thread->yielding ? BANDS - 1 : band_of(thread);
     thread->next = NULL;
     thread->ready_since = timer_ms();
     if (q->tail[band]) {
@@ -344,15 +346,23 @@ struct thread *thread_current(void) {
     return running ? cpu_current()->current : NULL;
 }
 
-void thread_yield(void) {
+/* `voluntary`: the thread asked (it's polling for something): it goes
+ * behind everyone. Otherwise it was preempted, and keeps its band. */
+static void yield(bool voluntary) {
     uint64_t flags = spin_lock_irqsave(&sched_lock);
     struct cpu *cpu = cpu_current();
     struct thread *thread = cpu->current;
     if (thread != cpu->idle && thread->state == THREAD_RUNNING) {
+        thread->yielding = voluntary;
         make_ready(thread);
+        thread->yielding = false;
     }
     schedule();
     spin_unlock_irqrestore(&sched_lock, flags);
+}
+
+void thread_yield(void) {
+    yield(true);
 }
 
 static int sleep_common(uint64_t ms, bool interruptible) {
@@ -725,7 +735,7 @@ void sched_preempt_if_needed(void) {
     struct cpu *cpu = cpu_current();
     if (cpu->need_resched && cpu->current) {
         cpu->need_resched = false;
-        thread_yield();
+        yield(false);
     }
 }
 

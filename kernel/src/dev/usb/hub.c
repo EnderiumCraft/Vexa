@@ -31,6 +31,12 @@
 #define STATUS_HIGH_SPEED (1U << 10)
 #define CHANGE_RESET (1U << 4)
 
+/* The hub's own changes (GET_STATUS to the hub): cleared with CLEAR_FEATURE
+ * to the hub, or it keeps reporting them. */
+#define HUB_REQUEST_DEVICE (USB_TYPE_CLASS | USB_RECIP_DEVICE)
+#define C_HUB_LOCAL_POWER 0
+#define C_HUB_OVER_CURRENT 1
+
 static bool port_status(struct usb_device *hub, int port, uint16_t *status, uint16_t *change) {
     uint8_t data[4];
     if (usb_control(hub, USB_DIR_IN | HUB_REQUEST, USB_REQ_GET_STATUS, 0, (uint16_t)port, data, 4) <
@@ -99,6 +105,21 @@ static void check_ports(void *arg) {
     if (hub->gone) {
         return;
     }
+    hub->check_queued = false; /* (A report from now on queues another look.) */
+    uint8_t hub_status[4];
+    if (usb_control(hub, USB_DIR_IN | HUB_REQUEST_DEVICE, USB_REQ_GET_STATUS, 0, 0, hub_status,
+                    4) == 4) {
+        uint16_t hub_change = (uint16_t)(hub_status[2] | hub_status[3] << 8);
+        if (hub_change & 1) {
+            usb_control(hub, USB_DIR_OUT | HUB_REQUEST_DEVICE, USB_REQ_CLEAR_FEATURE,
+                        C_HUB_LOCAL_POWER, 0, NULL, 0);
+        }
+        if (hub_change & 2) {
+            kprintf("[usb-hub] over-current on a hub\n");
+            usb_control(hub, USB_DIR_OUT | HUB_REQUEST_DEVICE, USB_REQ_CLEAR_FEATURE,
+                        C_HUB_OVER_CURRENT, 0, NULL, 0);
+        }
+    }
     for (int port = 1; port <= hub->hub_ports; port++) {
         uint16_t status, change;
         if (!port_status(hub, port, &status, &change)) {
@@ -122,7 +143,9 @@ static void check_ports(void *arg) {
 }
 
 void usb_hub_changed(struct usb_device *hub) {
-    usb_queue_work(check_ports, hub);
+    if (!__atomic_exchange_n(&hub->check_queued, true, __ATOMIC_ACQ_REL)) {
+        usb_queue_work(check_ports, hub);
+    }
 }
 
 static void status_report(void *arg, const uint8_t *data, int length) {

@@ -28,6 +28,7 @@ struct thread {
     uint32_t cpu;            /* CPU it last ran on (MAX_CPUS: none yet). */
     int8_t nice;             /* -20 (first) to 19 (last); its process's. */
     uint64_t ready_since;    /* timer_ms() when it was queued. */
+    bool yielding;           /* Being queued by thread_yield: behind everyone. */
     struct thread *next;     /* Run queue, sleep list or wait queue link. */
     struct thread *all_next; /* List of every thread. */
     struct wait_queue *waiting_on; /* While THREAD_BLOCKED. */
