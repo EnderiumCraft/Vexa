@@ -60,14 +60,14 @@ int socket_create(int family, int type, int protocol, struct socket **out) {
     if (type & ~(VX_SOCK_TYPE_MASK | VX_SOCK_NONBLOCK | VX_SOCK_CLOEXEC)) {
         return -VX_EINVAL;
     }
-    if (family != VX_AF_INET && family != VX_AF_UNIX) {
+    if (family != VX_AF_INET && family != VX_AF_INET6 && family != VX_AF_UNIX) {
         return -VX_EAFNOSUPPORT;
     }
     struct socket *socket = socket_new(family, type, protocol);
     if (!socket) {
         return -VX_ENOMEM;
     }
-    int error = family == VX_AF_INET ? inet_create(socket) : unix_create(socket);
+    int error = family == VX_AF_UNIX ? unix_create(socket) : inet_create(socket);
     if (error) {
         kfree(socket); /* The protocol has nothing to release yet. */
         return error;
@@ -81,7 +81,8 @@ int socket_create_pair(int family, int type, int protocol, struct socket *out[2]
         return -VX_EINVAL;
     }
     if (family != VX_AF_UNIX) {
-        return family == VX_AF_INET ? -VX_EOPNOTSUPP : -VX_EAFNOSUPPORT;
+        return family == VX_AF_INET || family == VX_AF_INET6 ? -VX_EOPNOTSUPP
+                                                             : -VX_EAFNOSUPPORT;
     }
     struct socket *a = socket_new(family, type, protocol);
     struct socket *b = socket_new(family, type, protocol);

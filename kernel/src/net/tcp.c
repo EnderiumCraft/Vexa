@@ -43,7 +43,6 @@ enum tcp_state {
 #define TCP_HEADER 20
 #define BUFFER_SIZE (64 * 1024)
 #define DEFAULT_MSS 536
-#define OUR_MSS (NET_MTU - IP_HEADER - TCP_HEADER)
 #define RTO_INITIAL_MS 1000
 #define RTO_MAX_MS 16000
 #define MAX_RETRIES 8
@@ -63,7 +62,8 @@ struct tcp_conn {
     struct tcp_conn *next; /* In `connections`. */
     struct socket *socket; /* NULL when orphaned, or not accepted yet. */
     enum tcp_state state;
-    ipv4_t local_ip, remote_ip;
+    ip6_t local_ip, remote_ip; /* IPv4 ones mapped; local "any" while listening. */
+    int domains;               /* INET_V4, INET_V6: what a listener takes. */
     uint16_t local_port, remote_port;
     bool bound, listed;
 
@@ -121,10 +121,15 @@ static void wake(struct tcp_conn *conn) {
     wait_queue_wake_all(&conn->wait);
 }
 
-bool tcp_port_in_use(ipv4_t ip, uint16_t port, bool reuse) {
+/* The largest segment we take: what fits in one packet from the peer. */
+static uint16_t our_mss(struct tcp_conn *conn) {
+    return (uint16_t)(net_payload_max(conn->remote_ip) - TCP_HEADER);
+}
+
+static bool tcp_port_in_use(ip6_t ip, int domains, uint16_t port, bool reuse) {
     for (struct tcp_conn *c = connections; c; c = c->next) {
         if (!c->bound || c->local_port != port ||
-            (ip && c->local_ip && c->local_ip != ip)) {
+            !inet_overlap(ip, domains, c->local_ip, c->domains)) {
             continue;
         }
         /* SO_REUSEADDR: connections on their way out don't count. */
@@ -204,8 +209,8 @@ static void send_segment(struct tcp_conn *conn, uint32_t seq, uint8_t flags, siz
         uint8_t *option = (uint8_t *)(tcp + 1);
         option[0] = 2;
         option[1] = 4;
-        option[2] = OUR_MSS >> 8;
-        option[3] = OUR_MSS & 0xff;
+        option[2] = (uint8_t)(our_mss(conn) >> 8);
+        option[3] = (uint8_t)our_mss(conn);
         header += 4;
     }
     uint8_t *data = (uint8_t *)tcp + header;
@@ -222,9 +227,9 @@ static void send_segment(struct tcp_conn *conn, uint32_t seq, uint8_t flags, siz
     tcp->window = net16((uint16_t)conn->advertised);
     tcp->checksum = 0;
     tcp->urgent = 0;
-    tcp->checksum = ip_transport_checksum(conn->local_ip, conn->remote_ip, IP_PROTOCOL_TCP, tcp,
-                                          header + length);
-    ip_send(frame, conn->local_ip, conn->remote_ip, IP_PROTOCOL_TCP, header + length);
+    tcp->checksum = net_transport_checksum(conn->local_ip, conn->remote_ip, IP_PROTOCOL_TCP, tcp,
+                                           header + length);
+    net_send(frame, conn->local_ip, conn->remote_ip, IP_PROTOCOL_TCP, header + length);
     if (flags & FLAG_ACK) {
         conn->ack_now = false;
     }
@@ -252,9 +257,9 @@ static void send_reset(const struct ip_packet *packet, const struct tcp_header *
         tcp->flags = FLAG_RST | FLAG_ACK;
     }
     tcp->offset = (TCP_HEADER / 4) << 4;
-    tcp->checksum = ip_transport_checksum(packet->destination, packet->source, IP_PROTOCOL_TCP,
-                                          tcp, TCP_HEADER);
-    ip_send(frame, packet->destination, packet->source, IP_PROTOCOL_TCP, TCP_HEADER);
+    tcp->checksum = net_transport_checksum(packet->destination, packet->source, IP_PROTOCOL_TCP,
+                                           tcp, TCP_HEADER);
+    net_send(frame, packet->destination, packet->source, IP_PROTOCOL_TCP, TCP_HEADER);
 }
 
 static void start_timer(struct tcp_conn *conn) {
@@ -369,8 +374,8 @@ static void parse_options(struct tcp_conn *conn, const struct tcp_header *tcp,
             break;
         }
         if (o[0] == 2 && o[1] == 4) {
-            uint16_t mss = (uint16_t)(o[2] << 8 | o[3]);
-            conn->mss = mss < OUR_MSS ? (mss ? mss : DEFAULT_MSS) : OUR_MSS;
+            uint16_t mss = (uint16_t)(o[2] << 8 | o[3]), most = our_mss(conn);
+            conn->mss = mss < most ? (mss ? mss : DEFAULT_MSS) : most;
         }
         o += o[1];
     }
@@ -417,6 +422,7 @@ static void accept_syn(struct tcp_conn *listener, const struct ip_packet *packet
     conn->local_port = tcp->destination_port;
     conn->remote_ip = packet->source;
     conn->remote_port = tcp->source_port;
+    conn->domains = packet->version == 4 ? INET_V4 : INET_V6;
     conn->bound = true;
     conn->rcv_nxt = net32(tcp->seq) + 1;
     random_bytes(&conn->iss, sizeof(conn->iss));
@@ -439,11 +445,12 @@ static struct tcp_conn *find(const struct ip_packet *packet, const struct tcp_he
             continue;
         }
         if (c->state == TCP_LISTEN) {
-            if (!c->local_ip || c->local_ip == packet->destination) {
+            if (inet_takes(c->local_ip, c->domains, packet)) {
                 listener = c;
             }
         } else if (c->state != TCP_CLOSED && c->remote_port == tcp->source_port &&
-                   c->remote_ip == packet->source && c->local_ip == packet->destination) {
+                   ip6_equal(c->remote_ip, packet->source) &&
+                   ip6_equal(c->local_ip, packet->destination)) {
             return c;
         }
     }
@@ -457,8 +464,8 @@ void tcp_input(const struct ip_packet *packet) {
     const struct tcp_header *tcp = (const struct tcp_header *)packet->data;
     size_t header_length = (size_t)(tcp->offset >> 4) * 4;
     if (header_length < TCP_HEADER || header_length > packet->length ||
-        ip_transport_checksum(packet->source, packet->destination, IP_PROTOCOL_TCP, tcp,
-                              packet->length) != 0) {
+        net_transport_checksum(packet->source, packet->destination, IP_PROTOCOL_TCP, tcp,
+                               packet->length) != 0) {
         return;
     }
     const uint8_t *data = packet->data + header_length;
@@ -722,19 +729,20 @@ void tcp_tick(uint64_t now) {
 
 static int tcp_bind(struct socket *socket, const struct vx_socket_address *address,
                     size_t length) {
-    ipv4_t ip;
+    ip6_t ip;
     uint16_t port;
-    int error = inet_parse_address(address, length, &ip, &port);
+    int error = inet_parse_address(socket, address, length, &ip, &port);
     if (error) {
         return error;
     }
+    int domains = inet_domains(socket, ip);
     mutex_lock(&net_lock);
     struct tcp_conn *conn = conn_of(socket);
     if (conn->bound || conn->state != TCP_CLOSED) {
         error = -VX_EINVAL;
-    } else if (ip && !ip_is_local(ip)) {
+    } else if (!ip6_is_any(ip) && !net_is_local(ip)) {
         error = -VX_EADDRNOTAVAIL;
-    } else if (port && tcp_port_in_use(ip, port, socket->reuse_address)) {
+    } else if (port && tcp_port_in_use(ip, domains, port, socket->reuse_address)) {
         error = -VX_EADDRINUSE;
     } else {
         if (!port) {
@@ -744,6 +752,7 @@ static int tcp_bind(struct socket *socket, const struct vx_socket_address *addre
             error = -VX_EADDRINUSE;
         } else {
             conn->local_ip = ip;
+            conn->domains = domains;
             conn->local_port = port;
             conn->bound = true;
             list_add(conn);
@@ -763,6 +772,7 @@ static int tcp_listen(struct socket *socket, int backlog) {
         error = -VX_EINVAL;
     } else {
         if (!conn->bound) {
+            conn->domains = inet_domains(socket, IP6_ANY);
             conn->local_port = inet_ephemeral_port(tcp_port_in_use);
             conn->bound = conn->local_port != 0;
         }
@@ -809,7 +819,8 @@ static int tcp_accept(struct socket *socket, struct socket **out) {
         conn->listener = NULL;
         conn->accept_next = NULL;
         object_init(&new_socket->object, &socket_object_type);
-        new_socket->family = VX_AF_INET;
+        new_socket->family = socket->family;
+        new_socket->v6only = socket->v6only;
         new_socket->type = VX_SOCK_STREAM;
         new_socket->protocol = VX_IPPROTO_TCP;
         new_socket->linger_seconds = -1;
@@ -832,13 +843,16 @@ static bool connect_done(void *arg) {
 
 static int tcp_connect(struct socket *socket, const struct vx_socket_address *address,
                        size_t length) {
-    ipv4_t ip;
+    ip6_t ip, source;
     uint16_t port;
-    int error = inet_parse_address(address, length, &ip, &port);
+    int error = inet_parse_address(socket, address, length, &ip, &port);
     if (error) {
         return error;
     }
-    if (!port || !ip) {
+    if (ip6_is_any(ip)) {
+        ip = socket->family == VX_AF_INET ? ip6_mapped(IPV4_LOOPBACK) : IP6_LOOPBACK;
+    }
+    if (!port) {
         return -VX_ECONNREFUSED;
     }
     mutex_lock(&net_lock);
@@ -861,8 +875,7 @@ static int tcp_connect(struct socket *socket, const struct vx_socket_address *ad
         conn->error = 0;
         goto out;
     }
-    ipv4_t source = ip_source_for(ip);
-    if (!source) {
+    if (!net_source_for(ip, &source)) {
         error = -VX_ENETUNREACH;
         goto out;
     }
@@ -874,9 +887,10 @@ static int tcp_connect(struct socket *socket, const struct vx_socket_address *ad
         }
         conn->bound = true;
     }
-    if (!conn->local_ip) {
+    if (ip6_is_any(conn->local_ip)) {
         conn->local_ip = source;
     }
+    conn->domains = ip6_is_mapped(ip) ? INET_V4 : INET_V6;
     conn->remote_ip = ip;
     conn->remote_port = port;
     random_bytes(&conn->iss, sizeof(conn->iss));
@@ -1011,7 +1025,7 @@ static int64_t tcp_receive(struct socket *socket, struct socket_message *message
         }
     }
     if (message->address && done) {
-        inet_make_address(message->address, &message->address_length, conn->remote_ip,
+        inet_make_address(socket, message->address, &message->address_length, conn->remote_ip,
                           conn->remote_port);
     }
 out:
@@ -1054,10 +1068,10 @@ static int tcp_address(struct socket *socket, bool peer, struct vx_socket_addres
             conn->state == TCP_SYN_SENT) {
             error = -VX_ENOTCONN;
         } else {
-            inet_make_address(address, length, conn->remote_ip, conn->remote_port);
+            inet_make_address(socket, address, length, conn->remote_ip, conn->remote_port);
         }
     } else {
-        inet_make_address(address, length, conn->local_ip, conn->local_port);
+        inet_make_address(socket, address, length, conn->local_ip, conn->local_port);
     }
     mutex_unlock(&net_lock);
     return error;

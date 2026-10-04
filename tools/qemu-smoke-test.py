@@ -137,6 +137,10 @@ TYPED_COMMANDS = ([
     # (@URL@ is the test's HTTP server).
     ("net", "address 10.0.2.15", 10),
     ("socket-test", "socket-test: passed", 60),
+    # IPv6: a link-local address, then QEMU's router advertises fec0::/64
+    # (an address from it, and a default route); fec0::2 answers pings.
+    ("net", "router6 fe80::2", 10),
+    ("net", "address6 fec0::5054:ff:fe12:3456/64", 10),
     ("fetch @URL@/hello.txt", "Hello from the test's web server", 30),
     # HTTPS (Mbed TLS): a server with the test's own certificate authority is
     # refused, then trusted with it.
@@ -434,6 +438,14 @@ LINUX_COMMANDS = [
     ("sha1sum /tmp/data.bin", "@SHA1@", 30),
     ("ifconfig eth0", "inet addr:10.0.2.15", 20),
     ("ping -c 2 127.0.0.1", "2 packets received", 30),
+    # IPv6 (raw ICMPv6 sockets): loopback, then QEMU's router over the wire.
+    ("ping6 -c 2 ::1", "2 packets received", 30),
+    ("ping6 -c 2 fec0::2", "2 packets received", 30),
+    ("cat /proc/net/if_inet6", "fec0000000000000505400fffe123456 02 40 00 80 eth0", 10),
+    ("python3 -c \"import socket; s = socket.create_server(('::', 0), family=socket.AF_INET6, "
+     "dualstack_ipv6=True); p = s.getsockname()[1]; socket.create_connection(('::1', p)); "
+     "socket.create_connection(('127.0.0.1', p)); print('from', s.accept()[1][0], 'and', "
+     "s.accept()[1][0])\"", "from ::1 and ::ffff:127.0.0.1", 60),
     ("python-net-test.py @URL@/data.bin @SHA1@", "python-net-test: passed", 300),
     # HTTPS: OpenSSL, curl and Python's ssl module, with the root certificates
     # (and, for the test's own server, its certificate authority: without it,

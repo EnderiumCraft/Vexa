@@ -359,25 +359,42 @@ RTL8111/8168, with descriptor rings). Each registers with `net_register` under t
 
 - **One lock and one thread.** All protocol state is under `net_lock`, a sleeping
   mutex. A card's interrupt only wakes the network thread, which takes received frames
-  from the drivers, passes them up (Ethernet, ARP, IPv4, then ICMP, UDP or TCP) and runs
-  the timers: TCP retransmissions, ARP retries and DHCP. System calls take the lock for
+  from the drivers, passes them up (Ethernet, ARP, IPv4 or IPv6, then ICMP, ICMPv6, UDP
+  or TCP) and runs the timers: TCP retransmissions, neighbour retries, DHCP and IPv6
+  address autoconfiguration. System calls take the lock for
   their part and never wait while holding it.
-- **Interfaces.** `lo` (127.0.0.1), and a card per `ethN`, configured by DHCP. Routing
-  is "the interface's own subnet, else its router". What the stack knows shows in
-  `/proc/net/dev`, `route` and `resolv.conf`.
+- **Interfaces.** `lo` (127.0.0.1 and ::1), and a card per `ethN`, configured by DHCP.
+  Routing is "the interface's own subnet, else its router". What the stack knows shows
+  in `/proc/net/dev`, `route`, `if_inet6`, `ipv6_route` and `resolv.conf`.
+- **IPv6** (`net/ipv6.c`). Each card gets a link-local address (fe80:: and its MAC
+  address as an EUI-64), checks nobody else has it (duplicate address detection), then
+  sends router solicitations; a router advertisement gives it an address in each /64
+  prefix marked for autoconfiguration, a default route, and a DNS server if one is
+  advertised. Neighbour discovery shares the neighbour table with ARP (`core.c` keys it
+  by 16-byte address), so frames wait for either kind of answer the same way. No
+  fragments, no multicast listener reports (the cards take every multicast frame), and
+  link-local destinations go out of the first card (there are no zone ids yet).
+- **Addresses above IP** are all 16 bytes (`ip6_t`): IPv6 addresses as they are, IPv4
+  ones mapped (`::ffff:a.b.c.d`). UDP and TCP don't care which version a packet came
+  by; `net_send` and `net_transport_checksum` pick it from the address. So a
+  `VX_AF_INET6` socket bound to `::` takes IPv4 connections too, unless it's set
+  IPv6-only (`IPV6_V6ONLY`, in the Linux subsystem).
 - **TCP** keeps 64 KiB send and receive buffers per connection, retransmits from the
   oldest unacknowledged byte with a doubling timeout, and drops segments that arrive
   out of order (the sender repeats them). No congestion control or window scaling yet.
 - **Sockets** (`core/socket.h`) are objects shared by both personalities: `VX_AF_INET`
-  (TCP, UDP, raw ICMP for `ping`) and `VX_AF_UNIX`. Addresses use Linux's layouts, so
+  and `VX_AF_INET6` (TCP, UDP, raw ICMP and ICMPv6 for `ping`) and `VX_AF_UNIX`. Addresses use Linux's layouts, so
   the Linux subsystem mostly handles calling conventions: iovecs, address lengths,
   control messages, options.
 - **Local sockets** queue what is sent as chunks at the receiver. A chunk can carry
   objects (`SCM_RIGHTS`), each with a reference, so a descriptor sent by one process
   becomes a new handle in the other. A named socket's path is a file; connecting looks
   the socket up by that file.
-- **Names.** `libvexa`'s `vx_resolve` reads `/etc/hosts`, then asks the name server
-  DHCP gave us. Linux programs use musl's resolver and `/etc/resolv.conf`.
+- **Names.** `libvexa`'s `vx_resolve` (A records) and `vx_resolve6` (AAAA) read
+  `/etc/hosts`, then ask the name server DHCP gave us (or a router advertised).
+  `getaddrinfo` gives IPv4 answers first and looks for IPv6 ones when asked to, or when
+  a name has no IPv4 address. Linux programs use their own resolver and
+  `/etc/resolv.conf`.
 - **Waiting.** `poll`, `select` and `epoll` (and `vx_poll`) check objects' readiness
   every few milliseconds rather than being woken; good enough for now.
 

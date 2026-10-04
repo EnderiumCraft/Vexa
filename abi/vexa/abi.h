@@ -226,10 +226,11 @@ struct vx_process_info {
  * SOCK_STREAM, struct sockaddr_in...), in network byte order. */
 #define VX_AF_UNIX 1 /* Local sockets, named by a path. */
 #define VX_AF_INET 2 /* IPv4 */
+#define VX_AF_INET6 10 /* IPv6 (and IPv4, as ::ffff:a.b.c.d addresses). */
 
 #define VX_SOCK_STREAM 1
 #define VX_SOCK_DGRAM 2
-#define VX_SOCK_RAW 3 /* VX_AF_INET with VX_IPPROTO_ICMP only. */
+#define VX_SOCK_RAW 3 /* VX_IPPROTO_ICMP (VX_AF_INET) or VX_IPPROTO_ICMPV6 only. */
 #define VX_SOCK_SEQPACKET 5
 #define VX_SOCK_TYPE_MASK 0xf
 #define VX_SOCK_NONBLOCK 0x800 /* Calls return -VX_EAGAIN instead of waiting. */
@@ -238,6 +239,7 @@ struct vx_process_info {
 #define VX_IPPROTO_ICMP 1
 #define VX_IPPROTO_TCP 6
 #define VX_IPPROTO_UDP 17
+#define VX_IPPROTO_ICMPV6 58
 
 /* vx_message flags. */
 #define VX_MSG_PEEK 0x2       /* Receive without taking the data. */
@@ -257,6 +259,14 @@ struct vx_inet_address {
     unsigned char zero[8];
 };
 
+struct vx_inet6_address {
+    unsigned short family;   /* VX_AF_INET6 */
+    unsigned short port;     /* Network byte order. */
+    unsigned int flow_info;
+    unsigned char address[16];
+    unsigned int scope_id;
+};
+
 struct vx_unix_address {
     unsigned short family;  /* VX_AF_UNIX */
     char path[108];         /* NUL-terminated; a leading NUL means an abstract name. */
@@ -266,6 +276,7 @@ struct vx_socket_address {
     union {
         unsigned short family;
         struct vx_inet_address inet;
+        struct vx_inet6_address inet6;
         struct vx_unix_address local;
         unsigned char storage[128];
     };
@@ -303,6 +314,12 @@ struct vx_net_interface {
     unsigned int mtu;
     unsigned int address, netmask, gateway, dns; /* Network byte order; 0 if none. */
     unsigned long long rx_packets, rx_bytes, tx_packets, tx_bytes, rx_dropped, tx_dropped;
+    /* IPv6: up to 3 addresses (the link-local one first; unused ones all
+     * zero) with their prefix lengths, the default router and a DNS server. */
+    unsigned char address6[3][16];
+    unsigned char prefix6[3];
+    unsigned char reserved6[5];
+    unsigned char router6[16], dns6[16];
 };
 
 /* ---- Input devices: /dev/input/event0, event1... ----

@@ -104,8 +104,8 @@ static int translate_flags(uint64_t flags) {
 
 int64_t linux_sys_socket(struct interrupt_frame *f, uint64_t domain, uint64_t type,
                          uint64_t protocol, uint64_t a3, uint64_t a4, uint64_t a5) {
-    if (domain != LINUX_AF_UNIX && domain != LINUX_AF_INET) {
-        return -LE_EAFNOSUPPORT; /* IPv6 and netlink: callers fall back. */
+    if (domain != LINUX_AF_UNIX && domain != LINUX_AF_INET && domain != LINUX_AF_INET6) {
+        return -LE_EAFNOSUPPORT; /* Netlink and the rest: callers fall back. */
     }
     struct socket *socket;
     int error = socket_create((int)domain, (int)(type & ~(uint64_t)LINUX_SOCK_CLOEXEC),
@@ -780,6 +780,12 @@ int64_t linux_sys_setsockopt(struct interrupt_frame *f, uint64_t fd, uint64_t le
         if (!(error = read_int(value, length, &n))) {
             socket->no_delay = n != 0; /* Always true in effect: no Nagle. */
         }
+    } else if (level == LINUX_IPPROTO_IPV6 && name == LINUX_IPV6_V6ONLY) {
+        if (socket->family != VX_AF_INET6) {
+            error = -LE_ENOPROTOOPT;
+        } else if (!(error = read_int(value, length, &n))) {
+            socket->v6only = n != 0; /* (Before bind(), as on Linux.) */
+        }
     }
     /* Other IP and TCP options are accepted quietly. */
     put(socket);
@@ -851,6 +857,9 @@ int64_t linux_sys_getsockopt(struct interrupt_frame *f, uint64_t fd, uint64_t le
         case LINUX_TCP_MAXSEG: out.n = NET_MTU - 40; break;
         default: error = -LE_ENOPROTOOPT;
         }
+    } else if (level == LINUX_IPPROTO_IPV6 && name == LINUX_IPV6_V6ONLY &&
+               socket->family == VX_AF_INET6) {
+        out.n = socket->v6only;
     } else {
         error = -LE_ENOPROTOOPT;
     }

@@ -137,7 +137,7 @@ long code = child >= 0 ? vx_wait(child, 0) : child;
 
 | Function | What it does |
 | --- | --- |
-| `int vx_socket(int family, int type, int protocol)` | `VX_AF_INET` or `VX_AF_UNIX`; `VX_SOCK_STREAM` or `VX_SOCK_DGRAM` (or'd with `VX_SOCK_NONBLOCK`) |
+| `int vx_socket(int family, int type, int protocol)` | `VX_AF_INET`, `VX_AF_INET6` (which takes IPv4 too, as `::ffff:a.b.c.d`) or `VX_AF_UNIX`; `VX_SOCK_STREAM` or `VX_SOCK_DGRAM` (or'd with `VX_SOCK_NONBLOCK`) |
 | `long vx_bind(int h, const struct vx_socket_address *a, size_t length)` | a port, or a path for a local socket |
 | `long vx_listen(int h, int backlog)`, `int vx_accept(int h, struct vx_socket_address *peer, unsigned flags)` | a server |
 | `long vx_connect(int h, const struct vx_socket_address *a, size_t length)` | a client |
@@ -204,8 +204,11 @@ void *result = vx_thread_join(t);
 
 | Function | What it does |
 | --- | --- |
-| `int vx_connect_to(const char *host, uint16_t port)` | resolves `host` and opens a TCP connection; returns the socket |
+| `int vx_connect_to(const char *host, uint16_t port)` | resolves `host` and opens a TCP connection (by IPv4, else IPv6); returns the socket |
 | `long vx_resolve(const char *name, uint32_t *address)` | a numeric address, `localhost`, `/etc/hosts`, or DNS; `-VX_ENOENT` if there's no such name |
+| `long vx_resolve6(const char *name, uint8_t address[16])` | the same for an IPv6 address (DNS AAAA records) |
+| `struct vx_socket_address vx_inet6_address(const uint8_t address[16], uint16_t port)` | an IPv6 socket address (port in host order) |
+| `int vx_parse_ipv6(const char *text, uint8_t address[16])`, `char *vx_format_ipv6(const uint8_t address[16], char text[46])` | "2001:db8::1" and back |
 | `struct vx_socket_address vx_inet_address(uint32_t address, uint16_t port)` | an IPv4 socket address (address in network order, port in host order) |
 | `int vx_parse_ipv4(const char *text, uint32_t *address)`, `char *vx_format_ipv4(uint32_t address, char text[16])` | "10.0.2.2" and back |
 | `uint16_t vx_net16(uint16_t value)` | swaps bytes (host and network order) |

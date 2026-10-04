@@ -164,7 +164,8 @@ static int write_all(int handle, const char *data, long size) {
 
 struct url {
     bool https;
-    char host[256];
+    char host[256]; /* An IPv6 address without its brackets. */
+    bool ipv6;
     uint16_t port;
     char path[1024];
 };
@@ -188,6 +189,20 @@ static bool parse_url(const char *text, struct url *u) {
     u->host[length] = '\0';
     u->port = u->https ? 443 : 80;
     char *colon = strchr(u->host, ':');
+    u->ipv6 = u->host[0] == '[';
+    if (u->ipv6) {
+        /* [2001:db8::1]:8080 */
+        char *end = strchr(u->host, ']');
+        if (!end || (end[1] && end[1] != ':')) {
+            return false;
+        }
+        if (end[1]) {
+            u->port = (uint16_t)atoi(end + 2);
+        }
+        *end = '\0';
+        memmove(u->host, u->host + 1, strlen(u->host + 1) + 1);
+        colon = NULL;
+    }
     if (colon) {
         *colon = '\0';
         u->port = (uint16_t)atoi(colon + 1);
@@ -212,9 +227,9 @@ static int request(const struct url *u, int out, const char *ca_file, bool check
     }
     char text[1400];
     int n = snprintf(text, sizeof(text),
-                     "GET %s HTTP/1.0\r\nHost: %s\r\nUser-Agent: Vexa-fetch\r\n"
+                     "GET %s HTTP/1.0\r\nHost: %s%s%s\r\nUser-Agent: Vexa-fetch\r\n"
                      "Connection: close\r\n\r\n",
-                     u->path, u->host);
+                     u->path, u->ipv6 ? "[" : "", u->host, u->ipv6 ? "]" : "");
     if (n <= 0 || (size_t)n >= sizeof(text) || connection_write(&c, text, (size_t)n) != n) {
         fprintf(stderr, "fetch: can't send the request\n");
         connection_close(&c);

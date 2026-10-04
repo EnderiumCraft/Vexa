@@ -1,5 +1,6 @@
 /* net: the network interfaces, their addresses and traffic. */
 #include <stdio.h>
+#include <string.h>
 #include <vexa/net.h>
 
 int main(void) {
@@ -29,6 +30,20 @@ int main(void) {
             printf("  router %s", vx_format_ipv4(n->gateway, gateway));
             if (n->dns) {
                 printf(" name server %s", vx_format_ipv4(n->dns, dns));
+            }
+            printf("\n");
+        }
+        static const unsigned char zero[16];
+        char text[46];
+        for (int j = 0; j < 3; j++) {
+            if (n->prefix6[j]) {
+                printf("  address6 %s/%u\n", vx_format_ipv6(n->address6[j], text), n->prefix6[j]);
+            }
+        }
+        if (memcmp(n->router6, zero, 16) != 0) {
+            printf("  router6 %s", vx_format_ipv6(n->router6, text));
+            if (memcmp(n->dns6, zero, 16) != 0) {
+                printf(" name server %s", vx_format_ipv6(n->dns6, text));
             }
             printf("\n");
         }

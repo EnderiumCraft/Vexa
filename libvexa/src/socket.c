@@ -64,11 +64,10 @@ static int new_socket(int handle, int type, bool nonblock) {
 
 /* ---- Sockets ---- */
 
+const struct in6_addr in6addr_any = IN6ADDR_ANY_INIT;
+const struct in6_addr in6addr_loopback = IN6ADDR_LOOPBACK_INIT;
+
 int socket(int family, int type, int protocol) {
-    if (family == AF_INET6) {
-        errno = EAFNOSUPPORT;
-        return -1;
-    }
     bool nonblock = type & SOCK_NONBLOCK;
     /* (Vexa's non-blocking flag is libvexa's to keep: see send and recv.) */
     return new_socket(vx_socket(family, type & ~(SOCK_NONBLOCK | SOCK_CLOEXEC), protocol), type,
@@ -371,6 +370,9 @@ char *inet_ntoa(struct in_addr address) {
 }
 
 int inet_pton(int family, const char *text, void *address) {
+    if (family == AF_INET6) {
+        return vx_parse_ipv6(text, address) == 0 ? 1 : 0;
+    }
     if (family != AF_INET) {
         errno = EAFNOSUPPORT;
         return -1;
@@ -384,14 +386,17 @@ int inet_pton(int family, const char *text, void *address) {
 }
 
 const char *inet_ntop(int family, const void *address, char *text, socklen_t size) {
-    if (family != AF_INET) {
+    char buffer[46];
+    if (family == AF_INET6) {
+        vx_format_ipv6(address, buffer);
+    } else if (family == AF_INET) {
+        uint32_t a;
+        memcpy(&a, address, 4);
+        vx_format_ipv4(a, buffer);
+    } else {
         errno = EAFNOSUPPORT;
         return NULL;
     }
-    char buffer[16];
-    uint32_t a;
-    memcpy(&a, address, 4);
-    vx_format_ipv4(a, buffer);
     if (strlen(buffer) + 1 > size) {
         errno = ENOSPC;
         return NULL;
@@ -482,12 +487,58 @@ static int service_port(const char *service, int flags, int *port) {
     return 0;
 }
 
+/* Adds one answer per kind of socket asked for (both, if none was). */
+static int add_answers(struct addrinfo **result, struct addrinfo **last, int family,
+                       const void *address, int port, int type, int protocol, int flags,
+                       const char *node) {
+    int types[2] = {type ? type : SOCK_STREAM, SOCK_DGRAM};
+    int count = type ? 1 : 2;
+    for (int i = 0; i < count; i++) {
+        size_t size = family == AF_INET6 ? sizeof(struct sockaddr_in6) : sizeof(struct sockaddr_in);
+        struct addrinfo *info = calloc(1, sizeof(*info) + size);
+        if (!info) {
+            return EAI_MEMORY;
+        }
+        if (family == AF_INET6) {
+            struct sockaddr_in6 *in6 = (struct sockaddr_in6 *)(info + 1);
+            in6->sin6_family = AF_INET6;
+            in6->sin6_port = htons((uint16_t)port);
+            memcpy(&in6->sin6_addr, address, 16);
+        } else {
+            struct sockaddr_in *in = (struct sockaddr_in *)(info + 1);
+            in->sin_family = AF_INET;
+            in->sin_port = htons((uint16_t)port);
+            memcpy(&in->sin_addr, address, 4);
+        }
+        info->ai_family = family;
+        info->ai_socktype = types[i];
+        info->ai_protocol = protocol ? protocol
+                                     : (types[i] == SOCK_DGRAM ? IPPROTO_UDP : IPPROTO_TCP);
+        info->ai_addrlen = (socklen_t)size;
+        info->ai_addr = (struct sockaddr *)(info + 1);
+        if ((flags & AI_CANONNAME) && node && !*result) {
+            info->ai_canonname = strdup(node);
+        }
+        if (*last) {
+            (*last)->ai_next = info;
+        } else {
+            *result = info;
+        }
+        *last = info;
+    }
+    return 0;
+}
+
+static int lookup_error(long e) {
+    return e == -VX_ENOENT ? EAI_NONAME : EAI_AGAIN;
+}
+
 int getaddrinfo(const char *node, const char *service, const struct addrinfo *hints,
                 struct addrinfo **result) {
     int flags = hints ? hints->ai_flags : 0, family = hints ? hints->ai_family : AF_UNSPEC;
     int type = hints ? hints->ai_socktype : 0, protocol = hints ? hints->ai_protocol : 0;
     *result = NULL;
-    if (family != AF_UNSPEC && family != AF_INET) {
+    if (family != AF_UNSPEC && family != AF_INET && family != AF_INET6) {
         return EAI_FAMILY;
     }
     if (!node && !service) {
@@ -498,50 +549,66 @@ int getaddrinfo(const char *node, const char *service, const struct addrinfo *hi
     if (error) {
         return error;
     }
-    uint32_t address;
+    /* A numeric address, without a "%zone" suffix (there are no zones). */
+    char name[256];
+    if (node) {
+        snprintf(name, sizeof(name), "%s", node);
+        char *zone = strchr(name, '%');
+        if (zone && strchr(name, ':')) {
+            *zone = '\0';
+        }
+    }
+    uint32_t v4;
+    uint8_t v6[16];
+    bool have4 = false, have6 = false;
+    long e4 = 0, e6 = 0;
     if (!node) {
-        address = htonl((flags & AI_PASSIVE) ? INADDR_ANY : INADDR_LOOPBACK);
-    } else if (vx_parse_ipv4(node, &address) != 0) {
-        if (flags & AI_NUMERICHOST) {
+        /* The local machine: any address to listen on, or loopback. */
+        v4 = htonl((flags & AI_PASSIVE) ? INADDR_ANY : INADDR_LOOPBACK);
+        memcpy(v6, (flags & AI_PASSIVE) ? &in6addr_any : &in6addr_loopback, 16);
+        have4 = family != AF_INET6;
+        have6 = family == AF_INET6;
+    } else if (vx_parse_ipv4(name, &v4) == 0) {
+        have4 = true;
+    } else if (vx_parse_ipv6(name, v6) == 0) {
+        have6 = true;
+    } else if (flags & AI_NUMERICHOST) {
+        return EAI_NONAME;
+    } else {
+        /* IPv4 first, IPv6 if asked for or if there is no IPv4 address. */
+        if (family != AF_INET6) {
+            have4 = (e4 = vx_resolve(name, &v4)) == 0;
+        }
+        if (family == AF_INET6 || (family == AF_UNSPEC && !have4)) {
+            have6 = (e6 = vx_resolve6(name, v6)) == 0;
+        }
+    }
+    if (have4 && family == AF_INET6) {
+        if (!(flags & AI_V4MAPPED)) {
             return EAI_NONAME;
         }
-        long e = vx_resolve(node, &address);
-        if (e != 0) {
-            return e == -VX_ENOENT ? EAI_NONAME : EAI_AGAIN;
-        }
+        memset(v6, 0, 10); /* As ::ffff:a.b.c.d */
+        v6[10] = v6[11] = 0xff;
+        memcpy(v6 + 12, &v4, 4);
+        have4 = false;
+        have6 = true;
     }
-    /* One answer per kind of socket asked for (both, if none was). */
-    int types[2] = {type ? type : SOCK_STREAM, SOCK_DGRAM};
-    int count = type ? 1 : 2;
+    if (have6 && family == AF_INET) {
+        return EAI_NONAME;
+    }
+    if (!have4 && !have6) {
+        return lookup_error(e6 ? e6 : e4);
+    }
     struct addrinfo *last = NULL;
-    for (int i = 0; i < count; i++) {
-        struct addrinfo *info = calloc(1, sizeof(*info) + sizeof(struct sockaddr_in));
-        if (!info) {
-            freeaddrinfo(*result);
-            *result = NULL;
-            return EAI_MEMORY;
-        }
-        struct sockaddr_in *in = (struct sockaddr_in *)(info + 1);
-        in->sin_family = AF_INET;
-        in->sin_port = htons((uint16_t)port);
-        in->sin_addr.s_addr = address;
-        info->ai_family = AF_INET;
-        info->ai_socktype = types[i];
-        info->ai_protocol = protocol ? protocol
-                                     : (types[i] == SOCK_DGRAM ? IPPROTO_UDP : IPPROTO_TCP);
-        info->ai_addrlen = sizeof(*in);
-        info->ai_addr = (struct sockaddr *)in;
-        if ((flags & AI_CANONNAME) && node) {
-            info->ai_canonname = strdup(node);
-        }
-        if (last) {
-            last->ai_next = info;
-        } else {
-            *result = info;
-        }
-        last = info;
+    error = have4 ? add_answers(result, &last, AF_INET, &v4, port, type, protocol, flags, node) : 0;
+    if (!error && have6) {
+        error = add_answers(result, &last, AF_INET6, v6, port, type, protocol, flags, node);
     }
-    return 0;
+    if (error) {
+        freeaddrinfo(*result);
+        *result = NULL;
+    }
+    return error;
 }
 
 void freeaddrinfo(struct addrinfo *list) {
@@ -569,15 +636,25 @@ const char *gai_strerror(int error) {
 int getnameinfo(const struct sockaddr *address, socklen_t length, char *host, socklen_t host_size,
                 char *service, socklen_t service_size, int flags) {
     (void)flags;
-    if (address->sa_family != AF_INET || length < sizeof(struct sockaddr_in)) {
+    const void *ip;
+    uint16_t port;
+    if (address->sa_family == AF_INET && length >= sizeof(struct sockaddr_in)) {
+        const struct sockaddr_in *in = (const struct sockaddr_in *)address;
+        ip = &in->sin_addr;
+        port = in->sin_port;
+    } else if (address->sa_family == AF_INET6 && length >= sizeof(struct sockaddr_in6)) {
+        const struct sockaddr_in6 *in6 = (const struct sockaddr_in6 *)address;
+        ip = &in6->sin6_addr;
+        port = in6->sin6_port;
+    } else {
         return EAI_FAMILY;
     }
-    const struct sockaddr_in *in = (const struct sockaddr_in *)address;
-    if (host && host_size && !inet_ntop(AF_INET, &in->sin_addr, host, host_size)) {
+    /* (No reverse lookups: the address is the name.) */
+    if (host && host_size && !inet_ntop(address->sa_family, ip, host, host_size)) {
         return EAI_OVERFLOW;
     }
     if (service && service_size) {
-        snprintf(service, service_size, "%u", ntohs(in->sin_port));
+        snprintf(service, service_size, "%u", ntohs(port));
     }
     return 0;
 }

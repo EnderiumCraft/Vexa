@@ -674,7 +674,23 @@ python3 -c "import urllib.request; print(urllib.request.urlopen('https://example
 
 Vexa's own `fetch` speaks HTTPS too (`fetch https://example.com/`, checking the server's
 certificate the same way; `--ca file` trusts another certificate authority, `-k` none),
-and follows redirects; BusyBox's `wget` speaks only HTTP. There's no IPv6 yet.
+and follows redirects; BusyBox's `wget` speaks only HTTP.
+
+IPv6 works alongside IPv4. Each card gets a link-local address (`fe80::...`) at once,
+and a global one when a router advertises a prefix; QEMU's user-mode network advertises
+`fec0::/64`, with its router at `fec0::2`. `net` shows the addresses, and programs take
+IPv6 addresses in the usual places:
+
+```sh
+net                             # address6 fe80::..., address6 fec0::..., router6
+ping6 fec0::2                   # BusyBox's ping, over IPv6
+fetch http://[2001:db8::1]/     # an IPv6 address in a URL goes in brackets
+python3 -c "import socket; print(socket.getaddrinfo('localhost', 80, socket.AF_INET6)[0][4])"
+```
+
+A program listening on `::` takes IPv4 connections too (they come from `::ffff:a.b.c.d`
+addresses). There are no IPv6 fragments yet, and on a machine with several cards,
+link-local addresses are reached through the first one.
 
 ## Disks and CDs
 

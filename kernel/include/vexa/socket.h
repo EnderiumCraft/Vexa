@@ -61,6 +61,7 @@ struct socket {
     int family, type, protocol;
     uint64_t receive_timeout_ms, send_timeout_ms; /* 0: wait as long as it takes. */
     bool reuse_address, keep_alive, no_delay, broadcast;
+    bool v6only; /* VX_AF_INET6: IPv6 only, no ::ffff:a.b.c.d addresses. */
     bool listening; /* listen() succeeded. */
     int linger_seconds; /* -1: off */
     void *data; /* The protocol's. */

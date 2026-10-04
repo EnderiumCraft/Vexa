@@ -54,6 +54,7 @@
 #define CTRL_PHY_RST (1U << 31)
 #define STATUS_LINK_UP (1U << 1)
 #define RCTL_EN (1U << 1)
+#define RCTL_MPE (1U << 4) /* Every multicast (IPv6 neighbour discovery). */
 #define RCTL_BAM (1U << 15) /* Broadcasts. */
 #define RCTL_SECRC (1U << 26) /* Strip the CRC. */
 #define TCTL_EN (1U << 1)
@@ -274,7 +275,7 @@ static void probe(struct pci_device *pci, bool newer) {
     w32(card, CTRL, (r32(card, CTRL) | CTRL_SLU | CTRL_ASDE) & ~CTRL_PHY_RST);
     read_mac(card, newer);
     for (int i = 0; i < 128; i++) {
-        w32(card, MTA + 4 * (uint32_t)i, 0); /* No multicast. */
+        w32(card, MTA + 4 * (uint32_t)i, 0); /* (RCTL_MPE takes every group.) */
     }
 
     /* Rings: 128 x 16 bytes, 64 x 16 bytes; buffers 2 KiB each. */
@@ -304,7 +305,8 @@ static void probe(struct pci_device *pci, bool newer) {
     w32(card, TDLEN, TX_COUNT * sizeof(struct tx_desc));
     w32(card, TDH, 0);
     w32(card, TDT, 0);
-    w32(card, RCTL, RCTL_EN | RCTL_BAM | RCTL_SECRC); /* 2 KiB buffers (size bits 0). */
+    /* 2 KiB buffers (size bits 0). */
+    w32(card, RCTL, RCTL_EN | RCTL_MPE | RCTL_BAM | RCTL_SECRC);
     w32(card, TCTL, TCTL_EN | TCTL_PSP | 0x0fU << 4 | 0x3fU << 12);
     w32(card, TIPG, 10 | 8 << 10 | 6 << 20);
 

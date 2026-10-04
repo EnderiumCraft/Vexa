@@ -177,7 +177,9 @@ Linux track:
 - [x] virtio-net driver (QEMU), with MSI-X interrupts (0.11.0); wired cards on real PCs:
       Intel e1000 and e1000e, Realtek RTL8139 and RTL8111/8168 (0.28.0). Wi-Fi later
 - [x] TCP/IP stack: Ethernet, ARP, IPv4, ICMP, UDP, TCP; DHCP client; loopback (0.11.0).
-      IPv6, IP fragments, window scaling and congestion control come later
+      IP fragments, window scaling and congestion control come later
+- [x] IPv6: neighbour discovery, stateless address autoconfiguration, ICMPv6, dual-stack
+      `AF_INET6` sockets for native and Linux programs, AAAA lookups (0.30.0)
 - [x] Native socket API in the core (`vx_socket`, `vx_send`, `vx_poll`...); the Linux
       subsystem maps BSD sockets onto it (`sendmsg`, `accept4`, options, `SIOCGIF*`)
 - [x] Local sockets that can pass handles between processes (Linux: Unix domain

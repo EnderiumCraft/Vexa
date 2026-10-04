@@ -28,6 +28,7 @@
 
 /* Registers both share. */
 #define REG_MAC 0x00
+#define REG_MAR 0x08 /* The multicast filter: 64 bits. */
 #define REG_COMMAND 0x37
 #define REG_IMR 0x3c
 #define REG_ISR 0x3e
@@ -50,7 +51,7 @@
 #define INT_FIFO_OVERFLOW 0x0040
 
 /* Receive: this card's address, broadcasts; no limit on DMA bursts. */
-#define RX_ACCEPT (0x02 | 0x08) /* Physical match, broadcast. */
+#define RX_ACCEPT (0x02 | 0x04 | 0x08) /* Physical match, multicast (IPv6), broadcast. */
 
 struct card {
     struct net_interface net;
@@ -206,8 +207,10 @@ static bool rtl8139_setup(struct card *c) {
     w32(c, REG_RBSTART, (uint32_t)virt_to_phys(c->rx_ring));
     w8(c, REG_COMMAND, COMMAND_RX | COMMAND_TX);
     /* An 8 KiB ring (bits 11-12: 0); bit 7: a packet at the end runs on past it (into
-     * the extra room) instead of wrapping; unlimited DMA bursts; ours and broadcasts. */
+     * the extra room) instead of wrapping; unlimited DMA bursts; ours, multicasts and broadcasts. */
     w32(c, REG_RX_CONFIG, RX_ACCEPT | 1U << 7 | 7U << 8 | 7U << 13);
+    w32(c, REG_MAR, 0xffffffffU); /* Every multicast group. */
+    w32(c, REG_MAR + 4, 0xffffffffU);
     w32(c, REG_TX_CONFIG, 6U << 8 | 3U << 24); /* DMA burst 1024, standard gap. */
     w16(c, REG_IMR, INT_ROK | INT_RER | INT_TOK | INT_TER | INT_RX_OVERFLOW | INT_LINK |
                         INT_FIFO_OVERFLOW);
@@ -327,8 +330,10 @@ static bool gigabit_setup(struct card *c) {
     w32(c, REG_RX_DESC, (uint32_t)rx);
     w32(c, REG_RX_DESC + 4, (uint32_t)(rx >> 32));
     w8(c, REG_COMMAND, COMMAND_RX | COMMAND_TX);
-    /* No receive threshold, unlimited DMA bursts, ours and broadcasts. */
+    /* No receive threshold, unlimited DMA bursts, ours, multicasts, broadcasts. */
     w32(c, REG_RX_CONFIG, (r32(c, REG_RX_CONFIG) & 0xff7e1880U) | RX_ACCEPT | 7U << 8 | 7U << 13);
+    w32(c, REG_MAR, 0xffffffffU); /* Every multicast group. */
+    w32(c, REG_MAR + 4, 0xffffffffU);
     w32(c, REG_TX_CONFIG, 3U << 24 | 7U << 8); /* Standard gap, unlimited bursts. */
     w8(c, REG_9346, 0x00);
     w16(c, REG_IMR, INT_ROK | INT_RER | INT_TOK | INT_TER | INT_RX_OVERFLOW | INT_LINK |

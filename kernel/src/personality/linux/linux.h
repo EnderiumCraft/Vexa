@@ -511,6 +511,7 @@ struct linux_siginfo {
 #define LINUX_AF_UNSPEC 0
 #define LINUX_AF_UNIX 1
 #define LINUX_AF_INET 2
+#define LINUX_AF_INET6 10
 #define LINUX_SOCK_TYPE_MASK 0xf
 #define LINUX_SOCK_NONBLOCK 04000
 #define LINUX_SOCK_CLOEXEC 02000000
@@ -548,6 +549,8 @@ struct linux_siginfo {
 
 #define LINUX_IPPROTO_IP 0
 #define LINUX_IPPROTO_TCP 6
+#define LINUX_IPPROTO_IPV6 41
+#define LINUX_IPV6_V6ONLY 26
 #define LINUX_TCP_NODELAY 1
 #define LINUX_TCP_MAXSEG 2
 

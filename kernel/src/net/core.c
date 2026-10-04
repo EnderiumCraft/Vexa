@@ -8,7 +8,8 @@
 
 /*
  * The core of the network stack: interfaces (and the loopback one), the
- * network thread, Ethernet, ARP, IPv4 and ICMP.
+ * network thread, Ethernet, the neighbour table (ARP for IPv4; ipv6.c asks
+ * by neighbour discovery), IPv4 and ICMP. IPv6 is in ipv6.c.
  *
  * IPv4 is kept simple: no fragments (received ones are dropped, sent packets
  * must fit the MTU), no options, and routing is "the interface's own subnet,
@@ -24,6 +25,7 @@ static volatile bool work_pending;
 
 #define ETH_TYPE_IP 0x0800
 #define ETH_TYPE_ARP 0x0806
+#define ETH_TYPE_IP6 0x86dd
 
 struct __attribute__((packed)) eth_header {
     uint8_t destination[ETH_ADDRESS];
@@ -114,6 +116,7 @@ void net_register(struct net_interface *net) {
                 net->mac[1], net->mac[2], net->mac[3], net->mac[4], net->mac[5]);
         dhcp_start(net);
     }
+    ip6_start(net);
     mutex_unlock(&net_lock);
     net_wake();
 }
@@ -141,12 +144,20 @@ int net_snapshot(struct vx_net_interface *out, int max) {
         o->tx_bytes = net->tx_bytes;
         o->rx_dropped = net->rx_dropped;
         o->tx_dropped = net->tx_dropped;
+        for (int i = 0, n = 0; i < NET_IP6_ADDRESSES && n < 3; i++) {
+            if (net->ip6[i].prefix_length && !net->ip6[i].tentative) {
+                memcpy(o->address6[n], net->ip6[i].address.b, 16);
+                o->prefix6[n++] = net->ip6[i].prefix_length;
+            }
+        }
+        memcpy(o->router6, net->router6.b, 16);
+        memcpy(o->dns6, net->dns6.b, 16);
     }
     mutex_unlock(&net_lock);
     return count;
 }
 
-static void transmit(struct net_interface *net, const void *frame, size_t length) {
+void net_transmit(struct net_interface *net, const void *frame, size_t length) {
     net->tx_packets++;
     net->tx_bytes += length;
     net->transmit(net, frame, length);
@@ -210,6 +221,10 @@ static struct net_interface loopback = {
     .poll = loop_poll,
 };
 
+struct net_interface *net_loopback(void) {
+    return &loopback;
+}
+
 /* ---- ARP ---- */
 
 struct __attribute__((packed)) arp_packet {
@@ -226,6 +241,7 @@ struct __attribute__((packed)) arp_packet {
 
 #define ARP_REQUEST 1
 #define ARP_REPLY 2
+/* The neighbour table: IPv4 (mapped) and IPv6 addresses alike. */
 #define ARP_ENTRIES 64
 #define ARP_LIFETIME_MS (5 * 60 * 1000)
 #define ARP_RETRY_MS 1000
@@ -233,7 +249,7 @@ struct __attribute__((packed)) arp_packet {
 
 struct arp_entry {
     struct net_interface *net;
-    ipv4_t ip;
+    ip6_t ip;
     uint8_t mac[ETH_ADDRESS];
     bool resolved;
     uint64_t updated;   /* When learned, or when the last request went out. */
@@ -244,10 +260,12 @@ struct arp_entry {
 struct pending_frame {
     struct pending_frame *next;
     uint8_t *frame;
-    size_t length;
+    size_t start, length; /* The Ethernet frame is at frame + start. */
 };
 
 static struct arp_entry arp_table[ARP_ENTRIES];
+
+static void ask(struct arp_entry *entry);
 
 static void free_pending(struct arp_entry *entry) {
     while (entry->pending) {
@@ -259,16 +277,16 @@ static void free_pending(struct arp_entry *entry) {
     }
 }
 
-static struct arp_entry *arp_find(struct net_interface *net, ipv4_t ip) {
+static struct arp_entry *arp_find(struct net_interface *net, ip6_t ip) {
     for (int i = 0; i < ARP_ENTRIES; i++) {
-        if (arp_table[i].net == net && arp_table[i].ip == ip) {
+        if (arp_table[i].net == net && ip6_equal(arp_table[i].ip, ip)) {
             return &arp_table[i];
         }
     }
     return NULL;
 }
 
-static struct arp_entry *arp_new(struct net_interface *net, ipv4_t ip) {
+static struct arp_entry *arp_new(struct net_interface *net, ip6_t ip) {
     struct arp_entry *victim = &arp_table[0];
     for (int i = 0; i < ARP_ENTRIES; i++) {
         if (!arp_table[i].net) {
@@ -308,7 +326,7 @@ static void arp_send(struct net_interface *net, uint16_t operation, const uint8_
         memcpy(arp->target_mac, target_mac, ETH_ADDRESS);
     }
     arp->target_ip = target_ip;
-    transmit(net, frame, sizeof(frame));
+    net_transmit(net, frame, sizeof(frame));
 }
 
 static void arp_learned(struct arp_entry *entry, const uint8_t *mac) {
@@ -321,8 +339,8 @@ static void arp_learned(struct arp_entry *entry, const uint8_t *mac) {
     entry->pending = NULL;
     while (p) {
         struct pending_frame *next = p->next;
-        memcpy(((struct eth_header *)p->frame)->destination, mac, ETH_ADDRESS);
-        transmit(entry->net, p->frame, p->length);
+        memcpy(((struct eth_header *)(p->frame + p->start))->destination, mac, ETH_ADDRESS);
+        net_transmit(entry->net, p->frame + p->start, p->length);
         kfree(p->frame);
         kfree(p);
         p = next;
@@ -338,12 +356,8 @@ static void arp_input(struct net_interface *net, const uint8_t *data, size_t len
         return;
     }
     bool for_us = net->address && arp->target_ip == net->address;
-    struct arp_entry *entry = arp_find(net, arp->sender_ip);
-    if (entry) {
-        arp_learned(entry, arp->sender_mac);
-    } else if (for_us && arp->sender_ip) {
-        arp_learned(arp_new(net, arp->sender_ip), arp->sender_mac);
-    }
+    net_neighbour_learned(net, ip6_mapped(arp->sender_ip), arp->sender_mac,
+                          for_us && arp->sender_ip);
     if (for_us && arp->operation == net16(ARP_REQUEST)) {
         arp_send(net, ARP_REPLY, arp->sender_mac, arp->sender_ip);
     }
@@ -363,10 +377,63 @@ static void arp_tick(uint64_t now) {
                 entry->net = NULL;
             } else {
                 entry->updated = now;
-                arp_send(entry->net, ARP_REQUEST, NULL, entry->ip);
+                ask(entry);
             }
         }
     }
+}
+
+static void ask(struct arp_entry *entry) {
+    if (ip6_is_mapped(entry->ip)) {
+        arp_send(entry->net, ARP_REQUEST, NULL, ip6_v4(entry->ip));
+    } else {
+        ndp_solicit(entry->net, entry->ip);
+    }
+}
+
+void net_neighbour_learned(struct net_interface *net, ip6_t ip, const uint8_t *mac, bool create) {
+    struct arp_entry *entry = arp_find(net, ip);
+    if (entry) {
+        arp_learned(entry, mac);
+    } else if (create) {
+        arp_learned(arp_new(net, ip), mac);
+    }
+}
+
+void net_send_to_neighbour(struct net_interface *net, ip6_t hop, uint8_t *frame, size_t start,
+                           size_t length) {
+    struct eth_header *eth = (struct eth_header *)(frame + start);
+    struct arp_entry *entry = arp_find(net, hop);
+    if (!entry || !entry->resolved) {
+        /* Ask, and keep the packet until the answer comes. */
+        if (!entry) {
+            entry = arp_new(net, hop);
+            entry->updated = timer_ms();
+            ask(entry);
+        }
+        int waiting = 0;
+        struct pending_frame **p = &entry->pending;
+        while (*p) {
+            p = &(*p)->next;
+            waiting++;
+        }
+        struct pending_frame *pending = waiting < ARP_PENDING_MAX ? kmalloc(sizeof(*pending))
+                                                                  : NULL;
+        if (!pending) {
+            net->tx_dropped++;
+            kfree(frame); /* Lost, like on a busy wire; TCP sends it again. */
+            return;
+        }
+        pending->next = NULL;
+        pending->frame = frame;
+        pending->start = start;
+        pending->length = length;
+        *p = pending;
+        return;
+    }
+    memcpy(eth->destination, entry->mac, ETH_ADDRESS);
+    net_transmit(net, frame + start, length);
+    kfree(frame);
 }
 
 /* ---- IPv4 ---- */
@@ -439,7 +506,8 @@ int ip_send_on(struct net_interface *net, ipv4_t hop, uint8_t *frame, ipv4_t sou
         kfree(frame);
         return -VX_EMSGSIZE;
     }
-    struct ip_header *ip = (struct ip_header *)(frame + ETH_HEADER);
+    size_t start = TRANSPORT_OFFSET - IP_HEADER - ETH_HEADER;
+    struct ip_header *ip = (struct ip_header *)(frame + start + ETH_HEADER);
     ip->version_length = 0x45;
     ip->tos = 0;
     ip->total_length = net16((uint16_t)(IP_HEADER + length));
@@ -452,7 +520,7 @@ int ip_send_on(struct net_interface *net, ipv4_t hop, uint8_t *frame, ipv4_t sou
     ip->destination = destination;
     ip->checksum = net_checksum(ip, IP_HEADER, 0);
 
-    struct eth_header *eth = (struct eth_header *)frame;
+    struct eth_header *eth = (struct eth_header *)(frame + start);
     memcpy(eth->source, net->mac, ETH_ADDRESS);
     eth->type = net16(ETH_TYPE_IP);
     size_t frame_length = ETH_HEADER + IP_HEADER + length;
@@ -464,36 +532,10 @@ int ip_send_on(struct net_interface *net, ipv4_t hop, uint8_t *frame, ipv4_t sou
     } else if (destination == IPV4_BROADCAST || subnet_broadcast) {
         memcpy(eth->destination, broadcast_mac, ETH_ADDRESS);
     } else {
-        struct arp_entry *entry = arp_find(net, hop);
-        if (!entry || !entry->resolved) {
-            /* Ask, and keep the packet until the answer comes. */
-            if (!entry) {
-                entry = arp_new(net, hop);
-                entry->updated = timer_ms();
-                arp_send(net, ARP_REQUEST, NULL, hop);
-            }
-            int waiting = 0;
-            struct pending_frame **p = &entry->pending;
-            while (*p) {
-                p = &(*p)->next;
-                waiting++;
-            }
-            struct pending_frame *pending = waiting < ARP_PENDING_MAX ? kmalloc(sizeof(*pending))
-                                                                      : NULL;
-            if (!pending) {
-                net->tx_dropped++;
-                kfree(frame);
-                return 0; /* Lost, like on a busy wire; TCP sends it again. */
-            }
-            pending->next = NULL;
-            pending->frame = frame;
-            pending->length = frame_length;
-            *p = pending;
-            return 0;
-        }
-        memcpy(eth->destination, entry->mac, ETH_ADDRESS);
+        net_send_to_neighbour(net, ip6_mapped(hop), frame, start, frame_length);
+        return 0;
     }
-    transmit(net, frame, frame_length);
+    net_transmit(net, frame + start, frame_length);
     kfree(frame);
     return 0;
 }
@@ -520,12 +562,21 @@ static void icmp_input(const struct ip_packet *packet) {
         icmp[2] = icmp[3] = 0;
         uint16_t sum = net_checksum(icmp, packet->length, 0);
         memcpy(icmp + 2, &sum, 2);
-        ip_send(frame, packet->destination, packet->source, IP_PROTOCOL_ICMP, packet->length);
+        ip_send(frame, ip6_v4(packet->destination), ip6_v4(packet->source), IP_PROTOCOL_ICMP,
+                packet->length);
     }
 }
 
 void icmp_send_unreachable(const struct ip_packet *packet, uint8_t code) {
     if (packet->broadcast) {
+        return;
+    }
+    if (packet->version == 6) {
+        if (code == 3) {
+            icmp6_send_error(packet, 1, 4, 0); /* Port unreachable. */
+        } else {
+            icmp6_send_error(packet, 4, 1, 6); /* Unknown next header (at byte 6). */
+        }
         return;
     }
     uint8_t *frame = net_frame();
@@ -544,7 +595,8 @@ void icmp_send_unreachable(const struct ip_packet *packet, uint8_t code) {
     size_t length = 8 + packet->header_length + quoted;
     uint16_t sum = net_checksum(icmp, length, 0);
     memcpy(icmp + 2, &sum, 2);
-    ip_send(frame, packet->destination, packet->source, IP_PROTOCOL_ICMP, length);
+    ip_send(frame, ip6_v4(packet->destination), ip6_v4(packet->source), IP_PROTOCOL_ICMP,
+            length);
 }
 
 static void ip_input(struct net_interface *net, const uint8_t *data, size_t length) {
@@ -572,8 +624,9 @@ static void ip_input(struct net_interface *net, const uint8_t *data, size_t leng
     }
     struct ip_packet packet = {
         .net = net,
-        .source = ip->source,
-        .destination = ip->destination,
+        .version = 4,
+        .source = ip6_mapped(ip->source),
+        .destination = ip6_mapped(ip->destination),
         .protocol = ip->protocol,
         .header = data,
         .header_length = header_length,
@@ -611,6 +664,9 @@ void net_receive(struct net_interface *net, const uint8_t *frame, size_t length)
     case ETH_TYPE_IP:
         ip_input(net, frame + ETH_HEADER, length - ETH_HEADER);
         break;
+    case ETH_TYPE_IP6:
+        ip6_input(net, frame + ETH_HEADER, length - ETH_HEADER);
+        break;
     }
 }
 
@@ -637,6 +693,7 @@ static void net_thread(void *arg) {
         if (now - last_tick >= TICK_MS) {
             last_tick = now;
             arp_tick(now);
+            ip6_tick(now);
             tcp_tick(now);
             dhcp_tick(now);
         }
@@ -647,4 +704,39 @@ static void net_thread(void *arg) {
 void net_init(void) {
     net_register(&loopback);
     thread_create("network", net_thread, NULL);
+}
+
+/* ---- Either IP version ---- */
+
+int net_send(uint8_t *frame, ip6_t source, ip6_t destination, uint8_t protocol, size_t length) {
+    if (ip6_is_mapped(destination)) {
+        return ip_send(frame, ip6_is_any(source) ? 0 : ip6_v4(source), ip6_v4(destination),
+                       protocol, length);
+    }
+    return ip6_send(frame, source, destination, protocol, length);
+}
+
+bool net_source_for(ip6_t destination, ip6_t *source) {
+    if (ip6_is_mapped(destination)) {
+        ipv4_t v4 = ip_source_for(ip6_v4(destination));
+        *source = ip6_mapped(v4);
+        return v4 != 0;
+    }
+    return ip6_source_for(destination, source);
+}
+
+bool net_is_local(ip6_t address) {
+    return ip6_is_mapped(address) ? ip_is_local(ip6_v4(address)) : ip6_is_local(address);
+}
+
+uint16_t net_transport_checksum(ip6_t source, ip6_t destination, uint8_t protocol,
+                                const void *data, size_t length) {
+    if (ip6_is_mapped(destination)) {
+        return ip_transport_checksum(ip6_v4(source), ip6_v4(destination), protocol, data, length);
+    }
+    return ip6_transport_checksum(source, destination, protocol, data, length);
+}
+
+size_t net_payload_max(ip6_t destination) {
+    return NET_MTU - (ip6_is_mapped(destination) ? IP_HEADER : IP6_HEADER);
 }

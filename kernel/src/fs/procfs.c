@@ -22,6 +22,7 @@
  *   /proc/<pid>/stat, status, cmdline, comm, maps, exe, cwd, fd/
  *   /proc/meminfo, uptime, loadavg, stat, cpuinfo, version, mounts, filesystems
  *   /proc/net/dev, route         network interfaces and routes, as Linux shows them
+ *   /proc/net/if_inet6, ipv6_route  IPv6 addresses and routes, likewise
  *   /proc/net/resolv.conf        the name servers DHCP gave us (/etc/resolv.conf
  *                                links here; Linux has no such file)
  *
@@ -446,13 +447,99 @@ static void gen_net_route(struct text *text) {
     }
 }
 
+static bool zero16(const unsigned char *a) {
+    for (int i = 0; i < 16; i++) {
+        if (a[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
 static void gen_net_resolv(struct text *text) {
     struct vx_net_interface list[8];
     int count = interfaces(list);
+    bool any = false;
     for (int i = 0; i < count; i++) {
         if (list[i].dns) {
             const uint8_t *b = (const uint8_t *)&list[i].dns;
             text_printf(text, "nameserver %u.%u.%u.%u\n", b[0], b[1], b[2], b[3]);
+            any = true;
+        }
+    }
+    /* IPv6 name servers only when there is no IPv4 one (each extra server
+     * is one more wait when names can't be found). */
+    for (int i = 0; i < count && !any; i++) {
+        if (!zero16(list[i].dns6)) {
+            ip6_t a;
+            char name[48];
+            memcpy(a.b, list[i].dns6, 16);
+            ip6_format(a, name, sizeof(name));
+            text_printf(text, "nameserver %s\n", name);
+        }
+    }
+}
+
+/* Linux's /proc/net/if_inet6: each IPv6 address, its interface, prefix
+ * length, scope and flags. */
+static void gen_net_if_inet6(struct text *text) {
+    struct vx_net_interface list[8];
+    int count = interfaces(list);
+    for (int i = 0; i < count; i++) {
+        for (int j = 0; j < 3; j++) {
+            const unsigned char *a = list[i].address6[j];
+            if (!list[i].prefix6[j]) {
+                continue;
+            }
+            for (int k = 0; k < 16; k++) {
+                text_printf(text, "%02x", a[k]);
+            }
+            unsigned scope = list[i].flags & VX_NET_LOOPBACK ? 0x10
+                             : a[0] == 0xfe && (a[1] & 0xc0) == 0x80 ? 0x20
+                                                                      : 0;
+            text_printf(text, " %02x %02x %02x %02x %s\n", i + 1, list[i].prefix6[j], scope,
+                        0x80, list[i].name);
+        }
+    }
+}
+
+/* Linux's /proc/net/ipv6_route: the routes, as 32-digit hex addresses. */
+static void hex16(struct text *text, const unsigned char *a) {
+    for (int k = 0; k < 16; k++) {
+        text_printf(text, "%02x", a[k]);
+    }
+}
+
+static void gen_net_ipv6_route(struct text *text) {
+    struct vx_net_interface list[8];
+    int count = interfaces(list);
+    static const unsigned char zero[16];
+    for (int i = 0; i < count; i++) {
+        struct vx_net_interface *n = &list[i];
+        if (n->flags & VX_NET_LOOPBACK) {
+            continue;
+        }
+        for (int j = 0; j < 3; j++) {
+            if (!n->prefix6[j]) {
+                continue;
+            }
+            unsigned char prefix[16];
+            memcpy(prefix, n->address6[j], 16);
+            memset(prefix + 8, 0, 8); /* (All of our prefixes are /64.) */
+            hex16(text, prefix);
+            text_printf(text, " %02x ", n->prefix6[j]);
+            hex16(text, zero);
+            text_printf(text, " 00 ");
+            hex16(text, zero);
+            text_printf(text, " %08x 00000000 00000000 00000001 %s\n", 256, n->name);
+        }
+        if (!zero16(n->router6)) {
+            hex16(text, zero);
+            text_printf(text, " 00 ");
+            hex16(text, zero);
+            text_printf(text, " 00 ");
+            hex16(text, n->router6);
+            text_printf(text, " %08x 00000000 00000000 00000003 %s\n", 1024, n->name);
         }
     }
 }
@@ -461,6 +548,8 @@ static const struct global_entry net_entries[] = {
     {"dev", gen_net_dev},
     {"route", gen_net_route},
     {"resolv.conf", gen_net_resolv},
+    {"if_inet6", gen_net_if_inet6},
+    {"ipv6_route", gen_net_ipv6_route},
 };
 #define NET_ENTRY_COUNT (int)(sizeof(net_entries) / sizeof(net_entries[0]))
 

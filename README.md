@@ -170,7 +170,8 @@ kernel options behind it (`acpi=off`, `noapic`) can also be set in `limine.conf`
 10.0.2.15, the router is 10.0.2.2 (which is also your machine), and DNS goes through
 10.0.2.3. Try `net`, `fetch http://example.com/`, or `wget -O - http://example.com/`.
 Linux programs have HTTPS: `curl https://example.com/`, `openssl`, and Python's `ssl`,
-with Mozilla's root certificates. There's no IPv6 yet.
+with Mozilla's root certificates. IPv6 works too: QEMU's router advertises `fec0::/64`,
+so Vexa also gets `fec0::5054:ff:fe12:3456` (try `ping6 fec0::2`).
 
 ### Disks
 
