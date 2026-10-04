@@ -137,6 +137,7 @@ the `vexa:/>` prompt:
 | `fpu-stress &` | runs a program in the background (try it three times, then `ps`) |
 | `sleep 30`, then Ctrl-C | stops the program in front |
 | `ps`, `kill`, `uptime` | processes and how long the system has been up |
+| `nice -n 10 fpu-stress &` | runs a program at a lower priority (`renice` changes it later) |
 | `thread-test`, `pthread-test` | threads: a Vexa program, and a Linux one using musl's pthreads |
 | `posix-test` | checks libvexa's POSIX layer: files, `printf` and `scanf` with floats, libm, pthreads, time |
 | `devices`, `devices -l usb` | the devices Vexa found and their drivers, as a tree; only the USB ones, in detail |
@@ -161,7 +162,7 @@ something is broken: pick it in the boot menu, and Vexa starts it instead of `vi
 If Vexa has trouble on a machine, pick **safe mode** in the boot menu. It ignores ACPI
 and uses only the oldest, most widely supported interrupt and timer hardware. The
 kernel options behind it (`acpi=off`, `noapic`) can also be set in `limine.conf`, as can
-`nosmp` to use only the first CPU core.
+`nosmp` to use only the first CPU core and `noaml` to skip running ACPI's code.
 
 ### Network
 
@@ -275,8 +276,9 @@ kernel/
   src/fs/            ext2, ISO 9660, tmpfs, devfs, procfs, initramfs unpacking
 abi/vexa/abi.h       system call numbers and error codes, shared by kernel and libvexa
 rootfs/              files for the root file system (packed into initramfs.tar)
-third_party/         BusyBox's build configuration, the X sources list (x11-sources.txt) and
-                     Xvexa, Vexa's X server (xvexa/); sources are fetched here at build time
+third_party/         BusyBox's build configuration, the X sources list (x11-sources.txt),
+                     Xvexa, Vexa's X server (xvexa/), uACPI and stb; other sources are
+                     fetched here at build time
 libvexa/             Vexa's C library: program startup, system calls, printf, strings,
                      threads, networking, drawing and windows; built as libvexa.so, with
                      the dynamic loader in libvexa/ld/
@@ -309,7 +311,8 @@ The console font is [Spleen](https://github.com/fcambus/spleen) 8x16 by Frederic
 with the [DejaVu](https://dejavu-fonts.github.io) fonts (Bitstream Vera license and
 public domain changes, `rootfs/share/fonts/LICENSE`), rasterized by
 [stb_truetype](https://github.com/nothings/stb) (public domain or MIT,
-`third_party/stb/stb_truetype.h`).
+`third_party/stb/stb_truetype.h`). The kernel interprets ACPI's AML with
+[uACPI](https://github.com/uACPI/uACPI) 6.1.1 (MIT license, `third_party/uacpi`).
 
 The ISO includes [BusyBox](https://busybox.net) 1.36.1 (GPL-2.0), built unmodified from
 its source with the configuration in `third_party/busybox.config`, and

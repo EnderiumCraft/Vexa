@@ -6,10 +6,11 @@
  * through ATAPI: SCSI commands in a PACKET command).
  *
  * Data moves by PIO (16 bits at a time through the data register). A channel
- * at the old fixed ports has its old fixed interrupt (IRQ 14 or 15), which
- * the waiting thread sleeps until; one in native mode (a PCI interrupt, which
- * Vexa doesn't route) is checked on instead. The controller's own DMA engine
- * (bus mastering) is left alone.
+ * at the old fixed ports has its old fixed interrupt (IRQ 14 or 15); in
+ * native mode, both channels share the controller's PCI interrupt (routed by
+ * the ACPI tables). The waiting thread sleeps until it; without one, it
+ * checks instead. The controller's own DMA engine (bus mastering) is left
+ * alone, except that its status says which channel interrupted.
  */
 #include <vexa/arch.h>
 #include <vexa/block.h>
@@ -64,10 +65,13 @@
 
 struct channel {
     uint16_t command, control;
+    uint16_t bus_master; /* Its bus master status register (native mode), or 0. */
     struct mutex lock; /* (Its two drives share it.) */
     bool interrupts;
     struct wait_queue queue; /* Woken by its interrupt. */
 };
+
+#define BM_STATUS_INTERRUPT 0x04 /* (Write 1 to clear.) */
 
 static struct channel *legacy_channels[2]; /* On IRQ 14 and 15. */
 
@@ -412,13 +416,31 @@ static void secondary_interrupt(struct interrupt_frame *frame) {
     channel_interrupt(1);
 }
 
-static void add_channel(uint16_t command, uint16_t control, struct device *controller) {
+/* Native mode: either channel may be why the controller's line is up. */
+static bool native_interrupt(void *arg) {
+    struct channel *c = arg;
+    if (c->bus_master) {
+        uint8_t status = inb(c->bus_master);
+        if (!(status & BM_STATUS_INTERRUPT)) {
+            return false;
+        }
+        outb(c->bus_master, BM_STATUS_INTERRUPT);
+    }
+    inb((uint16_t)(c->command + REG_STATUS)); /* (Acknowledges it.) */
+    wait_queue_wake_all(&c->queue);
+    return true;
+}
+
+static void add_channel(struct pci_device *pci, uint16_t command, uint16_t control,
+                        uint16_t bus_master) {
+    struct device *controller = pci->node;
     struct channel *c = kzalloc(sizeof(*c));
     if (!c) {
         return;
     }
     c->command = command;
     c->control = control;
+    c->bus_master = bus_master;
     c->lock = (struct mutex)MUTEX_INIT;
     c->queue = (struct wait_queue)WAIT_QUEUE_INIT;
     /* Finding the drives without interrupts (some raise one for nothing). */
@@ -436,6 +458,10 @@ static void add_channel(uint16_t command, uint16_t control, struct device *contr
         inb((uint16_t)(c->command + REG_STATUS));
         c->interrupts = true;
         outb((uint16_t)(c->control + REG_CONTROL), 0);
+    } else if (which < 0 && pci_attach_interrupt(pci, native_interrupt, c)) {
+        inb((uint16_t)(c->command + REG_STATUS));
+        c->interrupts = true;
+        outb((uint16_t)(c->control + REG_CONTROL), 0);
     }
 }
 
@@ -446,15 +472,18 @@ static void probe(struct pci_device *pci) {
     /* Each channel: at the old fixed ports, or (native mode) its BARs. */
     for (int ch = 0; ch < 2; ch++) {
         bool native = pci->prog_if & (1 << (2 * ch));
-        uint16_t command = ch ? 0x170 : 0x1f0, control = ch ? 0x376 : 0x3f6;
+        uint16_t command = ch ? 0x170 : 0x1f0, control = ch ? 0x376 : 0x3f6, bus_master = 0;
         if (native) {
             if (!pci->bar_is_io[2 * ch] || !pci->bar_is_io[2 * ch + 1]) {
                 continue;
             }
             command = (uint16_t)pci->bar[2 * ch];
             control = (uint16_t)(pci->bar[2 * ch + 1] + 2);
+            if (pci->bar_is_io[4] && pci->bar[4]) {
+                bus_master = (uint16_t)(pci->bar[4] + 8 * ch + 2);
+            }
         }
-        add_channel(command, control, pci->node);
+        add_channel(pci, command, control, bus_master);
     }
     device_set_details(pci->node, "IDE, PIO");
 }

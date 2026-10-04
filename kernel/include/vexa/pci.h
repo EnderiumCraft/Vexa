@@ -17,6 +17,7 @@ struct pci_device {
     bool bar_is_io[6];
     volatile uint8_t *config; /* Memory-mapped config space, or NULL for port I/O. */
     struct device *node;      /* In the device tree (its driver names it and claims it). */
+    struct pci_device *bridge; /* The PCI-to-PCI bridge it's behind; NULL on bus 0. */
     struct pci_device *next;
 };
 
@@ -41,6 +42,19 @@ uint8_t pci_find_capability(struct pci_device *device, uint8_t id, uint8_t after
  * bootstrap CPU. Returns false if neither is available (or there is no APIC),
  * in which case the driver should poll. */
 bool pci_enable_msi(struct pci_device *device, irq_handler_t handler);
+
+/* Its legacy interrupt (INTx), routed by the ACPI tables (or, without an
+ * APIC, by the firmware's choice of 8259 IRQ): `handler(arg)` runs on each
+ * interrupt on the (possibly shared) line and says whether it was this
+ * device's. Returns false if it can't be routed: the driver polls. */
+bool pci_attach_interrupt(struct pci_device *device, shared_irq_handler_t handler, void *arg);
+
+/* Configuration space by address, before (or without) pci_init(). `width`
+ * is 1, 2 or 4 bytes. Segment 0 only. */
+uint32_t pci_config_read(uint8_t bus, uint8_t slot, uint8_t function, uint16_t offset,
+                         int width);
+void pci_config_write(uint8_t bus, uint8_t slot, uint8_t function, uint16_t offset, int width,
+                      uint32_t value);
 
 const char *pci_class_name(struct pci_device *device);
 /* A driver has the device: its name in the device tree, and the driver's. */

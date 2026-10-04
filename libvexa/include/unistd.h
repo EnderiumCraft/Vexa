@@ -56,6 +56,7 @@ void sync(void);
 unsigned sleep(unsigned seconds);
 int usleep(useconds_t us);
 pid_t getpid(void);
+int nice(int increment); /* Returns the new nice value. */
 pid_t getppid(void);
 uid_t getuid(void);
 uid_t geteuid(void);

@@ -14,6 +14,18 @@
 static volatile uint32_t aps_ready;
 static volatile bool smp_active;
 
+/* Another CPU queued work here: irq_dispatch() switches to it on the way out. */
+static void reschedule_interrupt(struct interrupt_frame *frame) {
+    (void)frame;
+    cpu_current()->need_resched = true;
+}
+
+void arch_send_reschedule(struct cpu *cpu) {
+    if (cpu->online && cpu != cpu_current()) {
+        lapic_send_ipi(cpu->lapic_id, VECTOR_RESCHEDULE);
+    }
+}
+
 __attribute__((noreturn)) static void halt_this_cpu(struct interrupt_frame *frame) {
     (void)frame;
     cpu_halt_forever();
@@ -63,6 +75,7 @@ void smp_start(struct limine_mp_response *mp) {
         return;
     }
     irq_register(VECTOR_HALT, halt_this_cpu);
+    irq_register(VECTOR_RESCHEDULE, reschedule_interrupt);
     tlb_init();
 
     uint32_t started = 0;

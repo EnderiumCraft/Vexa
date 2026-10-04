@@ -18,6 +18,7 @@
 /* Interrupt vector layout. */
 #define VECTOR_ISA_BASE 0x20 /* ISA IRQ n (timer, keyboard...) arrives on 0x20 + n. */
 #define VECTOR_APIC_TIMER 0x30
+#define VECTOR_RESCHEDULE 0xfc /* Asks a CPU to look at its run queue (sched.c). */
 #define VECTOR_TLB 0xfd  /* Asks other CPUs to flush their TLBs (tlb.c). */
 #define VECTOR_HALT 0xfe /* Sent to other CPUs when the kernel panics. */
 #define VECTOR_SPURIOUS 0xff
@@ -49,6 +50,16 @@ void irq_register(uint8_t vector, irq_handler_t handler);
 int irq_alloc_vector(void);
 /* Installs `handler` for a legacy ISA IRQ (0-15) and unmasks it. */
 void isa_irq_enable(uint8_t irq, irq_handler_t handler);
+/* Shared interrupt lines (PCI INTx, the ACPI SCI): `handler(arg)` runs on
+ * every interrupt on the line and returns whether its device had one. `gsi`
+ * is an I/O APIC input, or, without an APIC, an ISA IRQ. Returns false if
+ * the line can't be used. */
+typedef bool (*shared_irq_handler_t)(void *arg);
+bool irq_attach_line(uint32_t gsi, bool level, bool active_low, shared_irq_handler_t handler,
+                     void *arg);
+/* Where an ISA IRQ arrives (its GSI, after the MADT's overrides, which may
+ * change `level` and `active_low`; pass the defaults in). */
+uint32_t irq_isa_gsi(uint8_t irq, bool *level, bool *active_low);
 
 /* 1000 Hz system timer: the local APIC timer calibrated against the PIT, or the
  * PIT itself without an APIC. */
@@ -56,6 +67,9 @@ void timer_init(void);
 /* Starts the timer on an application processor, reusing timer_init()'s calibration. */
 void timer_init_ap(void);
 uint64_t timer_ms(void);
+/* Makes another CPU check its run queue now (an IPI). */
+struct cpu;
+void arch_send_reschedule(struct cpu *cpu);
 void timer_sleep_ms(uint64_t ms);
 
 static inline uint64_t rdmsr(uint32_t msr) {

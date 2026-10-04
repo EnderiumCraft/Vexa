@@ -225,10 +225,11 @@ partition table again through controls on its `/dev` node (`VX_BLOCK_INFO`,
   per endpoint, in the controller's asynchronous list (control, bulk) or its
   periodic one (interrupt endpoints, visited every frame), with a transfer's
   descriptors hung on it. They take 32-bit addresses, so their memory comes from below
-  4 GiB (`pmm_alloc_below`) and data goes through bounce buffers there; they have no
-  MSI, and Vexa doesn't route the older PCI interrupts, so a thread waiting for a
-  transfer checks its descriptors, and a thread per controller checks the interrupt
-  endpoints and the ports (every 2 ms with a keyboard or mouse, else every 20).
+  4 GiB (`pmm_alloc_below`) and data goes through bounce buffers there. They have no
+  MSI: their interrupt is a legacy PCI one (INTx, below), which wakes the thread
+  waiting for a transfer and a thread per controller that handles the interrupt
+  endpoints and the ports. When it can't be routed, they check instead (every 2 ms
+  with a keyboard or mouse, else every 20).
   EHCI starts before its companions (until then every port is theirs) and hands a
   port to them when what's on it isn't high speed; low and full speed devices behind
   a high speed hub get split transactions instead. UHCI keeps data toggles in
@@ -312,6 +313,20 @@ partition table again through controls on its `/dev` node (`VX_BLOCK_INFO`,
   `VX_DISPLAY_SET_MODE`, through the card's DISPI registers), and the first mode comes
   back when it lets go. The desktop can also draw everything twice as big: it composes
   at half the size and doubles the pixels as it copies them out.
+- **ACPI's namespace** (`core/aml.c`) comes from [uACPI](https://github.com/uACPI/uACPI)
+  (`third_party/uacpi`, MIT), an AML interpreter: at boot it loads the DSDT and SSDTs
+  and runs their initialization (`_INI`, `_STA`), with `\_PIC(1)` telling the firmware
+  that interrupts go through I/O APICs. `aml.c` gives uACPI the services it asks for
+  (mapping, PCI configuration space, ports, locks with timeouts, events, the SCI) and
+  handles the power button. `noaml` on the kernel command line skips it.
+- **Legacy PCI interrupts** (INTx): `pci_attach_interrupt` finds where a device's pin
+  goes by the `_PRT` tables: the host bridge's, or the deepest bridge above the device
+  that has one (pins rotate by slot through each bridge below it); an entry names an
+  I/O APIC input or a link device, whose current resources give it. Without ACPI it
+  falls back to the firmware's 8259 IRQ (the interrupt line register). Lines are
+  shared (`irq_attach_line`): each handler says whether its device interrupted, and a
+  line nobody claims for a long run is masked. The EHCI, UHCI and OHCI drivers and
+  IDE channels in native mode use it.
 - **Power** (`kernel/src/core/power.c`): turning off enters ACPI's S5 state (the PM1
   control registers from the FADT, the sleep type from the DSDT's `\_S5_` package,
   found by its name), with the ports virtual machines use as a fallback; restarting
@@ -399,6 +414,16 @@ RTL8111/8168, with descriptor rings). Each registers with `net_register` under t
   every few milliseconds rather than being woken; good enough for now.
 
 ## Threads today
+
+**Scheduling** (`core/sched.c`). Each CPU has a run queue with three priority bands,
+from the thread's nice value (its process's, -20 to 19: below 0 high, 0 normal, above
+0 low; kernel threads are high). A CPU runs the first thread of its highest non-empty
+band, but one that has waited over 100 ms goes first whatever its band, so nothing
+starves; a CPU with nothing to do takes work from the busiest one. A woken thread goes
+back to the CPU it ran on last, or to an idle CPU (woken by an IPI) if that one is
+busy, and it preempts a lower-band thread at once. Within a band it's round robin with
+10 ms slices. One lock still covers the queues, wait queues and sleepers: it's held
+across a context switch, so no CPU picks up a thread whose stack is still in use.
 
 A process has a list of threads, all sharing its address space and handle table. Each
 thread has its own kernel stack, saved registers, thread pointer (FS base), blocked

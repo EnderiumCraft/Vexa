@@ -467,6 +467,7 @@ struct process *process_spawn(const struct spawn_request *request, int *error,
         }
     }
     process->parent = request->parent;
+    process->nice = request->parent ? request->parent->nice : 0;
     process->auto_reap = request->parent == NULL;
     process->start_ms = timer_ms();
     set_program(process, request->path, request->argv, request->argc);
@@ -538,6 +539,7 @@ struct process *process_fork(struct interrupt_frame *frame, int *error) {
     memcpy(child->name, parent->name, sizeof(child->name));
     memcpy(child->signal_actions, parent->signal_actions, sizeof(child->signal_actions));
     child->umask = parent->umask;
+    child->nice = parent->nice;
     if (parent->terminal) {
         child->terminal = parent->terminal;
         vnode_ref(child->terminal);

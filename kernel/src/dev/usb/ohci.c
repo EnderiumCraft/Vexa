@@ -7,9 +7,10 @@
  * the HCCA, a page it shares with the driver). Each ED has a queue of
  * transfer descriptors (TDs) that ends in an empty one, its tail: queuing a
  * transfer fills the tail and adds a new empty one after it. The controller
- * keeps the data toggle. As with EHCI and UHCI there are no interrupts here:
- * waiting threads check their TDs, and the controller's thread the interrupt
- * endpoints and the ports.
+ * keeps the data toggle. Finished TDs (each written back at the end of its
+ * frame), errors and root hub changes interrupt: that wakes the waiting
+ * thread and the controller's thread (interrupt endpoints and ports).
+ * Without a routed interrupt, they check instead.
  */
 #include <vexa/arch.h>
 #include <vexa/device.h>
@@ -27,6 +28,7 @@
 #define REG_CONTROL 0x04
 #define REG_COMMAND_STATUS 0x08
 #define REG_INTERRUPT_STATUS 0x0c
+#define REG_INTERRUPT_ENABLE 0x10
 #define REG_INTERRUPT_DISABLE 0x14
 #define REG_HCCA 0x18
 #define REG_CONTROL_HEAD 0x20
@@ -74,12 +76,20 @@
 #define TD_SETUP (0U << 19)
 #define TD_OUT (1U << 19)
 #define TD_IN (2U << 19)
-#define TD_NO_INTERRUPT (7U << 21)
 #define TD_DATA0 (2U << 24)
 #define TD_DATA1 (3U << 24)
 #define TD_CODE(info) ((info) >> 28)
 #define TD_NOT_ACCESSED (15U << 28)
 #define CODE_STALL 4
+
+/* Interrupts: TDs written back (the done queue), an unrecoverable error,
+ * root hub changes; and the master enable. */
+#define INT_WRITEBACK (1U << 1)
+#define INT_UNRECOVERABLE (1U << 4)
+#define INT_ROOT_HUB (1U << 6)
+#define INT_MASTER (1U << 31)
+#define INT_USED (INT_WRITEBACK | INT_UNRECOVERABLE | INT_ROOT_HUB)
+#define HCCA_DONE_HEAD 0x84
 
 struct ed {
     uint32_t info, tail, head, next;
@@ -109,6 +119,7 @@ struct endpoint {
     usb_report_fn callback;
     void *arg;
     uint16_t size;
+    struct ohci *hc;
     struct endpoint *next;
 };
 
@@ -127,6 +138,7 @@ struct ohci {
     struct endpoint *lists[3];
     struct mutex lock;
     struct hcd_addresses addresses;
+    struct hcd_irq irq;
 };
 
 enum { LIST_CONTROL, LIST_BULK, LIST_INTERRUPT };
@@ -166,6 +178,7 @@ static struct endpoint *new_endpoint(struct usb_device *device, int address, uin
     ep->type = type;
     ep->max_packet = max_packet ? max_packet : 8;
     ep->lock = (struct mutex)MUTEX_INIT;
+    ep->hc = device->hc->data;
     ep->bounce_order = type == USB_ENDPOINT_BULK ? 1 : type == USB_ENDPOINT_CONTROL ? 1 : 0;
     ep->ed = hcd_pages(0);
     ep->bounce = hcd_pages(ep->bounce_order);
@@ -259,7 +272,7 @@ static void queue_td(struct queue *q, uint32_t info, const uint8_t *buffer, uint
     struct td *td = &q->ep->tds[q->cursor];
     int index = q->cursor;
     struct td *following = next_td(q->ep, &index);
-    td->info = info | TD_NOT_ACCESSED | TD_NO_INTERRUPT;
+    td->info = info | TD_NOT_ACCESSED; /* (Delay 0: an interrupt at the end of its frame.) */
     td->buffer = length ? hcd_phys(buffer) : 0;
     td->end = length ? hcd_phys(buffer + length - 1) : 0;
     td->next = hcd_phys(following);
@@ -301,7 +314,7 @@ static void reset_queue(struct endpoint *ep, bool skip_first) {
 
 /* Waits for the queued TDs; returns 0 or an error. */
 static int finish(struct endpoint *ep, struct queue *q, uint32_t timeout_ms) {
-    if (!hcd_wait(queue_done, q, timeout_ms)) {
+    if (!hcd_wait(&ep->hc->irq, queue_done, q, timeout_ms)) {
         reset_queue(ep, true);
         kprintf("[ohci] endpoint %x: a transfer timed out\n", ep->address);
         return -VX_ETIMEDOUT;
@@ -606,11 +619,31 @@ static const struct usb_hc_ops ohci_ops = {
 
 /* ---- The controller's thread ---- */
 
+static bool ohci_interrupt(void *arg) {
+    struct ohci *hc = arg;
+    uint32_t status = read32(hc, REG_INTERRUPT_STATUS);
+    if (!(status & INT_USED) || status == 0xffffffffU) {
+        return false; /* Another device's, on a shared line. */
+    }
+    if (status & INT_WRITEBACK) {
+        /* (The driver watches its EDs, not the done queue: let it go.) */
+        hc->hcca[HCCA_DONE_HEAD / 4] = 0;
+    }
+    if (status & INT_UNRECOVERABLE) {
+        write32(hc, REG_INTERRUPT_DISABLE, INT_UNRECOVERABLE); /* (Once is enough.) */
+    }
+    write32(hc, REG_INTERRUPT_STATUS, status & INT_USED);
+    hcd_irq_wake(&hc->irq);
+    return true;
+}
+
 static void poll_thread(void *arg) {
     struct ohci *hc = arg;
     for (;;) {
-        thread_sleep_ms(hc->lists[LIST_INTERRUPT] ? 2 : 20);
-        write32(hc, REG_INTERRUPT_STATUS, read32(hc, REG_INTERRUPT_STATUS) & 0x7f);
+        hcd_idle(&hc->irq, hc->lists[LIST_INTERRUPT] ? 2 : 20, 250);
+        if (!hc->irq.enabled) {
+            write32(hc, REG_INTERRUPT_STATUS, read32(hc, REG_INTERRUPT_STATUS) & 0x7f);
+        }
         for (int port = 1; port <= hc->ports; port++) {
             uint32_t status = read32(hc, REG_RH_PORT(port));
             if (status & PORT_CONNECT_CHANGE) {
@@ -731,6 +764,13 @@ static void probe(struct pci_device *pci) {
     uint32_t power_good = (a >> 24) * 2;
     thread_sleep_ms(power_good > 20 ? power_good : 20);
 
+    hc->irq.queue = (struct wait_queue)WAIT_QUEUE_INIT;
+    hc->irq.enabled = pci_attach_interrupt(pci, ohci_interrupt, hc);
+    if (hc->irq.enabled) {
+        write32(hc, REG_INTERRUPT_STATUS, 0xffffffffU);
+        write32(hc, REG_INTERRUPT_ENABLE, INT_USED | INT_MASTER);
+    }
+
     hc->usb.ops = &ohci_ops;
     hc->usb.data = hc;
     hc->usb.name = "ohci";
@@ -738,8 +778,9 @@ static void probe(struct pci_device *pci) {
     hc->usb.node = pci->node;
     controller_count++;
     pci_claim(pci, "ohci", NULL);
-    device_set_details(pci->node, "USB 1, %d ports, polled", hc->ports);
-    kprintf("[ohci] %d ports\n", hc->ports);
+    const char *how = hc->irq.enabled ? "interrupts" : "polled";
+    device_set_details(pci->node, "USB 1, %d ports, %s", hc->ports, how);
+    kprintf("[ohci] %d ports, %s\n", hc->ports, how);
     thread_create("ohci", poll_thread, hc);
     usb_add_controller(&hc->usb);
 }

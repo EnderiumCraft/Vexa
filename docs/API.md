@@ -101,6 +101,7 @@ Paths are C strings; relative ones start from the current folder.
 | `long vx_wait(int process, unsigned flags)` | waits for it to end; returns its exit code (`VX_WAIT_NO_HANG`: `-VX_EAGAIN` if it hasn't) |
 | `long vx_handle_process_id(int process)` | the process id behind a handle |
 | `long vx_kill(long process_id, int signal)` | sends a signal to a process |
+| `long vx_priority(long process_id, int nice, int *now)` | sets a process's nice value (-20 runs first, 19 last; `VX_PRIORITY_GET` just reads it); children inherit it |
 | `long vx_signal(int signal, int action)` | `VX_SIGNAL_DEFAULT` or `VX_SIGNAL_IGNORE` (Vexa programs can't catch signals) |
 | `long vx_set_foreground(long group)` | which process group the terminal's Ctrl-C goes to |
 | `long vx_process_list(struct vx_process_info *entries, size_t count)` | the processes (id, parent, group, state, memory, name) |

@@ -9,9 +9,10 @@ int main(void) {
         fprintf(stderr, "ps: %s\n", vx_strerror(n));
         return 1;
     }
-    printf("   id  parent  group  state    name\n");
+    printf("   id  parent  group  nice  threads  state    name\n");
     for (long i = n - 1; i >= 0; i--) {
-        printf("%5u  %6u  %5u  %-7s  %s\n", list[i].id, list[i].parent, list[i].group,
+        printf("%5u  %6u  %5u  %4d  %7u  %-7s  %s\n", list[i].id, list[i].parent,
+               list[i].group, list[i].nice, list[i].threads,
                list[i].state == 0 ? "running" : "exited", list[i].name);
     }
     return 0;

@@ -121,6 +121,18 @@ void lapic_send_ipi_all_but_self(uint8_t vector) {
     }
 }
 
+void lapic_send_ipi(uint32_t lapic_id, uint8_t vector) {
+    if (x2apic) {
+        wrmsr(X2APIC_MSR_BASE + LAPIC_ICR_LOW / 16, (uint64_t)lapic_id << 32 | vector);
+        return;
+    }
+    lapic_write(LAPIC_ICR_HIGH, lapic_id << 24);
+    lapic_write(LAPIC_ICR_LOW, vector);
+    while (lapic_read(LAPIC_ICR_LOW) & ICR_DELIVERY_PENDING) {
+        __asm__ volatile("pause");
+    }
+}
+
 static void lapic_enable_this_cpu(void) {
     wrmsr(IA32_APIC_BASE_MSR, rdmsr(IA32_APIC_BASE_MSR) | IA32_APIC_BASE_ENABLE);
     lapic_write(LAPIC_TPR, 0);                       /* Accept all priorities. */
@@ -231,6 +243,54 @@ bool apic_init(void) {
     kprintf("[apic] %u CPU(s), local APIC id %u (%s), %d I/O APIC(s), %d IRQ override(s)\n",
             cpu_count, lapic_id(), x2apic ? "x2APIC" : "xAPIC", ioapic_count, override_count);
     return true;
+}
+
+uint32_t ioapic_isa_gsi(uint8_t irq, bool *level, bool *active_low) {
+    for (int i = 0; i < override_count; i++) {
+        if (overrides[i].irq == irq) {
+            /* Polarity and trigger: 0 means the bus's default (kept). */
+            uint16_t polarity = overrides[i].flags & 0x3, trigger = (overrides[i].flags >> 2) & 0x3;
+            if (polarity) {
+                *active_low = polarity == 0x3;
+            }
+            if (trigger) {
+                *level = trigger == 0x3;
+            }
+            return overrides[i].gsi;
+        }
+    }
+    return irq;
+}
+
+static struct ioapic *ioapic_for(uint32_t gsi, uint32_t *pin) {
+    for (int i = 0; i < ioapic_count; i++) {
+        struct ioapic *io = &ioapics[i];
+        if (gsi >= io->gsi_base && gsi < io->gsi_base + io->gsi_count) {
+            *pin = gsi - io->gsi_base;
+            return io;
+        }
+    }
+    return NULL;
+}
+
+bool ioapic_route_gsi(uint32_t gsi, uint8_t vector, bool level, bool active_low) {
+    uint32_t pin;
+    struct ioapic *io = ioapic_for(gsi, &pin);
+    if (!io) {
+        return false;
+    }
+    ioapic_write(io, IOAPIC_REDTBL(pin) + 1, lapic_id() << 24);
+    ioapic_write(io, IOAPIC_REDTBL(pin),
+                 vector | (level ? IOAPIC_LEVEL : 0) | (active_low ? IOAPIC_ACTIVE_LOW : 0));
+    return true;
+}
+
+void ioapic_mask_gsi(uint32_t gsi) {
+    uint32_t pin;
+    struct ioapic *io = ioapic_for(gsi, &pin);
+    if (io) {
+        ioapic_write(io, IOAPIC_REDTBL(pin), ioapic_read(io, IOAPIC_REDTBL(pin)) | IOAPIC_MASKED);
+    }
 }
 
 void ioapic_route_isa_irq(uint8_t irq, uint8_t vector) {

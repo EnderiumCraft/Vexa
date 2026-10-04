@@ -727,6 +727,31 @@ static void list_one(struct process *process, void *arg) {
     info->state = process->state == PROCESS_RUNNING ? 0 : 1;
     info->memory = 0;
     memcpy(info->name, process->name, sizeof(info->name));
+    info->nice = process->nice;
+    info->threads = process->thread_count;
+}
+
+/* A process's nice value: read, or set. (There are no users yet, so anyone
+ * may set anyone's.) */
+static int64_t sys_priority(uint64_t id, uint64_t nice, uint64_t out, uint64_t a3) {
+    (void)a3;
+    struct process *process = id ? process_find((uint32_t)id) : process_current();
+    if (!process) {
+        return -VX_ESRCH;
+    }
+    if (id == 0) {
+        object_ref(&process->object);
+    }
+    int64_t value = (int64_t)nice;
+    if (value != VX_PRIORITY_GET) {
+        sched_set_nice(process, value < -20 ? -20 : value > 19 ? 19 : (int)value);
+    }
+    int32_t now = process->nice;
+    object_put(&process->object);
+    if (out && !copy_to_user(out, &now, sizeof(now))) {
+        return -VX_EFAULT;
+    }
+    return 0;
 }
 
 static int64_t sys_process_list(uint64_t out, uint64_t count, uint64_t a2, uint64_t a3) {
@@ -1398,6 +1423,7 @@ static const syscall_fn syscalls[] = {
     [VX_SYS_SET_THREAD_POINTER] = sys_set_thread_pointer,
     [VX_SYS_DEVICE_LIST] = sys_device_list,
     [VX_SYS_DUP] = sys_dup,
+    [VX_SYS_PRIORITY] = sys_priority,
 };
 
 static void vexa_syscall(struct interrupt_frame *frame) {

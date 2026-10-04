@@ -25,7 +25,9 @@ struct thread {
     void *fpu_state;         /* Saved vector registers; user threads only. */
     uint64_t wake_at;        /* For THREAD_SLEEPING, in timer_ms() time. */
     uint64_t cpu_ms;         /* Time spent running. */
-    uint32_t cpu;            /* CPU it last ran on. */
+    uint32_t cpu;            /* CPU it last ran on (MAX_CPUS: none yet). */
+    int8_t nice;             /* -20 (first) to 19 (last); its process's. */
+    uint64_t ready_since;    /* timer_ms() when it was queued. */
     struct thread *next;     /* Run queue, sleep list or wait queue link. */
     struct thread *all_next; /* List of every thread. */
     struct wait_queue *waiting_on; /* While THREAD_BLOCKED. */
@@ -121,6 +123,8 @@ bool sched_attach_thread(struct process *process, struct thread *thread);
 /* Asks every thread of the process except `keep` to exit (for exec), and
  * waits until they are all gone. */
 void sched_kill_other_threads(struct process *process, struct thread *keep);
+/* Sets the process's nice value (-20 to 19), for each of its threads. */
+void sched_set_nice(struct process *process, int nice);
 /* Calls `fn` for each thread of the process, with the scheduler lock held. */
 void sched_for_each_process_thread(struct process *process,
                                    void (*fn)(struct thread *thread, void *arg), void *arg);

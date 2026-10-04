@@ -106,6 +106,11 @@ long vx_device_list(struct vx_device_info *devices, size_t count, unsigned long 
 /* Another handle to the same object: `new_handle` (closing what was there) or,
  * with -1, the lowest free one. */
 long vx_dup(int handle, int new_handle);
+/* A process's nice value (-20 runs first, 19 last; 0 by default; children
+ * inherit it): set to `nice`, or just read with VX_PRIORITY_GET; `*now`
+ * (unless NULL) gets the value. Process id 0 is this one. Returns 0 or a
+ * negative VX_E* error. */
+long vx_priority(long process_id, int nice, int *now);
 long vx_kernel_command(const char *command);
 
 /* A short description of a (negative) VX_E* error. */

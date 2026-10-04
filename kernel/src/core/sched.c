@@ -12,12 +12,21 @@
 #include <vexa/string.h>
 
 /*
- * Preemptive round-robin scheduler.
+ * Preemptive scheduler with per-CPU run queues and three priority bands.
  *
- * All CPUs share one run queue, protected by sched_lock. A thread runs until
- * it blocks, sleeps, yields, or uses up its time slice, at which point the
- * timer interrupt switches to the next ready thread. Each CPU has an idle
+ * Each CPU has its own run queue: a FIFO per band (high, normal, low; from
+ * a thread's nice value: below 0, 0, above 0). A woken thread goes back to
+ * the CPU it last ran on (its caches are warm there), or to an idle CPU if
+ * that one is busy, which is then woken with an IPI. A CPU runs the first
+ * thread of its highest non-empty band, except that a thread waiting longer
+ * than STARVE_MS goes first whatever its band; a CPU with nothing to run
+ * takes work from the busiest other one. A higher-band thread becoming ready
+ * preempts a lower-band one at once. Within a band, a thread runs until it
+ * blocks, sleeps, yields, or uses up its time slice. Each CPU has an idle
  * thread (the code that booted it) for when nothing else is ready.
+ *
+ * One lock, sched_lock, still covers the run queues, wait queues and
+ * sleepers (finer locking would need wake-ups to be reworked).
  *
  * sched_lock is held across a context switch: the thread that switches away
  * takes it, and the thread that resumes releases it. That keeps other CPUs
@@ -25,6 +34,9 @@
  */
 
 #define TIME_SLICE_MS 10
+#define BANDS 3        /* High, normal, low. */
+#define STARVE_MS 100  /* Waited this long: runs next, whatever its band. */
+#define KERNEL_NICE -5 /* Kernel threads: in the high band (short bursts of work). */
 #define KERNEL_STACK_SIZE (64 * 1024)
 #define STACK_CACHE_SIZE 64
 
@@ -33,7 +45,14 @@ void thread_trampoline(void);                              /* switch.S */
 void arch_prepare_switch(struct cpu *cpu, struct thread *prev, struct thread *next); /* cpu.c */
 
 static struct spinlock sched_lock = SPINLOCK_INIT;
-static struct thread *run_head, *run_tail;
+
+struct run_queue {
+    struct thread *head[BANDS], *tail[BANDS];
+    uint32_t count;
+};
+
+static struct run_queue queues[MAX_CPUS];
+static volatile uint32_t queued; /* In all of them. */
 static struct thread *sleepers;
 static struct process_timer *armed_timers; /* Under sched_lock. */
 static struct thread *all_threads;
@@ -63,31 +82,101 @@ static bool stack_put(uint64_t top) {
     return cached;
 }
 
-static void run_queue_push(struct thread *thread) {
+static int band_of(const struct thread *thread) {
+    return thread->nice < 0 ? 0 : thread->nice == 0 ? 1 : 2;
+}
+
+static bool cpu_idle(const struct cpu *cpu) {
+    return cpu->current == cpu->idle && queues[cpu->id].count == 0;
+}
+
+static void push(uint32_t cpu, struct thread *thread) {
+    struct run_queue *q = &queues[cpu];
+    int band = band_of(thread);
     thread->next = NULL;
-    if (run_tail) {
-        run_tail->next = thread;
+    thread->ready_since = timer_ms();
+    if (q->tail[band]) {
+        q->tail[band]->next = thread;
     } else {
-        run_head = thread;
+        q->head[band] = thread;
     }
-    run_tail = thread;
+    q->tail[band] = thread;
+    q->count++;
+    queued++;
+}
+
+static struct thread *take(struct run_queue *q, int band) {
+    struct thread *thread = q->head[band];
+    q->head[band] = thread->next;
+    if (!q->head[band]) {
+        q->tail[band] = NULL;
+    }
+    thread->next = NULL;
+    q->count--;
+    queued--;
+    return thread;
+}
+
+/* The next thread for `q`: one that has waited too long, else the first of
+ * the highest band. */
+static struct thread *pick(struct run_queue *q) {
+    if (!q->count) {
+        return NULL;
+    }
+    uint64_t now = timer_ms();
+    for (int band = BANDS - 1; band > 0; band--) {
+        if (q->head[band] && now - q->head[band]->ready_since >= STARVE_MS) {
+            return take(q, band);
+        }
+    }
+    for (int band = 0; band < BANDS; band++) {
+        if (q->head[band]) {
+            return take(q, band);
+        }
+    }
+    return NULL;
 }
 
 static struct thread *run_queue_pop(void) {
-    struct thread *thread = run_head;
-    if (thread) {
-        run_head = thread->next;
-        if (!run_head) {
-            run_tail = NULL;
-        }
-        thread->next = NULL;
+    struct cpu *cpu = cpu_current();
+    struct thread *thread = pick(&queues[cpu->id]);
+    if (thread || !queued) {
+        return thread;
     }
-    return thread;
+    /* Nothing here: take work from the busiest CPU. */
+    struct run_queue *busiest = NULL;
+    for (uint32_t i = 0; i < MAX_CPUS; i++) {
+        if (i != cpu->id && queues[i].count && (!busiest || queues[i].count > busiest->count)) {
+            busiest = &queues[i];
+        }
+    }
+    return busiest ? pick(busiest) : NULL;
 }
 
 static void make_ready(struct thread *thread) {
     thread->state = THREAD_READY;
-    run_queue_push(thread);
+    struct cpu *here = cpu_current();
+    uint32_t target = thread->cpu < MAX_CPUS && cpus[thread->cpu].online ? thread->cpu : here->id;
+    if (!cpu_idle(&cpus[target])) {
+        /* Its CPU is busy: an idle one, if there is one, takes it. */
+        for (uint32_t i = 0; i < MAX_CPUS; i++) {
+            if (cpus[i].online && cpus[i].current && cpu_idle(&cpus[i])) {
+                target = i;
+                break;
+            }
+        }
+    }
+    push(target, thread);
+    struct cpu *cpu = &cpus[target];
+    struct thread *running_there = cpu->current;
+    bool preempt = running_there == cpu->idle ||
+                   (running_there && band_of(thread) < band_of(running_there));
+    if (preempt) {
+        cpu->need_resched = true;
+        if (cpu != here) {
+            arch_send_reschedule(cpu);
+        }
+    }
 }
 
 /* Frees a dead thread. Runs on another thread's stack, with sched_lock held. */
@@ -224,6 +313,8 @@ struct thread *thread_create_stopped(const char *name, void (*entry)(void *), vo
     *--sp = 0;               /* r15 */
     thread->rsp = (uint64_t)sp;
     thread->state = THREAD_BLOCKED;
+    thread->nice = KERNEL_NICE; /* (A process's threads take its nice value.) */
+    thread->cpu = MAX_CPUS;     /* Never ran: whichever CPU starts it. */
     register_thread(thread);
     return thread;
 }
@@ -447,6 +538,7 @@ bool sched_attach_thread(struct process *process, struct thread *thread) {
     bool ok = !process->exiting;
     if (ok) {
         thread->process = process;
+        thread->nice = process->nice;
         thread->process_next = process->threads;
         process->threads = thread;
         process->thread_count++;
@@ -454,6 +546,15 @@ bool sched_attach_thread(struct process *process, struct thread *thread) {
     }
     spin_unlock_irqrestore(&sched_lock, flags);
     return ok;
+}
+
+void sched_set_nice(struct process *process, int nice) {
+    uint64_t flags = spin_lock_irqsave(&sched_lock);
+    process->nice = (int8_t)nice;
+    for (struct thread *thread = process->threads; thread; thread = thread->process_next) {
+        thread->nice = (int8_t)nice; /* (A queued thread moves band when queued next.) */
+    }
+    spin_unlock_irqrestore(&sched_lock, flags);
 }
 
 static bool only_one_thread(void *arg) {
@@ -609,7 +710,7 @@ void sched_tick(void) {
     }
 
     if (thread == cpu->idle) {
-        if (run_head) { /* Unlocked peek: at worst we check again next tick. */
+        if (queued) { /* Unlocked peek: at worst we check again next tick. */
             cpu->need_resched = true;
         }
     } else if (cpu->slice_left == 0 || --cpu->slice_left == 0) {

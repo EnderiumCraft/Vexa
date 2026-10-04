@@ -124,6 +124,11 @@ TYPED_COMMANDS = ([
     ("fpu-stress &", "started in the background", 10, 2),
     ("fpu-stress", "): passed, 20 rounds", 300, 3),
     ("ps", "vinit", 10),
+    # Priorities: nice runs a command with a higher nice value (it inherits
+    # it); two busy programs, one niced, still both finish.
+    ("nice -n 5 nice", "\n5\r\n", 10),
+    ("nice -n 19 fpu-stress &", "started in the background", 10, 3),
+    ("fpu-stress", "): passed, 20 rounds", 300, 5),
     # The kernel monitor's commands, through `sys`.
     # Threads: four sharing a mutex, then exiting with threads still running.
     ("thread-test", "thread-test: passed", 60),
@@ -350,6 +355,7 @@ LINUX_COMMANDS = [
     ("#linux",),
     ("busybox echo hello from linux", "hello from linux", 20, 2),
     ("busybox uname -sr", "Vexa 6.1.0-vexa", 20),
+    ("busybox nice -n 3 busybox nice", "\n3\r\n", 20),
     ("busybox uname -n", "vexa-test", 20, 3),  # The name `hostname` gave it.
     ("busybox sh -c 'echo answer $((6*7))'", "answer 42", 20),
     ("export PS1='\\166exa:bb# '", None, 10),  # "vexa:bb# ", so prompts are counted

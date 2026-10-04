@@ -68,6 +68,7 @@ struct process {
     char *cwd;               /* Absolute, normalized. */
     struct vnode *terminal;  /* What /dev/tty opens (a referenced pty), or NULL: the console. */
     uint32_t umask;          /* Permission bits new files don't get (kept across exec). */
+    int8_t nice;             /* Scheduling priority, -20 to 19; children inherit it. */
     uint64_t pending_signals;
     uint8_t signal_actions[VX_SIGNAL_COUNT]; /* enum signal_action */
     char *exe;               /* The program's path, and its arguments NUL-separated. */

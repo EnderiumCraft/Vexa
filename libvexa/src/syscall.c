@@ -267,6 +267,10 @@ long vx_dup(int handle, int new_handle) {
     return syscall2(VX_SYS_DUP, (long)handle, (long)new_handle);
 }
 
+long vx_priority(long process_id, int nice, int *now) {
+    return syscall3(VX_SYS_PRIORITY, process_id, (long)nice, (long)now);
+}
+
 long vx_set_thread_pointer(void *address) {
     return syscall1(VX_SYS_SET_THREAD_POINTER, address);
 }

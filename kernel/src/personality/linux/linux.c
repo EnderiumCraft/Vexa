@@ -2658,6 +2658,40 @@ static int64_t sys_sched_yield(struct interrupt_frame *f, uint64_t a0, uint64_t 
     return 0;
 }
 
+/* getpriority and setpriority: for a process (who 0: this one); a process
+ * group or user means this process, as there's one user. */
+static struct process *priority_target(uint64_t which, uint64_t who) {
+    if (which == 0 && who) {
+        return process_find((uint32_t)who);
+    }
+    struct process *self = process_current();
+    object_ref(&self->object);
+    return self;
+}
+
+static int64_t sys_getpriority(struct interrupt_frame *f, uint64_t which, uint64_t who,
+                               uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5) {
+    struct process *process = priority_target(which, who);
+    if (!process) {
+        return -LE_ESRCH;
+    }
+    int64_t value = 20 - process->nice; /* (The raw call's form: 1 to 40.) */
+    object_put(&process->object);
+    return value;
+}
+
+static int64_t sys_setpriority(struct interrupt_frame *f, uint64_t which, uint64_t who,
+                               uint64_t nice, uint64_t a3, uint64_t a4, uint64_t a5) {
+    struct process *process = priority_target(which, who);
+    if (!process) {
+        return -LE_ESRCH;
+    }
+    int64_t n = (int32_t)nice;
+    sched_set_nice(process, n < -20 ? -20 : n > 19 ? 19 : (int)n);
+    object_put(&process->object);
+    return 0;
+}
+
 static void realtime(struct linux_timespec *ts);
 
 /* A futex timeout in milliseconds: relative for FUTEX_WAIT, absolute (on the
@@ -3572,8 +3606,8 @@ static const linux_fn syscalls[] = {
     CALL(personality, sys_zero),
     CALL(statfs, sys_statfs),
     CALL(fstatfs, sys_fstatfs),
-    CALL(getpriority, sys_zero),
-    CALL(setpriority, sys_zero),
+    CALL(getpriority, sys_getpriority),
+    CALL(setpriority, sys_setpriority),
     CALL(prctl, sys_prctl),
     CALL(arch_prctl, sys_arch_prctl),
     CALL(setrlimit, sys_accept_quietly),

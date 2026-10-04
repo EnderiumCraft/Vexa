@@ -20,6 +20,7 @@ struct __attribute__((packed)) acpi_rsdp {
 };
 
 static const struct acpi_sdt_header *root_table; /* XSDT or RSDT. */
+static uint64_t rsdp_address;
 static bool root_is_xsdt;
 
 static bool checksum_ok(const void *data, size_t length) {
@@ -73,6 +74,7 @@ void acpi_init(uint64_t rsdp_phys) {
     if (!checksum_ok(root_table, root_table->length)) {
         panic("ACPI: bad %s checksum", root_is_xsdt ? "XSDT" : "RSDT");
     }
+    rsdp_address = rsdp_phys;
 
     kprintf("[acpi] revision %u, tables:", rsdp->revision);
     for (size_t i = 0; i < root_entry_count(); i++) {
@@ -81,6 +83,10 @@ void acpi_init(uint64_t rsdp_phys) {
                 table->signature[2], table->signature[3]);
     }
     kprintf("\n");
+}
+
+uint64_t acpi_rsdp(void) {
+    return rsdp_address;
 }
 
 const struct acpi_sdt_header *acpi_find_table(const char *signature) {

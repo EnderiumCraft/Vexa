@@ -91,6 +91,10 @@
                                  unsigned long long *generation) -> how many devices */
 #define VX_SYS_DUP 62      /* vx_dup(handle, new or -1) -> another handle to the same object:
                               `new` (closing what was there), or the lowest free one */
+#define VX_SYS_PRIORITY 63 /* vx_priority(process id or 0 for this one, nice or
+                              VX_PRIORITY_GET, int *nice_out or NULL): its nice value
+                              (-20 first .. 19 last), set and/or read */
+#define VX_PRIORITY_GET 1000
 
 /* vx_power actions. */
 #define VX_POWER_RESTART 1
@@ -219,6 +223,8 @@ struct vx_process_info {
     unsigned int state;   /* 0 running, 1 exited */
     unsigned long long memory; /* Bytes of memory in use. */
     char name[32];
+    int nice;             /* Its priority: -20 (first) to 19 (last). */
+    unsigned int threads;
 };
 
 /* ---- Sockets ----

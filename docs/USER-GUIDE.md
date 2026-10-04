@@ -49,8 +49,9 @@ Other resolutions: copy one of those entries in `limine.conf` and change its
 picks one it has instead. On QEMU's and Bochs's standard VGA, Settings → Display
 changes the resolution while Vexa runs, among the sizes the card can show.
 
-The kernel options behind safe mode (`acpi=off`, `noapic`), and `nosmp` (use only the
-first CPU core), can also be written into `limine.conf`.
+The kernel options behind safe mode (`acpi=off`, `noapic`), `nosmp` (use only the
+first CPU core) and `noaml` (keep ACPI's tables, but don't run their code: older USB
+controllers and some IDE ones are then polled), can also be written into `limine.conf`.
 
 While it starts, the kernel prints what it finds (memory, CPUs, disks, the network).
 Then `vinit`, the first program, shows a welcome message and starts the shell:
@@ -135,7 +136,8 @@ Vexa's own programs are in `/bin` (`ls /bin` lists them).
 
 | Command | What it does |
 | --- | --- |
-| `ps` | the running processes |
+| `ps` | the running processes (with their nice values and thread counts) |
+| `nice -n 10 command`, `renice 5 id` | run a command at a lower priority (nice values go from -20, first, to 19, last), or change a running one's |
 | `kill [-signal] id...` | sends a signal (`kill -9 12`); SIGTERM unless told |
 | `sleep seconds` | waits (fractions allowed: `sleep 0.5`) |
 | `uptime` | time since boot, CPUs and memory |
@@ -799,7 +801,7 @@ fit, `R` turn, Space slideshow.
 - **The desktop stops responding**: Ctrl+Alt+Q, then Enter, goes back to the console,
   if the desktop still reads the keyboard.
 - **Vexa doesn't boot on a machine**: try **safe mode** from the boot menu, then add
-  `nosmp` in `limine.conf`.
+  `nosmp` in `limine.conf`. If it stops just after `[acpi] revision...`, try `noaml`.
 - **Something is badly broken**: the **kernel monitor** entry in the boot menu starts
   the kernel's own command line (`help` lists its commands), without any programs.
 - **The kernel stops** ("VEXA KERNEL PANIC"): the screen (and the serial port) show

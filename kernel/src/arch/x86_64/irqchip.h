@@ -9,6 +9,8 @@
 /* Legacy 8259 PIC (pic.c). */
 void pic_init(void); /* Remaps IRQs to VECTOR_ISA_BASE and masks them all. */
 void pic_unmask(uint8_t irq);
+void pic_mask(uint8_t irq);
+void pic_set_level(uint8_t irq); /* Level-triggered (the ELCR), for PCI. */
 void pic_eoi(uint8_t irq);
 bool pic_is_spurious(uint8_t irq);
 
@@ -16,10 +18,17 @@ bool pic_is_spurious(uint8_t irq);
 bool apic_init(void); /* Returns false if the MADT or an I/O APIC is missing. */
 uint32_t apic_cpu_count(void);
 void ioapic_route_isa_irq(uint8_t irq, uint8_t vector);
+/* An ISA IRQ's GSI after the MADT's overrides, which may also change
+ * `level` and `active_low` (pass the defaults in). */
+uint32_t ioapic_isa_gsi(uint8_t irq, bool *level, bool *active_low);
+/* Points a GSI at `vector` (unmasked); false if no I/O APIC has it. */
+bool ioapic_route_gsi(uint32_t gsi, uint8_t vector, bool level, bool active_low);
+void ioapic_mask_gsi(uint32_t gsi);
 void lapic_eoi(void);
 uint32_t lapic_id(void);
 void lapic_init_ap(void);
 void lapic_send_ipi_all_but_self(uint8_t vector);
+void lapic_send_ipi(uint32_t lapic_id, uint8_t vector);
 /* TLB shootdowns (tlb.c): needed once more than one CPU runs. */
 void tlb_init(void);
 uint32_t lapic_read(uint32_t reg);

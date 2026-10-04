@@ -11,6 +11,7 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <sys/resource.h>
 #include <vexa/syscall.h>
 #include "internal.h"
 
@@ -427,6 +428,39 @@ unsigned sleep(unsigned seconds) {
 int usleep(useconds_t us) {
     vx_sleep((us + 999) / 1000);
     return 0;
+}
+
+/* ---- Priorities ---- */
+
+int getpriority(int which, id_t who) {
+    int nice = 0;
+    long error = vx_priority(which == PRIO_PROCESS ? (long)who : 0, VX_PRIORITY_GET, &nice);
+    if (error) {
+        errno = __vx_errno_of(error);
+        return -1;
+    }
+    errno = 0; /* (-1 is a valid answer: callers check errno.) */
+    return nice;
+}
+
+int setpriority(int which, id_t who, int value) {
+    long error = vx_priority(which == PRIO_PROCESS ? (long)who : 0, value, NULL);
+    if (error) {
+        errno = __vx_errno_of(error);
+        return -1;
+    }
+    return 0;
+}
+
+int nice(int increment) {
+    int now = 0;
+    vx_priority(0, VX_PRIORITY_GET, &now);
+    long error = vx_priority(0, now + increment, &now);
+    if (error) {
+        errno = __vx_errno_of(error);
+        return -1;
+    }
+    return now;
 }
 
 pid_t getpid(void) {

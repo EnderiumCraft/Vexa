@@ -32,6 +32,26 @@ void pic_unmask(uint8_t irq) {
     outb(PIC1_DATA, inb(PIC1_DATA) & ~(1 << irq));
 }
 
+void pic_mask(uint8_t irq) {
+    if (irq >= 8) {
+        outb(PIC2_DATA, inb(PIC2_DATA) | (uint8_t)(1 << (irq - 8)));
+    } else {
+        outb(PIC1_DATA, inb(PIC1_DATA) | (uint8_t)(1 << irq));
+    }
+}
+
+/* The edge/level control registers (ELCR), one bit per IRQ. */
+#define ELCR1 0x4d0
+#define ELCR2 0x4d1
+
+void pic_set_level(uint8_t irq) {
+    if (irq >= 8) {
+        outb(ELCR2, inb(ELCR2) | (uint8_t)(1 << (irq - 8)));
+    } else if (irq > 2) { /* (Never the timer, keyboard or cascade.) */
+        outb(ELCR1, inb(ELCR1) | (uint8_t)(1 << irq));
+    }
+}
+
 void pic_eoi(uint8_t irq) {
     if (irq >= 8) {
         outb(PIC2_COMMAND, PIC_EOI);

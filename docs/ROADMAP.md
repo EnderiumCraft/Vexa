@@ -76,9 +76,10 @@ allocations) and checks every byte and page comes back.
 - [x] SMEP and SMAP where the CPU has them, so the kernel can't be tricked into running
       or reading user memory
 - [x] `libvexa` begins: program startup, system call wrappers, `printf`, string functions
-- [ ] Moved to later phases: per-CPU run queues and priorities (once there are
-      workloads to measure), TLB shootdowns between CPUs (needed with multi-threaded
-      processes and `munmap`, Phases 5-6)
+- [x] Per-CPU run queues with three priority bands from nice values (`nice`,
+      `renice`, `vx_priority`; Linux `setpriority`), work stealing, and IPIs to wake
+      idle CPUs (0.30.0). TLB shootdowns between CPUs came with multi-threaded
+      processes (Phases 5-6)
 
 **Milestone:** a native Vexa "hello world" runs in user mode. Reached: `run hello-world`.
 `make test` also runs `crash` (a program that must be stopped without harming the
@@ -93,7 +94,8 @@ registers survive being interrupted.
 - [x] initramfs loaded as a Limine module (tar), unpacked into the root file system
 - [x] tmpfs and a device file system (`/dev/null`, `/dev/zero`, `/dev/console`, disks;
       `/dev/random` and `/dev/urandom` since 0.22.0)
-- [x] PCI enumeration (ECAM or legacy ports), MSI and MSI-X interrupts
+- [x] PCI enumeration (ECAM or legacy ports), MSI and MSI-X interrupts; legacy PCI interrupts
+      routed by the ACPI `_PRT` tables, through uACPI's AML interpreter (0.30.0)
 - [x] Block layer: write-through block cache, GPT and MBR partitions
 - [x] virtio-blk driver (QEMU), then AHCI and NVMe for real hardware; each falls back to
       polling without MSI

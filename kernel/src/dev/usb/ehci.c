@@ -10,10 +10,11 @@
  * Each endpoint has a queue head (QH): control and bulk ones in the
  * asynchronous schedule, a ring the controller goes around; interrupt ones in
  * the periodic schedule, visited every frame (1 ms). A transfer is a few
- * qTDs hung on its queue head. The controller has no MSI and Vexa doesn't
- * route the older PCI interrupts, so transfers are checked on: by the thread
- * that waits for one, and by the controller's thread (interrupt endpoints:
+ * qTDs hung on its queue head. The controller has no MSI; its legacy PCI
+ * interrupt (finished transfers, errors, port changes) wakes the thread that
+ * waits for a transfer and the controller's thread (interrupt endpoints:
  * each report to its callback, then queued again; and port changes).
+ * Without a routed interrupt, they check instead.
  */
 #include <vexa/arch.h>
 #include <vexa/device.h>
@@ -52,6 +53,9 @@
 #define STS_SYSTEM_ERROR (1U << 4)
 #define STS_DOORBELL (1U << 5)
 #define STS_HALTED (1U << 12)
+/* The interrupts used (USBINTR and USBSTS): transfers done, transfer errors,
+ * port changes, host system errors. (Not the doorbell: it's waited for.) */
+#define STS_INTERRUPTS 0x17
 
 #define PORT_CONNECTED (1U << 0)
 #define PORT_CONNECT_CHANGE (1U << 1)
@@ -120,10 +124,11 @@ struct endpoint {
     uint8_t *bounce; /* Data goes through here (below 4 GiB). */
     unsigned bounce_order;
     struct mutex lock;
-    /* Interrupt endpoints: kept polled. */
+    /* Interrupt endpoints: reports go here. */
     usb_report_fn callback;
     void *arg;
     uint16_t size;
+    struct ehci *hc;
     struct endpoint *next; /* In its schedule's list. */
 };
 
@@ -143,6 +148,8 @@ struct ehci {
     struct endpoint *async, *periodic; /* What's linked behind them. */
     struct mutex lock; /* The schedules and the lists. */
     struct hcd_addresses addresses;
+    struct hcd_irq irq;
+    volatile bool system_error;
 };
 
 static uint32_t read32(volatile uint8_t *base, uint32_t offset) {
@@ -210,6 +217,7 @@ static struct endpoint *new_endpoint(struct usb_device *device, int address, uin
     ep->type = type;
     ep->max_packet = max_packet ? max_packet : 8;
     ep->lock = (struct mutex)MUTEX_INIT;
+    ep->hc = device->hc->data;
     ep->bounce_order = type == USB_ENDPOINT_BULK ? 2 : type == USB_ENDPOINT_CONTROL ? 1 : 0;
     ep->qh = hcd_pages(0);
     ep->bounce = hcd_pages(ep->bounce_order);
@@ -333,7 +341,7 @@ static bool transfer_done(void *arg) {
 static int finish(struct ehci *hc, struct endpoint *ep, struct qtd *qtds, int count,
                   uint32_t timeout_ms) {
     struct transfer t = {qtds, count};
-    if (!hcd_wait(transfer_done, &t, timeout_ms)) {
+    if (!hcd_wait(&hc->irq, transfer_done, &t, timeout_ms)) {
         unlink(hc, ep);
         for (int i = 0; i < count; i++) {
             qtds[i].token &= ~TOKEN_ACTIVE;
@@ -441,7 +449,7 @@ static int ehci_bulk(struct usb_hc *usb, struct usb_device *device, uint8_t endp
 }
 
 static void queue_report(struct endpoint *ep) {
-    fill_qtd(&ep->qtds[0], ep->bounce, ep->size, TOKEN_IN);
+    fill_qtd(&ep->qtds[0], ep->bounce, ep->size, TOKEN_IN | TOKEN_IOC);
     start(ep, ep->qtds);
 }
 
@@ -646,13 +654,30 @@ static const struct usb_hc_ops ehci_ops = {
 
 /* ---- The controller's thread ---- */
 
+static bool ehci_interrupt(void *arg) {
+    struct ehci *hc = arg;
+    uint32_t status = read32(hc->op, OP_USBSTS);
+    if (!(status & STS_INTERRUPTS) || status == 0xffffffffU) {
+        return false; /* Another device's, on a shared line. */
+    }
+    if (status & STS_SYSTEM_ERROR) {
+        hc->system_error = true; /* (The controller has stopped; the thread says so.) */
+    }
+    write32(hc->op, OP_USBSTS, status & STS_INTERRUPTS);
+    hcd_irq_wake(&hc->irq);
+    return true;
+}
+
 static void poll_thread(void *arg) {
     struct ehci *hc = arg;
     bool complained = false;
     for (;;) {
-        thread_sleep_ms(hc->periodic ? 2 : 20);
+        hcd_idle(&hc->irq, hc->periodic ? 2 : 20, 250);
         uint32_t status = read32(hc->op, OP_USBSTS);
         write32(hc->op, OP_USBSTS, status & (STS_PORT_CHANGE | STS_SYSTEM_ERROR | 0x3));
+        if (hc->system_error) {
+            status |= STS_SYSTEM_ERROR;
+        }
         if ((status & (STS_SYSTEM_ERROR | STS_HALTED)) && !complained) {
             kprintf("[ehci] the controller stopped (status %x)\n", status);
             complained = true;
@@ -785,6 +810,12 @@ static void probe(struct pci_device *pci) {
         }
     }
     thread_sleep_ms(20);
+    hc->irq.queue = (struct wait_queue)WAIT_QUEUE_INIT;
+    hc->irq.enabled = pci_attach_interrupt(pci, ehci_interrupt, hc);
+    if (hc->irq.enabled) {
+        write32(hc->op, OP_USBSTS, STS_INTERRUPTS);
+        write32(hc->op, OP_USBINTR, STS_INTERRUPTS);
+    }
 
     hc->usb.ops = &ehci_ops;
     hc->usb.data = hc;
@@ -793,10 +824,11 @@ static void probe(struct pci_device *pci) {
     hc->usb.node = pci->node;
     controllers[controller_count++] = hc;
     pci_claim(pci, "ehci", NULL);
-    device_set_details(pci->node, "USB 2, %d ports, %d USB 1 companion controller%s, polled",
-                       hc->ports, hc->companions, hc->companions == 1 ? "" : "s");
-    kprintf("[ehci] %d ports, %d companion controller%s\n", hc->ports, hc->companions,
-            hc->companions == 1 ? "" : "s");
+    const char *how = hc->irq.enabled ? "interrupts" : "polled";
+    device_set_details(pci->node, "USB 2, %d ports, %d USB 1 companion controller%s, %s",
+                       hc->ports, hc->companions, hc->companions == 1 ? "" : "s", how);
+    kprintf("[ehci] %d ports, %d companion controller%s, %s\n", hc->ports, hc->companions,
+            hc->companions == 1 ? "" : "s", how);
     thread_create("ehci", poll_thread, hc);
     usb_add_controller(&hc->usb);
 }

@@ -49,6 +49,13 @@ else
 SRCS := $(filter-out kernel/src/personality/linux/%,$(SRCS))
 endif
 OBJS := $(patsubst kernel/src/%,$(BUILD)/obj/%.o,$(SRCS))
+# uACPI (third_party/uacpi, MIT): the ACPI interpreter, for the DSDT's AML
+# (PCI interrupt routing). Built with the kernel's flags and its own headers.
+UACPI_SRCS := $(wildcard third_party/uacpi/source/*.c)
+UACPI_OBJS := $(patsubst third_party/uacpi/source/%.c,$(BUILD)/obj/uacpi/%.o,$(UACPI_SRCS))
+UACPI_CFLAGS := -Ithird_party/uacpi/include -DUACPI_SIZED_FREES
+CFLAGS += $(UACPI_CFLAGS)
+OBJS += $(UACPI_OBJS)
 
 # User programs: libvexa plus one directory per program under userland/.
 # -nostdinc keeps the host's C library headers out; only the compiler's own
@@ -221,6 +228,10 @@ $(BUILD)/obj/%.c.o: kernel/src/%.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD)/obj/%.S.o: kernel/src/%.S
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD)/obj/uacpi/%.o: third_party/uacpi/source/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 

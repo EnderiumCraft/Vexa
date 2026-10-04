@@ -8,9 +8,11 @@
  * Every frame starts at the same place here: the queue heads (QHs) of the
  * interrupt endpoints, then those of the control and bulk endpoints. Each
  * QH has a chain of transfer descriptors (TDs), one per packet; the driver
- * keeps the endpoints' data toggles. As with EHCI there are no interrupts:
- * waiting threads check their TDs, and the controller's thread checks the
- * interrupt endpoints and the ports.
+ * keeps the endpoints' data toggles. The last TD of each transfer asks for
+ * an interrupt (as do short packets and errors), which wakes the waiting
+ * thread and the controller's thread (interrupt endpoints; it also checks
+ * the ports, which interrupt for nothing). Without a routed interrupt, they
+ * check instead.
  */
 #include <vexa/arch.h>
 #include <vexa/device.h>
@@ -34,6 +36,10 @@
 #define REG_SOFMOD 0x0c
 #define REG_PORTSC(port) (0x10 + 2 * ((port) - 1))
 
+/* USBINTR: timeouts and CRC errors, resume, completions (IOC), short packets. */
+#define INTR_ALL 0x0f
+#define STS_INTERRUPTS 0x1f /* (Write 1 to clear.) */
+
 #define CMD_RUN (1U << 0)
 #define CMD_RESET (1U << 1)
 #define CMD_GLOBAL_RESET (1U << 2)
@@ -51,6 +57,7 @@
 #define PORT_CHANGES (PORT_CONNECT_CHANGE | PORT_ENABLE_CHANGE) /* (Write 1 to clear.) */
 
 #define LEGACY_SUPPORT 0xc0 /* In PCI configuration space. */
+#define LEGACY_PIRQ_ENABLE 0x2000 /* The controller's interrupt reaches the PCI pin. */
 
 /* Link pointers. */
 #define LINK_TERMINATE 1U
@@ -106,6 +113,7 @@ struct endpoint {
     usb_report_fn callback;
     void *arg;
     uint16_t size;
+    struct uhci *hc;
     struct endpoint *next;
 };
 
@@ -124,6 +132,7 @@ struct uhci {
     struct endpoint *interrupts, *async;
     struct mutex lock;
     struct hcd_addresses addresses;
+    struct hcd_irq irq;
 };
 
 static uint16_t port_read(struct uhci *hc, int port) {
@@ -151,6 +160,7 @@ static struct endpoint *new_endpoint(struct usb_device *device, int address, uin
     ep->max_packet = max_packet ? max_packet : 8;
     ep->device_address = (uint8_t)address;
     ep->low_speed = device->speed == USB_SPEED_LOW;
+    ep->hc = device->hc->data;
     ep->lock = (struct mutex)MUTEX_INIT;
     ep->order = type == USB_ENDPOINT_CONTROL ? 1 : 0;
     ep->bounce_order = type == USB_ENDPOINT_BULK ? 2 : type == USB_ENDPOINT_CONTROL ? 1 : 0;
@@ -267,10 +277,12 @@ static bool transfer_done(void *arg) {
 static int run(struct endpoint *ep, int first, int count, uint32_t timeout_ms, int *finished) {
     struct td *tds = &ep->tds[first];
     struct transfer t = {tds, count};
+    struct uhci *hc = ep->hc;
     tds[count - 1].link = LINK_TERMINATE;
+    tds[count - 1].status |= TD_IOC;
     __atomic_thread_fence(__ATOMIC_SEQ_CST);
     ep->qh->element = hcd_phys(tds);
-    bool done = hcd_wait(transfer_done, &t, timeout_ms);
+    bool done = hcd_wait(&hc->irq, transfer_done, &t, timeout_ms);
     ep->qh->element = LINK_TERMINATE;
     *finished = 0;
     if (!done) {
@@ -400,6 +412,7 @@ static void queue_report(struct endpoint *ep) {
     fill_tds(ep, 0, PID_IN, ep->bounce, ep->size < ep->max_packet ? ep->size : ep->max_packet,
              &toggle);
     ep->tds[0].link = LINK_TERMINATE;
+    ep->tds[0].status |= TD_IOC;
     __atomic_thread_fence(__ATOMIC_SEQ_CST);
     ep->qh->element = hcd_phys(ep->tds);
 }
@@ -589,11 +602,26 @@ static const struct usb_hc_ops uhci_ops = {
 
 /* ---- The controller's thread ---- */
 
+static bool uhci_interrupt(void *arg) {
+    struct uhci *hc = arg;
+    uint16_t status = inw((uint16_t)(hc->io + REG_USBSTS));
+    if (!(status & STS_INTERRUPTS) || status == 0xffff) {
+        return false; /* Another device's, on a shared line. */
+    }
+    outw((uint16_t)(hc->io + REG_USBSTS), status & STS_INTERRUPTS);
+    hcd_irq_wake(&hc->irq);
+    return true;
+}
+
 static void poll_thread(void *arg) {
     struct uhci *hc = arg;
     for (;;) {
-        thread_sleep_ms(hc->interrupts ? 2 : 20);
-        outw((uint16_t)(hc->io + REG_USBSTS), 0x1f); /* (Clear what it says.) */
+        /* Interrupt endpoints are checked every 2 ms without interrupts; the
+         * ports (no interrupt tells of them) at least every 100 ms. */
+        hcd_idle(&hc->irq, hc->interrupts ? 2 : 20, 100);
+        if (!hc->irq.enabled) {
+            outw((uint16_t)(hc->io + REG_USBSTS), STS_INTERRUPTS); /* (Clear what it says.) */
+        }
         for (int port = 1; port <= hc->ports; port++) {
             uint16_t status = port_read(hc, port);
             if (status & PORT_CONNECT_CHANGE) {
@@ -694,6 +722,12 @@ static void probe(struct pci_device *pci) {
         return;
     }
     hc->ports = count_ports(hc);
+    hc->irq.queue = (struct wait_queue)WAIT_QUEUE_INIT;
+    hc->irq.enabled = pci_attach_interrupt(pci, uhci_interrupt, hc);
+    if (hc->irq.enabled) {
+        outw((uint16_t)(hc->io + REG_USBINTR), INTR_ALL);
+        pci_write16(pci, LEGACY_SUPPORT, LEGACY_PIRQ_ENABLE);
+    }
 
     hc->usb.ops = &uhci_ops;
     hc->usb.data = hc;
@@ -702,8 +736,9 @@ static void probe(struct pci_device *pci) {
     hc->usb.node = pci->node;
     controller_count++;
     pci_claim(pci, "uhci", NULL);
-    device_set_details(pci->node, "USB 1, %d ports, polled", hc->ports);
-    kprintf("[uhci] %d ports\n", hc->ports);
+    const char *how = hc->irq.enabled ? "interrupts" : "polled";
+    device_set_details(pci->node, "USB 1, %d ports, %s", hc->ports, how);
+    kprintf("[uhci] %d ports, %s\n", hc->ports, how);
     thread_create("uhci", poll_thread, hc);
     usb_add_controller(&hc->usb);
 }

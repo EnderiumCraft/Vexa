@@ -1,3 +1,4 @@
+#include <vexa/acpi.h>
 #include <vexa/cmdline.h>
 #include <vexa/device.h>
 #include <vexa/fb.h>
@@ -79,6 +80,7 @@ static bool start_vinit(void) {
 
 void init_thread(void *unused) {
     (void)unused;
+    acpi_namespace_init(); /* (Before the drivers: PCI interrupt routing.) */
     fs_init();
     /* The root file system: an installed Vexa's disk (root=), or the initramfs
      * unpacked into memory. */

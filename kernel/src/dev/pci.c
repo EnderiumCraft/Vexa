@@ -145,13 +145,14 @@ static void read_bars(struct pci_device *d, int count) {
     pci_write16(d, PCI_COMMAND, command);
 }
 
-static void scan_bus(uint8_t bus, int depth, struct device *parent);
+static void scan_bus(uint8_t bus, int depth, struct pci_device *bridge);
 
 static unsigned pci_kind(struct pci_device *d);
 
 static void probe_function(uint8_t bus, uint8_t slot, uint8_t function, int depth,
-                           struct device *parent) {
-    struct pci_device probe = {.bus = bus, .slot = slot, .function = function};
+                           struct pci_device *bridge) {
+    struct device *parent = bridge ? bridge->node : NULL;
+    struct pci_device probe = {.bus = bus, .slot = slot, .function = function, .bridge = bridge};
     if (ecam_base) {
         if (bus < ecam_start_bus || bus > ecam_end_bus) {
             return;
@@ -177,6 +178,13 @@ static void probe_function(uint8_t bus, uint8_t slot, uint8_t function, int dept
     d->prog_if = (class >> 8) & 0xff;
     uint8_t header = pci_read8(d, PCI_HEADER_TYPE) & 0x7f;
     read_bars(d, header == 0 ? 6 : header == 1 ? 2 : 0);
+    /* No legacy interrupt until a driver asks for it (pci_attach_interrupt):
+     * a device left asserting a shared line nobody handles would keep
+     * interrupting. (Not IDE controllers: in compatibility mode their
+     * interrupts are IRQ 14 and 15, which some chipsets tie to this bit.) */
+    if (header == 0 && !(d->class_code == 0x01 && d->subclass == 0x01)) {
+        pci_write16(d, PCI_COMMAND, pci_read16(d, PCI_COMMAND) | COMMAND_INTX_DISABLE);
+    }
 
     struct pci_device **link = &devices;
     while (*link) {
@@ -202,12 +210,12 @@ static void probe_function(uint8_t bus, uint8_t slot, uint8_t function, int dept
     if (d->class_code == 0x06 && d->subclass == 0x04 && header == 1 && depth < 16) {
         uint8_t secondary = pci_read8(d, PCI_SECONDARY_BUS);
         if (secondary > bus) {
-            scan_bus(secondary, depth + 1, d->node);
+            scan_bus(secondary, depth + 1, d);
         }
     }
 }
 
-static void scan_bus(uint8_t bus, int depth, struct device *parent) {
+static void scan_bus(uint8_t bus, int depth, struct pci_device *bridge) {
     for (uint8_t slot = 0; slot < 32; slot++) {
         struct pci_device probe = {.bus = bus, .slot = slot};
         if (ecam_base) {
@@ -223,12 +231,18 @@ static void scan_bus(uint8_t bus, int depth, struct device *parent) {
         }
         bool multifunction = pci_read8(&probe, PCI_HEADER_TYPE) & 0x80;
         for (uint8_t function = 0; function < (multifunction ? 8 : 1); function++) {
-            probe_function(bus, slot, function, depth, parent);
+            probe_function(bus, slot, function, depth, bridge);
         }
     }
 }
 
-void pci_init(void) {
+/* Where memory-mapped configuration space is, from the MCFG table (once). */
+static void find_ecam(void) {
+    static bool done;
+    if (done) {
+        return;
+    }
+    done = true;
     const struct acpi_sdt_header *mcfg = acpi_find_table("MCFG");
     if (mcfg && mcfg->length >= sizeof(*mcfg) + 8 + sizeof(struct mcfg_entry)) {
         const struct mcfg_entry *entry = (const void *)((const uint8_t *)mcfg + sizeof(*mcfg) + 8);
@@ -238,6 +252,63 @@ void pci_init(void) {
             ecam_end_bus = entry->end_bus;
         }
     }
+}
+
+uint32_t pci_config_read(uint8_t bus, uint8_t slot, uint8_t function, uint16_t offset,
+                         int width) {
+    find_ecam();
+    if (ecam_base && bus >= ecam_start_bus && bus <= ecam_end_bus) {
+        volatile uint8_t *config = map_phys(
+            ecam_base + ((uint64_t)(bus - ecam_start_bus) << 20 | (uint64_t)slot << 15 |
+                         (uint64_t)function << 12),
+            PAGE_SIZE, MAP_UNCACHED);
+        switch (width) {
+        case 1: return config[offset];
+        case 2: return *(volatile uint16_t *)(config + offset);
+        default: return *(volatile uint32_t *)(config + offset);
+        }
+    }
+    if (offset >= 256) {
+        return 0xffffffffU;
+    }
+    struct pci_device d = {.bus = bus, .slot = slot, .function = function};
+    uint32_t word = pci_read32(&d, offset & ~3);
+    return width == 4 ? word : (word >> ((offset & 3) * 8)) & (width == 1 ? 0xff : 0xffff);
+}
+
+void pci_config_write(uint8_t bus, uint8_t slot, uint8_t function, uint16_t offset, int width,
+                      uint32_t value) {
+    find_ecam();
+    if (ecam_base && bus >= ecam_start_bus && bus <= ecam_end_bus) {
+        volatile uint8_t *config = map_phys(
+            ecam_base + ((uint64_t)(bus - ecam_start_bus) << 20 | (uint64_t)slot << 15 |
+                         (uint64_t)function << 12),
+            PAGE_SIZE, MAP_UNCACHED);
+        switch (width) {
+        case 1: config[offset] = (uint8_t)value; break;
+        case 2: *(volatile uint16_t *)(config + offset) = (uint16_t)value; break;
+        default: *(volatile uint32_t *)(config + offset) = value; break;
+        }
+        return;
+    }
+    if (offset >= 256) {
+        return;
+    }
+    /* Through the ports: the byte lanes of the dword at 0xcfc. */
+    struct pci_device d = {.bus = bus, .slot = slot, .function = function};
+    __asm__ volatile("outl %0, %1" : : "a"(legacy_address(&d, offset)), "Nd"((uint16_t)0xcf8));
+    uint16_t port = (uint16_t)(0xcfc + (offset & 3));
+    if (width == 1) {
+        outb(port, (uint8_t)value);
+    } else if (width == 2) {
+        __asm__ volatile("outw %0, %1" : : "a"((uint16_t)value), "Nd"(port));
+    } else {
+        __asm__ volatile("outl %0, %1" : : "a"(value), "Nd"((uint16_t)0xcfc));
+    }
+}
+
+void pci_init(void) {
+    find_ecam();
     scan_bus(0, 0, NULL);
     kprintf("[pci] %d devices (%s)\n", device_count,
             ecam_base ? "memory-mapped config" : "legacy config ports");
@@ -301,6 +372,47 @@ bool pci_enable_msi(struct pci_device *d, irq_handler_t handler) {
         return true;
     }
     return false;
+}
+
+/* ---- Legacy interrupts (INTx) ---- */
+
+#define PCI_INTERRUPT_LINE 0x3c
+#define PCI_INTERRUPT_PIN 0x3d
+
+bool pci_attach_interrupt(struct pci_device *d, shared_irq_handler_t handler, void *arg) {
+    uint8_t pin = pci_read8(d, PCI_INTERRUPT_PIN);
+    if (pin < 1 || pin > 4) {
+        return false;
+    }
+    uint32_t gsi;
+    bool level = true, active_low = true, found;
+    const char *how;
+    if (interrupt_controller_is_apic()) {
+        /* The ACPI tables say where each slot's pins go. */
+        found = acpi_pci_route(d, pin, &gsi, &level, &active_low);
+        how = "ACPI";
+        if (!found) {
+            /* Without them: the firmware's choice for the 8259, which on
+             * most chipsets is also that I/O APIC input. */
+            uint8_t line = pci_read8(d, PCI_INTERRUPT_LINE);
+            found = line > 0 && line < 16;
+            gsi = found ? irq_isa_gsi(line, &level, &active_low) : 0;
+            how = "the firmware's IRQ";
+        }
+    } else {
+        uint8_t line = pci_read8(d, PCI_INTERRUPT_LINE);
+        found = line > 0 && line < 16;
+        gsi = line;
+        how = "the 8259";
+    }
+    if (!found || !irq_attach_line(gsi, level, active_low, handler, arg)) {
+        return false;
+    }
+    pci_write16(d, PCI_COMMAND, pci_read16(d, PCI_COMMAND) & ~COMMAND_INTX_DISABLE);
+    kprintf("[pci] %02x:%02x.%x: interrupt pin %c -> %s %u (%s, %s)\n", d->bus, d->slot,
+            d->function, 'A' + pin - 1, interrupt_controller_is_apic() ? "GSI" : "IRQ", gsi,
+            how, level ? "level" : "edge");
+    return true;
 }
 
 const char *pci_class_name(struct pci_device *d) {
