@@ -15,7 +15,7 @@ SDL 2, on another machine), the [API reference](docs/API.md) (libvexa), the
 
 ![Vexa running in QEMU](docs/screenshot.png)
 
-![The Vexa desktop: glass title bars and panel, Settings and the Installer](docs/desktop-screenshot.png)
+![The Vexa desktop: Music playing, with the glass title bars and panel](docs/desktop-screenshot.png)
 
 ## Status
 
