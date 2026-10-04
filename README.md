@@ -188,15 +188,15 @@ qemu-system-x86_64 -M q35 -m 512M -cdrom build/vexa.iso -boot d \
 ```
 
 ext3 disks (`mke2fs -t ext3`) have a journal, which Vexa keeps: pulling the plug
-mid-write can't leave them inconsistent. ext4 disks are refused (Vexa doesn't support
-their extra features yet).
+mid-write can't leave them inconsistent. ext4 disks (`mkfs.ext4`) are read, mounted
+read-only: Vexa follows their extent trees but doesn't write them yet.
 
 Phase 8 is under way: Vexa has a graphical desktop of its own (`desktop`), with terminal
 windows you can drag, resize, maximize and minimize, and X programs run on it as windows
 of their own: Ctrl+Alt+X opens an `xterm`.
 Linux programs also get the kernel's display and input interfaces, DRM with "dumb
 buffers" on `/dev/dri/card0` and evdev on `/dev/input`, so they can draw on the whole
-screen without X, OpenGL through Mesa's llvmpipe (in X windows, or into memory), a D-Bus
+screen without X (or run Xorg there: `startxorg`), OpenGL through Mesa's llvmpipe (in X windows, or into memory), a D-Bus
 session bus, and sound: an HD Audio driver, `play`, and ALSA for Linux programs (`aplay`). See [docs/ROADMAP.md](docs/ROADMAP.md) for the
 full plan from here to Firefox.
 

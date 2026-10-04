@@ -1,0 +1,39 @@
+--- a/hw/xfree86/os-support/linux/lnx_init.c
++++ b/hw/xfree86/os-support/linux/lnx_init.c
+@@ -99,6 +99,12 @@
+     if (vt_settings_parsed)
+         return 1;
+ 
++    /* Vexa has no virtual consoles: nothing to switch. */
++    if (access("/dev/tty0", F_OK) != 0) {
++        vt_settings_parsed = 1;
++        return 1;
++    }
++
+     /*
+      * setup the virtual terminal manager
+      */
+@@ -177,6 +183,12 @@
+     struct vt_mode VT;
+     const char *vcs[] = { "/dev/vc/%d", "/dev/tty%d", NULL };
+ 
++    /* Vexa has no virtual consoles. */
++    if (access("/dev/tty0", F_OK) != 0) {
++        xf86Info.consoleFd = -1;
++        return;
++    }
++
+     if (serverGeneration == 1) {
+         linux_parse_vt_settings(FALSE);
+ 
+@@ -302,6 +314,10 @@
+     struct vt_stat vts;
+     int ret;
+ 
++    if (xf86Info.consoleFd < 0) {
++        return; /* (No virtual console: see xf86OpenConsole.) */
++    }
++
+     if (xf86Info.ShareVTs) {
+         close(xf86Info.consoleFd);
+         return;

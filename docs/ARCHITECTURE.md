@@ -160,7 +160,11 @@ processes and sockets are objects; an object can be non-blocking (Linux's
 file descriptors onto the same table.
 
 Files live in one tree managed by the **VFS** (`core/vfs.c`). File systems plug in
-underneath it:
+underneath it. Each mount has a lock held around every call into its file system, so
+a file system's code never runs twice at once and may sleep on disk I/O; operations on
+names (lookups, creating, renaming, mounting) also hold `vfs_lock`, taken first, so the
+tree stays still while a path is walked. Reading, writing and paging in a file take
+only its file system's lock: a long read from the CD doesn't hold up `/tmp`.
 
 - `tmpfs`: in memory; the root file system, filled from `initramfs.tar` at boot (or,
   started from an installed disk, only `/tmp` and `/run`)
@@ -169,7 +173,9 @@ underneath it:
   an operation's metadata changes are gathered in memory (`meta_read` and `meta_write`
   go through them), written to the journal with a commit block, then to their places,
   and the journal is marked empty; file data is written first. A journal holding
-  committed transactions (Linux's too, with revoke records) is replayed at mount
+  committed transactions (Linux's too, with revoke records) is replayed at mount.
+  ext4 disks are read through their extent trees (and 64-bit group descriptors) and
+  mounted read-only
 - `iso9660`: CDs (read-only, with Rock Ridge names, permissions and links), mounted at
   `/mnt/cd0`...; the first with a `linux` directory, normally the boot CD, is also
   `/cdrom`. The Linux subsystem's programs and libraries live there: in the initramfs,
@@ -256,7 +262,10 @@ partition table again through controls on its `/dev` node (`VX_BLOCK_INFO`,
   flipped to or marked dirty, and about 30 times a second besides. Showing one takes
   the display as `/dev/display0`'s holder would (`display_claim`); closing the card
   gives it back. Linux reads of `/dev/input/eventN` get `struct input_event`, and the
-  `EVIOC*` requests describe the devices.
+  `EVIOC*` requests describe the devices. Xorg runs on these with its modesetting
+  driver (a shadow frame buffer in a dumb buffer) and evdev input driver, built from
+  the same xorg-server source as Xvexa; `third_party/xorg` patches out its virtual
+  console handling and stands in for the bit of udev evdev asks.
 - **The display** (`dev/display.c`): `/dev/display0` is the boot framebuffer. A program
   acquires it, which hides the text console (it keeps its text and redraws when the
   program is done), and maps it with `vx_map_file`. The framebuffer's pages are device

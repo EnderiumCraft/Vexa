@@ -593,6 +593,12 @@ it from the console while it does, though not while the desktop has it) and evde
 `/dev/input/event*`. `pthread-test`, `bsd-socket-test`, `memfd-test`,
 `python-net-test.py` and `drm-test` check parts of it.
 
+**Xorg** runs on those too, for X on the whole screen instead of in desktop windows:
+from the console (not from the desktop, which has the screen), `startxorg` starts Xorg
+with an `xterm` (`startxorg gtk3-demo`: another program); when the program ends, so
+does Xorg. It uses the modesetting driver on `/dev/dri/card0` and the evdev driver for
+the keyboard and mouse (`/linux/etc/X11/xorg.conf`), and logs to `/tmp/Xorg.1.log`.
+
 ## X and GTK programs
 
 X programs run on Vexa's desktop through **Xvexa**, Vexa's X server: each X window
@@ -705,12 +711,13 @@ It drives virtio-blk, AHCI (SATA disks and CD/DVD drives), NVMe and IDE (older P
 disks and CD drives as `hda`, `hdb`... and `cd0`, and VirtualBox's CD drive as it comes),
 reads GPT and MBR
 partition tables, reads and writes **ext2** and **ext3** (ext2 with a journal; disks
-made with `mke2fs -t ext3` on Linux work, and Linux reads what Vexa writes), and reads CDs
+made with `mke2fs -t ext3` on Linux work, and Linux reads what Vexa writes), reads
+**ext4** disks as Linux makes them (mounted read-only), and reads CDs
 (ISO 9660 with Rock Ridge). On ext3, each change is written to the journal first, so
 turning the machine off in the middle of writing can't leave the disk inconsistent: the
 next mount (Vexa's, or Linux's) finishes or forgets the last change. ext2 has no journal,
-and may need `e2fsck` (on Linux) after that. ext4 disks are refused (their extra
-features, such as extents, aren't supported yet).
+and may need `e2fsck` (on Linux) after that. ext4 disks are mounted read-only: their
+files can be read and copied off, but Vexa doesn't write ext4 yet.
 
 A disk to try, on Linux:
 

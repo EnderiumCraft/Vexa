@@ -53,3 +53,9 @@ a7ced37f4102b745ac86d6a70a9da399cc139ff168ba6b8002b4d8d43c900c15 https://archive
 64de45e18cc76b8e703cb09b3c9d28bd16e3d05d5cd99f2d630de2d62c3acc18 https://archive.ubuntu.com/ubuntu/pool/main/libx/libxinerama/libxinerama_1.1.4.orig.tar.gz
 ba1f21d2bd9d339da2d4aa8780c09df32fea87998b73da24f49ab9df1e36a50f https://archive.ubuntu.com/ubuntu/pool/main/d/dbus/dbus_1.14.10.orig.tar.xz
 317484352271d18cbbcfac3868eab798d67fff1b8402e740baa6ff41d588a9d8 https://archive.ubuntu.com/ubuntu/pool/main/h/hicolor-icon-theme/hicolor-icon-theme_0.17.orig.tar.xz
+3bf55363f76c7250946441ab51d3a6cc0ae518055c0ff017324ab76cdefb327a https://archive.ubuntu.com/ubuntu/pool/main/libd/libdrm/libdrm_2.4.120.orig.tar.xz
+0561690544796e25cfbd71806ba1b0d797ffe464e9796411123e79450f71db38 https://archive.ubuntu.com/ubuntu/pool/main/libx/libxcvt/libxcvt_0.1.2.orig.tar.xz
+1325f389a2f25cd5f5a8ea4d29aad24aa7c3ec30401d679400dd79eb9c0a8dbb https://archive.ubuntu.com/ubuntu/pool/main/m/mtdev/mtdev_1.1.6.orig.tar.gz
+abfc2ce1ba3b7657deb77f510201b49c35ab572963f454fb5a316ed0d36e0efb https://archive.ubuntu.com/ubuntu/pool/main/libe/libevdev/libevdev_1.13.1+dfsg.orig.tar.xz
+502e5d196ec09f858d94caf7bf4cebaf1aa6fd37f2f87d89f4ca723746438eea https://archive.ubuntu.com/ubuntu/pool/universe/x/xserver-xorg-input-evdev/xserver-xorg-input-evdev_2.10.6.orig.tar.gz
+f31889dfb54c1b0ba114ce0eebc360bdbe14392b209ca94cb019c2bb736a6b9a https://archive.ubuntu.com/ubuntu/pool/main/libp/libpciaccess/libpciaccess_0.18.1.orig.tar.gz

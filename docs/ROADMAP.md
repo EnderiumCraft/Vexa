@@ -107,7 +107,11 @@ registers survive being interrupted.
       (GPT, FAT32 ESP, ext2 root, Limine for BIOS and UEFI), `root=UUID=` (0.28.0)
 - [x] A journal: ext3 (JBD2, Linux's format), replayed at mount; the installer makes
       ext3 (0.29.0)
-- [ ] Moved to later phases: ext4 (extents and the rest), finer-grained VFS locking
+- [x] Finer-grained VFS locking: a lock per mounted file system, so reading and writing
+      on one doesn't hold up the others (0.30.0)
+- [x] Reading ext4 as Linux's `mkfs.ext4` makes it: extent trees, 64-bit group
+      descriptors, flexible block groups (mounted read-only) (0.30.0)
+- [ ] Moved to later phases: writing ext4 (extent allocation, metadata checksums)
 
 **Milestone:** boot from a disk image and read files from it. Reached: disks are
 mounted under `/mnt`, and `run /mnt/vda1/hello-world` runs a program from one. `make test`
@@ -270,7 +274,8 @@ Linux track:
 - [x] Translate the Linux interfaces onto the core: `memfd_create`, `/dev/shm` and
       `MAP_SHARED` (0.15.0); DRM/KMS with "dumb buffers" on `/dev/dri/card0` (mode
       setting, page flips with events) and evdev devices under `/dev/input` (0.23.0)
-- [ ] Xorg with the modesetting driver on those, for X on the whole screen
+- [x] Xorg with the modesetting driver on those, for X on the whole screen, and the
+      evdev input driver (`startxorg`) (0.30.0)
 
 **Milestone:** a graphical Vexa desktop with windows you can drag around. Reached on the
 native track in 0.12.0; in 0.13.0, X and `xterm` run in a window on it.

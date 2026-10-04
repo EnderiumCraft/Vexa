@@ -5,6 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <vexa/abi.h>
+#include <vexa/mutex.h>
 #include <vexa/object.h>
 
 /*
@@ -13,9 +14,13 @@
  * Every file, directory and device is a vnode. File systems provide the vnodes
  * and their operations; the VFS does path lookup, mounting and open files.
  *
- * All file system operations run under one lock (vfs_lock), a sleeping mutex,
- * so they may wait for disk I/O. Simple rather than fast; finer-grained
- * locking can come once there are workloads to measure.
+ * Locking: each mount has a lock (a sleeping mutex, so file systems may
+ * wait for disk I/O), held around every call into its file system, so one
+ * file system's code never runs twice at once. Operations on names (lookup,
+ * create, rename, mount...) also hold vfs_lock, taken first, which keeps the
+ * tree still while a path is walked. Reading, writing and paging in a file
+ * take only its file system's lock: I/O on one file system doesn't hold up
+ * the others.
  */
 
 struct vnode;
@@ -87,6 +92,7 @@ struct mount {
     struct vnode *root;
     struct vnode *mountpoint; /* NULL for the root file system. */
     void *data;
+    struct mutex lock; /* Around calls into its file system. */
     struct mount *next;
 };
 
@@ -113,7 +119,7 @@ extern const struct object_type file_object_type;
 void vnode_init(struct vnode *vnode, struct mount *mount, uint32_t type,
                 const struct vnode_ops *ops);
 void vnode_ref(struct vnode *vnode);
-void vnode_put(struct vnode *vnode); /* Call with vfs_lock held. */
+void vnode_put(struct vnode *vnode); /* (Takes its mount's lock for the last reference.) */
 
 void vfs_lock(void);
 void vfs_unlock(void);

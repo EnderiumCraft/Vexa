@@ -82,6 +82,14 @@ mkdir -p "$root/etc" "$root/usr/share/fonts" "$root/var/cache/fontconfig"
 cp -rL "$x11/etc/fonts" "$root/etc/"
 cp -a "$x11/usr/share/fonts/dejavu" "$root/usr/share/fonts/"
 cp "$(dirname "$0")/linux-files/xsession" "$(dirname "$0")/linux-files/xrun" "$root/usr/bin/"
+# Xorg, for the whole screen: the server, its modules (the modesetting and
+# evdev drivers among them), its settings, and startxorg to run it.
+rm -f "$root/usr/bin/Xorg"
+cp "$x11/usr/bin/Xorg" "$root/usr/bin/"
+mkdir -p "$root/usr/lib/xorg" "$root/etc/X11"
+cp -a "$x11/usr/lib/xorg/modules" "$root/usr/lib/xorg/"
+cp "$(dirname "$0")/linux-files/xorg.conf" "$root/etc/X11/"
+cp "$(dirname "$0")/linux-files/startxorg" "$root/usr/bin/"
 for entry in x/xterm x/xterm-256color x/xterm-color v/vt100 v/vt220 l/linux d/dumb; do
     mkdir -p "$root/usr/share/terminfo/$(dirname $entry)"
     cp -L "$x11/usr/share/terminfo/$entry" "$root/usr/share/terminfo/$entry"

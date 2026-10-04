@@ -17,8 +17,12 @@
  * 4 GiB, typed directory entries. Unknown required features refuse the mount;
  * unknown "read-only compatible" ones make it read-only.
  *
- * Everything runs under the VFS lock and writes go straight to the disk, so
- * the file system on disk is always complete between operations.
+ * ext4 disks (Linux's mkfs.ext4) are read, not written: files mapped by
+ * extent trees, 64-bit group descriptors, flexible block groups; their
+ * checksums aren't checked. They mount read-only.
+ *
+ * Everything runs under the mount's lock and writes go straight to the disk,
+ * so the file system on disk is always complete between operations.
  *
  * ext3 (ext2 with a journal, which Vexa's installer makes too) is crash-proof
  * as well: the metadata an operation changes (inodes, bitmaps, directories,
@@ -37,7 +41,16 @@
 #define INCOMPAT_RECOVER 0x0004 /* The journal may need replaying. */
 #define RO_COMPAT_SPARSE_SUPER 0x0001
 #define RO_COMPAT_LARGE_FILE 0x0002
+#define INCOMPAT_EXTENTS 0x0040
+#define INCOMPAT_64BIT 0x0080
+#define INCOMPAT_FLEX_BG 0x0200
+#define INCOMPAT_CSUM_SEED 0x2000
+#define INCOMPAT_LARGEDIR 0x4000
+/* What Vexa writes; and what it can read (ext4's: read-only). */
 #define SUPPORTED_INCOMPAT (INCOMPAT_FILETYPE | INCOMPAT_RECOVER)
+#define READABLE_INCOMPAT (SUPPORTED_INCOMPAT | INCOMPAT_EXTENTS | INCOMPAT_64BIT | \
+                           INCOMPAT_FLEX_BG | INCOMPAT_CSUM_SEED | INCOMPAT_LARGEDIR)
+#define SB_DESC_SIZE 150 /* In the superblock's rest: s_desc_size (64-bit descriptors). */
 #define SB_JOURNAL_INODE 120 /* In the superblock's rest: s_journal_inum. */
 #define SUPPORTED_RO_COMPAT (RO_COMPAT_SPARSE_SUPER | RO_COMPAT_LARGE_FILE)
 
@@ -51,6 +64,29 @@
 #define MODE_SOCKET 0xc000
 
 #define FLAG_INDEX 0x1000 /* Hashed directory index: we don't maintain it. */
+#define FLAG_EXTENTS 0x80000 /* ext4: the blocks are mapped by an extent tree. */
+
+/* ext4 extent trees: a header, then index entries (inner nodes) or extents
+ * (leaves). The root is in the inode's block pointers. */
+#define EXTENT_MAGIC 0xf30a
+
+struct __attribute__((packed)) extent_header {
+    uint16_t magic, entries, max, depth;
+    uint32_t generation;
+};
+
+struct __attribute__((packed)) extent_index {
+    uint32_t block;     /* The first file block it covers. */
+    uint32_t leaf_low;
+    uint16_t leaf_high, unused;
+};
+
+struct __attribute__((packed)) extent {
+    uint32_t block;     /* The first file block. */
+    uint16_t length;    /* Over 32768: not yet written (reads as zeros). */
+    uint16_t start_high;
+    uint32_t start_low;
+};
 
 #define DIRECT_BLOCKS 12
 
@@ -99,6 +135,7 @@ struct ext2 {
     struct mount *mount;
     struct superblock sb;
     struct group_descriptor *groups;
+    uint64_t *inode_tables; /* 64-bit descriptors (ext4): each group's, in full. */
     uint32_t group_count;
     uint32_t block_size;
     uint32_t inode_size;
@@ -251,7 +288,8 @@ static int write_group(struct ext2 *fs, uint32_t group) {
 static uint64_t inode_offset(struct ext2 *fs, uint32_t number) {
     uint32_t group = (number - 1) / fs->sb.inodes_per_group;
     uint32_t index = (number - 1) % fs->sb.inodes_per_group;
-    return (uint64_t)fs->groups[group].inode_table * fs->block_size + (uint64_t)index * fs->inode_size;
+    uint64_t table = fs->inode_tables ? fs->inode_tables[group] : fs->groups[group].inode_table;
+    return table * fs->block_size + (uint64_t)index * fs->inode_size;
 }
 
 static int read_inode(struct ext2 *fs, uint32_t number, struct inode *inode) {
@@ -415,9 +453,62 @@ static int write_pointer(struct ext2 *fs, uint32_t block, uint32_t index, uint32
     return meta_write(fs, (uint64_t)block * fs->block_size + index * 4, &value, 4);
 }
 
+/* ext4: the disk block holding file block `logical`, through the extent tree;
+ * 0 for a hole (or a block beyond 2^32, or a damaged tree). */
+static uint32_t map_extent(struct ext2 *fs, struct ext2_node *node, uint64_t logical) {
+    uint8_t *buffer = NULL;
+    const uint8_t *at = (const uint8_t *)node->inode.block;
+    size_t room = sizeof(node->inode.block);
+    uint32_t result = 0;
+    for (int levels = 0; levels < 8; levels++) {
+        const struct extent_header *header = (const struct extent_header *)at;
+        if (header->magic != EXTENT_MAGIC ||
+            sizeof(*header) + (size_t)header->entries * 12 > room) {
+            break;
+        }
+        if (header->depth == 0) {
+            const struct extent *e = (const struct extent *)(header + 1);
+            for (int i = 0; i < header->entries; i++) {
+                uint32_t length = e[i].length > 32768 ? 0 : e[i].length;
+                if (logical >= e[i].block && logical < (uint64_t)e[i].block + length) {
+                    uint64_t start = (uint64_t)e[i].start_high << 32 | e[i].start_low;
+                    uint64_t block = start + (logical - e[i].block);
+                    result = block >> 32 ? 0 : (uint32_t)block;
+                }
+            }
+            break;
+        }
+        /* The last index entry starting at or before the block. */
+        const struct extent_index *index = (const struct extent_index *)(header + 1);
+        int chosen = -1;
+        for (int i = 0; i < header->entries && index[i].block <= logical; i++) {
+            chosen = i;
+        }
+        uint64_t child = chosen < 0 ? 0
+                                    : (uint64_t)index[chosen].leaf_high << 32 |
+                                          index[chosen].leaf_low;
+        if (!child || child >> 32) {
+            break;
+        }
+        if (!buffer && !(buffer = kmalloc(fs->block_size))) {
+            break;
+        }
+        if (read_block(fs, (uint32_t)child, buffer)) {
+            break;
+        }
+        at = buffer;
+        room = fs->block_size;
+    }
+    kfree(buffer);
+    return result;
+}
+
 /* Returns the disk block holding file block `logical`, or 0 for a hole. With
  * `create`, allocates missing blocks (and indirect blocks) on the way. */
 static uint32_t map_block(struct ext2 *fs, struct ext2_node *node, uint64_t logical, bool create) {
+    if (node->inode.flags & FLAG_EXTENTS) {
+        return map_extent(fs, node, logical); /* (Only on read-only ext4 mounts.) */
+    }
     uint32_t per_block = fs->block_size / 4;
     uint32_t *slot;
     int levels;
@@ -508,7 +599,12 @@ static bool free_tree(struct ext2 *fs, struct ext2_node *node, uint32_t block, i
 /* Frees every block from file block `keep` on. */
 /* A "fast" symbolic link keeps its target in the block pointers, not in blocks. */
 static bool is_fast_symlink(const struct ext2_node *node) {
-    return (node->inode.mode & MODE_TYPE_MASK) == MODE_SYMLINK && node->inode.blocks == 0;
+    if ((node->inode.mode & MODE_TYPE_MASK) != MODE_SYMLINK) {
+        return false;
+    }
+    /* (ext4: a short link's target is inline even with extended attributes.) */
+    return node->inode.blocks == 0 ||
+           (!(node->inode.flags & FLAG_EXTENTS) && node->inode.size < 60 && node->inode.file_acl);
 }
 
 static void free_blocks_from(struct ext2 *fs, struct ext2_node *node, uint64_t keep) {
@@ -1238,8 +1334,27 @@ static const struct vnode_ops ext2_ops = {
 /* ---- Mounting ---- */
 
 static int read_groups(struct ext2 *fs) {
-    return block_read_bytes(fs->device, (uint64_t)(fs->sb.first_data_block + 1) * fs->block_size,
-                            fs->groups, fs->group_count * sizeof(struct group_descriptor));
+    uint64_t table = (uint64_t)(fs->sb.first_data_block + 1) * fs->block_size;
+    if (!fs->inode_tables) {
+        return block_read_bytes(fs->device, table, fs->groups,
+                                fs->group_count * sizeof(struct group_descriptor));
+    }
+    /* 64-bit descriptors: longer, with the high halves after the low ones. */
+    uint16_t size;
+    memcpy(&size, fs->sb.rest + SB_DESC_SIZE, 2);
+    uint8_t *raw = kmalloc((size_t)fs->group_count * size);
+    if (!raw) {
+        return -VX_ENOMEM;
+    }
+    int error = block_read_bytes(fs->device, table, raw, (size_t)fs->group_count * size);
+    for (uint32_t i = 0; !error && i < fs->group_count; i++) {
+        memcpy(&fs->groups[i], raw + (size_t)i * size, sizeof(struct group_descriptor));
+        uint32_t high;
+        memcpy(&high, raw + (size_t)i * size + 0x28, 4); /* bg_inode_table_hi */
+        fs->inode_tables[i] = (uint64_t)high << 32 | fs->groups[i].inode_table;
+    }
+    kfree(raw);
+    return error;
 }
 
 /* ext3: the journal (in its inode), replayed if it needs to be. */
@@ -1307,12 +1422,13 @@ static int ext2_mount(struct mount *mount, struct block_device *device) {
         kfree(fs);
         return error ? error : -VX_EINVAL;
     }
-    if (fs->sb.feature_incompat & ~SUPPORTED_INCOMPAT) {
-        kprintf("[ext2] %s: needs features Vexa doesn't support (incompat %x); an ext4 disk?\n",
-                device->name, fs->sb.feature_incompat & ~SUPPORTED_INCOMPAT);
+    if (fs->sb.feature_incompat & ~READABLE_INCOMPAT) {
+        kprintf("[ext2] %s: needs features Vexa doesn't support (incompat %x)\n",
+                device->name, fs->sb.feature_incompat & ~READABLE_INCOMPAT);
         kfree(fs);
         return -VX_EINVAL;
     }
+    bool ext4 = fs->sb.feature_incompat & ~SUPPORTED_INCOMPAT;
     fs->block_size = 1024U << fs->sb.log_block_size;
     fs->inode_size = fs->sb.rev_level >= 1 ? fs->sb.inode_size : 128;
     if (fs->sb.rev_level == 0) {
@@ -1322,8 +1438,18 @@ static int ext2_mount(struct mount *mount, struct block_device *device) {
     fs->group_count = (fs->sb.blocks_count - fs->sb.first_data_block + fs->sb.blocks_per_group - 1) /
                       fs->sb.blocks_per_group;
     fs->groups = kmalloc(fs->group_count * sizeof(struct group_descriptor));
+    uint16_t desc_size;
+    memcpy(&desc_size, fs->sb.rest + SB_DESC_SIZE, 2);
+    if ((fs->sb.feature_incompat & INCOMPAT_64BIT) && desc_size >= 64) {
+        fs->inode_tables = kmalloc(fs->group_count * sizeof(uint64_t));
+        if (!fs->inode_tables) {
+            kfree(fs->groups);
+            fs->groups = NULL;
+        }
+    }
     if (!fs->groups || read_groups(fs)) {
         kfree(fs->groups);
+        kfree(fs->inode_tables);
         kfree(fs);
         return -VX_EIO;
     }
@@ -1346,7 +1472,7 @@ static int ext2_mount(struct mount *mount, struct block_device *device) {
         return -VX_EINVAL;
     }
     mount->read_only = !device->write || (fs->sb.feature_ro_compat & ~SUPPORTED_RO_COMPAT) ||
-                       journal_unwritable;
+                       journal_unwritable || ext4;
     if (fs->journal && !mount->read_only) {
         /* Mounted: the journal may hold a transaction at any time (as Linux marks it). */
         fs->sb.feature_incompat |= INCOMPAT_RECOVER;
@@ -1355,7 +1481,9 @@ static int ext2_mount(struct mount *mount, struct block_device *device) {
     }
     if (mount->read_only && device->write) {
         kprintf("[ext2] %s: mounting read-only (%s)\n", device->name,
-                journal_unwritable ? "a journal Vexa can't write" : "unsupported features");
+                ext4                 ? "ext4, which Vexa reads but doesn't write"
+                : journal_unwritable ? "a journal Vexa can't write"
+                                     : "unsupported features");
     }
     mount->data = fs;
     error = get_node(fs, ROOT_INODE, &mount->root);

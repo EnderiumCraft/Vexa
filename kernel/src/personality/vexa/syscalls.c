@@ -1320,7 +1320,9 @@ static int64_t sys_mounts(uint64_t out, uint64_t count, uint64_t a2, uint64_t a3
         info->read_only = m->read_only;
         if (m->root && m->root->ops->statfs) {
             uint64_t total = 0, free = 0;
+            mutex_lock(&m->lock);
             m->root->ops->statfs(m, &total, &free);
+            mutex_unlock(&m->lock);
             info->total = total;
             info->free = free;
         }

@@ -1,0 +1,19 @@
+#!/bin/sh
+# startxorg [program...]: Xorg on the whole screen (display :1), running the
+# program (an xterm unless given); when it ends, so does Xorg.
+Xorg :1 -nolisten tcp -logfile /tmp/Xorg.1.log &
+server=$!
+i=0
+while [ ! -e /tmp/.X11-unix/X1 ] && [ $i -lt 100 ]; do
+    sleep 0.2
+    i=$((i + 1))
+done
+export DISPLAY=:1
+if [ $# -eq 0 ]; then
+    set -- xterm
+fi
+"$@"
+status=$?
+kill $server
+wait $server 2>/dev/null
+exit $status

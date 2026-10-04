@@ -1,8 +1,10 @@
 #!/bin/sh
 # Builds the X Window System for Vexa's Linux subsystem from source, with musl:
 # the libraries (libX11 and friends), Xvexa (an X server that shows its screen
-# in a window on the Vexa desktop; see third_party/xvexa), xkbcomp and the
-# keyboard data, fonts (FreeType, fontconfig, Xft and DejaVu), and xterm.
+# in a window on the Vexa desktop; see third_party/xvexa), Xorg (the ordinary
+# X server, with the modesetting and evdev drivers, for the whole screen),
+# xkbcomp and the keyboard data, fonts (FreeType, fontconfig, Xft and DejaVu),
+# and xterm.
 #
 # Usage: tools/build-x11.sh <sources list> <tarballs> <work dir> <sysroot> <linux headers>
 #
@@ -210,6 +212,63 @@ build_xserver() {
         -Dsha1=libmd -Dlibunwind=false -Ddocs=false -Ddevel-docs=false \
         -Dxkb_dir=/usr/share/X11/xkb -Dxkb_bin_dir=/usr/bin \
         -Dxkb_output_dir=/tmp -Ddefault_font_path=built-ins
+}
+
+build_libdrm() {
+    unpack libdrm_2.4.120.orig.tar.xz libdrm-2.4.120
+    mesonbuild -Dintel=disabled -Dradeon=disabled -Damdgpu=disabled -Dnouveau=disabled \
+        -Dvmwgfx=disabled -Domap=disabled -Dexynos=disabled -Dfreedreno=disabled \
+        -Dtegra=disabled -Dvc4=disabled -Detnaviv=disabled -Dcairo-tests=disabled \
+        -Dman-pages=disabled -Dvalgrind=disabled -Dtests=false -Dudev=false
+}
+
+build_libpciaccess() {
+    unpack libpciaccess_0.18.1.orig.tar.gz libpciaccess-0.18.1
+    mesonbuild -Dzlib=disabled
+}
+
+build_libxcvt() {
+    unpack libxcvt_0.1.2.orig.tar.xz libxcvt-0.1.2
+    mesonbuild
+}
+
+# Xorg: the same server, with the xfree86 hardware layer instead of Xvexa's.
+# The modesetting driver draws into DRM dumb buffers (/dev/dri/card0); there
+# is no udev or virtual console (third_party/xorg), and the PCI access
+# library finds no devices (there's no /sys): screens come from xorg.conf.
+build_xorg() {
+    unpack xorg-server_21.1.24.orig.tar.gz xorg-server-21.1.24
+    patch -p1 < "$vexa/third_party/xorg/no-vt.patch" > /dev/null
+    mesonbuild -Dxorg=true -Dxephyr=false -Dxnest=false -Dxvfb=false \
+        -Dxquartz=false -Dxwin=false -Dint10=false \
+        -Dudev=false -Dudev_kms=false -Dhal=false -Dsystemd_logind=false \
+        -Dglamor=false -Dglx=false -Ddri1=false -Ddri2=false -Ddri3=false -Ddrm=true \
+        -Dxdmcp=false -Dxdm-auth-1=false -Dsecure-rpc=false -Dxselinux=false \
+        -Dxcsecurity=false -Dmitshm=false -Dxv=false -Dxvmc=false -Ddpms=false \
+        -Dlisten_tcp=false -Dlisten_unix=true -Dlisten_local=false \
+        -Dsha1=libmd -Dlibunwind=false -Ddocs=false -Ddevel-docs=false \
+        -Dxkb_dir=/usr/share/X11/xkb -Dxkb_bin_dir=/usr/bin \
+        -Dxkb_output_dir=/tmp -Ddefault_font_path=built-ins \
+        -Dlog_dir=/tmp -Dsuid_wrapper=false
+}
+
+build_mtdev() {
+    unpack mtdev_1.1.6.orig.tar.gz mtdev-1.1.6
+    autotools
+}
+
+build_libevdev() {
+    unpack libevdev_1.13.1+dfsg.orig.tar.xz libevdev-1.13.1
+    mesonbuild -Dtests=disabled -Ddocumentation=disabled
+}
+
+# The evdev input driver. It asks udev only whether a device is virtual;
+# a stand-in header (third_party/xorg/libudev.h) says nobody knows.
+build_evdev() {
+    unpack xserver-xorg-input-evdev_2.10.6.orig.tar.gz xf86-input-evdev-2.10.6
+    export UDEV_CFLAGS="-I$vexa/third_party/xorg" UDEV_LIBS=" "
+    CFLAGS="$CFLAGS -I$vexa/third_party/xorg" autotools --with-xorg-module-dir=/usr/lib/xorg/modules
+    unset UDEV_CFLAGS UDEV_LIBS
 }
 
 build_freetype() {
@@ -480,6 +539,13 @@ package libxkbfile
 package xkbcomp
 package xkeyboardconfig
 package xserver "$vexa/third_party/xvexa"
+package libdrm
+package libpciaccess
+package libxcvt
+package xorg "$vexa/third_party/xorg"
+package mtdev
+package libevdev
+package evdev "$vexa/third_party/xorg"
 package freetype
 package expat
 package fontconfig

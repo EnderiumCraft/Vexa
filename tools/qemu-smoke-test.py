@@ -476,6 +476,12 @@ LINUX_COMMANDS = [
     # reads the grabbed keyboard through evdev.
     ("drm-test", "drm-test: press a key", 60),
     ("@sendkey a", "drm-test: passed", 30),
+    # Xorg on the whole screen (modesetting over DRM, evdev input), with an
+    # xterm as its client; when the client ends, Xorg does too.
+    ("startxorg xterm -e sh -c 'echo xorg client on $DISPLAY > /dev/console'",
+     "xorg client on :1", 180),
+    ("grep -c 'modeset(0)' /tmp/Xorg.1.log", None, 10),
+    ("grep evdev /tmp/Xorg.1.log | head -3", "evdev", 10),
     ("#linux-sound",),
     # Sound for Linux programs: ALSA (alsa-lib's "plug" on the kernel's ALSA
     # interface, over the HD Audio driver). Python writes a WAV file, aplay
@@ -591,6 +597,13 @@ DISK_COMMANDS = [
     ("mv /mnt/nvme0n1/made-by-vexa/note.txt /mnt/nvme0n1/moved.txt", None, 10),
     ("cat /mnt/nvme0n1/moved.txt", "written on nvme", 10, 3),
     ("rm -r /mnt/nvme0n1/made-by-vexa", None, 10),
+    # ext4, as Linux's mkfs.ext4 makes it: read (through extent trees, one
+    # with an index block; a hashed directory), not written.
+    ("cat /mnt/vdb/hello.txt", "Hello from an ext4 disk!", 10),
+    ("cat /mnt/vdb/link", "Hello from an ext4 disk!", 10, 2),
+    ("cat /mnt/vdb/dir/many/file-with-a-longer-name-399.txt", "\n399\r\n", 10),
+    ("busybox sha1sum /mnt/vdb/sparse.bin", "66ae21c2cd4afeb16d02809402927d82edd153b9", 30),
+    ("echo no > /mnt/vdb/new.txt", "read-only", 10),
     ("#shell",),
 ]
 
@@ -601,6 +614,7 @@ TEST_DISKS = [
                       "-device", "ide-hd,drive=sata0,bus=ide.0"], 1024 * 1024),
     ("nvme-whole.img", ["-drive", "file={},if=none,id=nvme0,format=raw",
                         "-device", "nvme,serial=vexa0,drive=nvme0"], 0),
+    ("ext4.img", ["-drive", "file={},if=virtio,format=raw"], 0),
 ]
 
 

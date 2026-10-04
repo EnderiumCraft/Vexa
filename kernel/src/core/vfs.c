@@ -34,14 +34,54 @@ void vnode_init(struct vnode *vnode, struct mount *mount, uint32_t type,
     vnode->mount = mount;
 }
 
+/* Every call into a file system holds its mount's lock (taken after
+ * vfs_lock, when both are held). A file system's code may already hold it:
+ * it calls back into vnode_put. */
+static bool fs_enter(struct mount *mount) {
+    if (!mount || mutex_held(&mount->lock)) {
+        return false;
+    }
+    mutex_lock(&mount->lock);
+    return true;
+}
+
+static void fs_leave(struct mount *mount, bool taken) {
+    if (taken) {
+        mutex_unlock(&mount->lock);
+    }
+}
+
+/* `expression` (a call into `vnode`'s file system) under its mount's lock. */
+#define FS_CALL(vnode, expression)                                                         \
+    ({                                                                                     \
+        struct mount *fs_mount_ = (vnode)->mount;                                          \
+        bool fs_taken_ = fs_enter(fs_mount_);                                              \
+        __typeof__(expression) fs_result_ = (expression);                                  \
+        fs_leave(fs_mount_, fs_taken_);                                                    \
+        fs_result_;                                                                        \
+    })
+
 void vnode_ref(struct vnode *vnode) {
     __atomic_add_fetch(&vnode->refs, 1, __ATOMIC_RELAXED);
 }
 
 void vnode_put(struct vnode *vnode) {
+    /* Not the last reference: no lock needed. */
+    uint32_t refs = __atomic_load_n(&vnode->refs, __ATOMIC_RELAXED);
+    while (refs > 1) {
+        if (__atomic_compare_exchange_n(&vnode->refs, &refs, refs - 1, false, __ATOMIC_ACQ_REL,
+                                        __ATOMIC_RELAXED)) {
+            return;
+        }
+    }
+    /* Perhaps the last: under the mount's lock, so a lookup that finds the
+     * vnode in its file system's cache can't take a reference meanwhile. */
+    struct mount *mount = vnode->mount;
+    bool taken = fs_enter(mount);
     if (__atomic_sub_fetch(&vnode->refs, 1, __ATOMIC_ACQ_REL) == 0 && vnode->ops->release) {
         vnode->ops->release(vnode);
     }
+    fs_leave(mount, taken);
 }
 
 void vfs_register_filesystem(const struct filesystem_type *type) {
@@ -96,7 +136,7 @@ static int lookup_step(struct vnode *dir, const char *name, size_t length, struc
         return -VX_ENAMETOOLONG;
     }
     struct vnode *found;
-    int error = dir->ops->lookup(dir, name, length, &found);
+    int error = FS_CALL(dir, dir->ops->lookup(dir, name, length, &found));
     if (error) {
         return error;
     }
@@ -145,7 +185,7 @@ static int read_link(struct vnode *link, char **out, size_t *length) {
     if (!target) {
         return -VX_ENOMEM;
     }
-    int64_t n = link->ops->read(link, target, link->size, 0);
+    int64_t n = FS_CALL(link, link->ops->read(link, target, link->size, 0));
     if (n <= 0) {
         kfree(target);
         return n < 0 ? (int)n : -VX_EIO;
@@ -388,7 +428,8 @@ int vfs_open(const char *path, size_t length, uint32_t flags, struct file **out)
                     : dir->mount->read_only                            ? -VX_EROFS
                     : name_length > VX_NAME_MAX                        ? -VX_ENAMETOOLONG
                     : !dir->ops->create                                ? -VX_EROFS
-                    : dir->ops->create(dir, name, name_length, VX_TYPE_FILE, &vnode);
+                    : FS_CALL(dir, dir->ops->create(dir, name, name_length, VX_TYPE_FILE,
+                                                    &vnode));
             vnode_put(dir);
         }
     } else if (error) {
@@ -404,7 +445,7 @@ int vfs_open(const char *path, size_t length, uint32_t flags, struct file **out)
                vnode->type == VX_TYPE_FILE) {
         error = -VX_EROFS;
     } else if (!error && (flags & VX_OPEN_TRUNCATE) && vnode->type == VX_TYPE_FILE) {
-        error = vnode->ops->truncate ? vnode->ops->truncate(vnode, 0) : -VX_EROFS;
+        error = vnode->ops->truncate ? FS_CALL(vnode, vnode->ops->truncate(vnode, 0)) : -VX_EROFS;
     }
     if (error) {
         if (vnode) {
@@ -525,25 +566,26 @@ static int modify_parent(const char *path, size_t length, uint32_t create, const
         error = -VX_EROFS;
     } else {
         struct vnode *existing;
-        error = dir->ops->lookup(dir, name, name_length, &existing);
+        error = FS_CALL(dir, dir->ops->lookup(dir, name, name_length, &existing));
         if (create) {
             if (!error) {
                 vnode_put(existing);
                 error = -VX_EEXIST;
             } else if (error == -VX_ENOENT) {
                 struct vnode *created = NULL;
-                error = dir->ops->create(dir, name, name_length, create, &created);
+                error = FS_CALL(dir, dir->ops->create(dir, name, name_length, create, &created));
                 if (!error && target) {
                     size_t target_length = strlen(target);
                     int64_t n = created->ops->write
-                                    ? created->ops->write(created, target, target_length, 0)
+                                    ? FS_CALL(created, created->ops->write(created, target,
+                                                                           target_length, 0))
                                     : -VX_EROFS;
                     if (n != (int64_t)target_length) {
                         /* Couldn't store the target: take the link away again. */
                         error = n < 0 ? (int)n : -VX_ENOSPC;
                         vnode_put(created);
                         created = NULL;
-                        dir->ops->remove(dir, name, name_length);
+                        FS_CALL(dir, dir->ops->remove(dir, name, name_length));
                     }
                 }
                 if (created && !error) {
@@ -553,7 +595,7 @@ static int modify_parent(const char *path, size_t length, uint32_t create, const
         } else if (!error) {
             bool busy = existing->mounted_here != NULL;
             vnode_put(existing);
-            error = busy ? -VX_EBUSY : dir->ops->remove(dir, name, name_length);
+            error = busy ? -VX_EBUSY : FS_CALL(dir, dir->ops->remove(dir, name, name_length));
         }
     }
     vnode_put(dir);
@@ -614,11 +656,11 @@ int vfs_link(const char *from, size_t from_length, const char *to, size_t to_len
     }
     if (!error) {
         struct vnode *existing;
-        if (dir->ops->lookup(dir, name, name_length, &existing) == 0) {
+        if (FS_CALL(dir, dir->ops->lookup(dir, name, name_length, &existing)) == 0) {
             vnode_put(existing);
             error = -VX_EEXIST;
         } else {
-            error = dir->ops->link(dir, name, name_length, target);
+            error = FS_CALL(dir, dir->ops->link(dir, name, name_length, target));
         }
     }
     if (dir) {
@@ -665,13 +707,14 @@ int vfs_rename(const char *from, size_t from_length, const char *to, size_t to_l
         error = -VX_EROFS;
     }
     if (!error) {
-        error = old_dir->ops->lookup(old_dir, old_name, old_length, &moving);
+        error = FS_CALL(old_dir, old_dir->ops->lookup(old_dir, old_name, old_length, &moving));
     }
     if (!error && moving->mounted_here) {
         error = -VX_EBUSY;
     }
     if (!error) {
-        error = old_dir->ops->rename(old_dir, old_name, old_length, new_dir, new_name, new_length);
+        error = FS_CALL(old_dir, old_dir->ops->rename(old_dir, old_name, old_length, new_dir,
+                                                      new_name, new_length));
     }
     if (moving) {
         vnode_put(moving);
@@ -705,21 +748,15 @@ int64_t vfs_pread(struct file *file, void *buffer, size_t size, uint64_t offset)
         /* Devices like the terminal can wait a long time: not under the lock. */
         return vnode->ops->read(vnode, buffer, size, offset);
     }
-    vfs_lock();
-    int64_t result = vnode->ops->read(vnode, buffer, size, offset);
-    vfs_unlock();
-    return result;
+    /* Only the file system's lock: other file systems carry on meanwhile. */
+    return FS_CALL(vnode, vnode->ops->read(vnode, buffer, size, offset));
 }
 
 int64_t vfs_read(struct file *file, void *buffer, size_t size) {
-    vfs_lock();
-    uint64_t offset = file->offset;
-    vfs_unlock();
+    uint64_t offset = __atomic_load_n(&file->offset, __ATOMIC_ACQUIRE);
     int64_t result = vfs_pread(file, buffer, size, offset);
     if (result > 0) {
-        vfs_lock();
-        file->offset = offset + result;
-        vfs_unlock();
+        __atomic_store_n(&file->offset, offset + result, __ATOMIC_RELEASE);
     }
     return result;
 }
@@ -735,18 +772,18 @@ int64_t vfs_write(struct file *file, const void *buffer, size_t size) {
     if (vnode->type == VX_TYPE_CHAR_DEVICE) {
         return vnode->ops->write(vnode, buffer, size, file->offset);
     }
-    vfs_lock();
+    bool taken = fs_enter(vnode->mount);
     uint64_t offset = (file->flags & VX_OPEN_APPEND) ? vnode->size : file->offset;
     int64_t result = vnode->ops->write(vnode, buffer, size, offset);
     if (result > 0) {
         file->offset = offset + result;
     }
-    vfs_unlock();
+    fs_leave(vnode->mount, taken);
     return result;
 }
 
 int64_t vfs_seek(struct file *file, int64_t offset, int whence) {
-    vfs_lock();
+    bool taken = fs_enter(file->vnode->mount);
     int64_t base = whence == VX_SEEK_SET       ? 0
                    : whence == VX_SEEK_CURRENT ? (int64_t)file->offset
                    : whence == VX_SEEK_END     ? (int64_t)file->vnode->size
@@ -756,7 +793,7 @@ int64_t vfs_seek(struct file *file, int64_t offset, int whence) {
         file->offset = base + offset;
         result = base + offset;
     }
-    vfs_unlock();
+    fs_leave(file->vnode->mount, taken);
     return result;
 }
 
@@ -766,7 +803,7 @@ int vfs_read_dir(struct file *file, struct vx_dir_entry *entry) {
         return -VX_ENOTDIR;
     }
     vfs_lock();
-    int result = vnode->ops->read_dir(vnode, &file->offset, entry);
+    int result = FS_CALL(vnode, vnode->ops->read_dir(vnode, &file->offset, entry));
     vfs_unlock();
     return result;
 }
@@ -786,7 +823,7 @@ static int set_mode_locked(struct vnode *vnode, uint32_t mode) {
         return -VX_EROFS;
     }
     vnode->mode = mode & 07777;
-    return vnode->ops->set_mode ? vnode->ops->set_mode(vnode) : 0;
+    return vnode->ops->set_mode ? FS_CALL(vnode, vnode->ops->set_mode(vnode)) : 0;
 }
 
 int vfs_chmod(const char *path, size_t length, uint32_t mode) {
@@ -821,7 +858,9 @@ int vfs_statfs(const char *path, size_t length, uint64_t *total, uint64_t *free,
         struct mount *mount = vnode->mount;
         *total = *free = 0;
         if (mount->root->ops->statfs) {
+            bool taken = fs_enter(mount);
             mount->root->ops->statfs(mount, total, free);
+            fs_leave(mount, taken);
         }
         *fs_name = mount->fs_name;
         vnode_put(vnode);
@@ -834,10 +873,7 @@ uint64_t vfs_share_page(struct file *file, uint64_t index) {
     if (!file->vnode->ops->share_page) {
         return 0;
     }
-    vfs_lock();
-    uint64_t phys = file->vnode->ops->share_page(file->vnode, index);
-    vfs_unlock();
-    return phys;
+    return FS_CALL(file->vnode, file->vnode->ops->share_page(file->vnode, index));
 }
 
 int vfs_truncate(struct file *file, uint64_t size) {
@@ -851,7 +887,7 @@ int vfs_truncate(struct file *file, uint64_t size) {
     vfs_lock();
     int error = vnode->mount->read_only || !vnode->ops->truncate
                     ? -VX_EROFS
-                    : vnode->ops->truncate(vnode, size);
+                    : FS_CALL(vnode, vnode->ops->truncate(vnode, size));
     vfs_unlock();
     return error;
 }
