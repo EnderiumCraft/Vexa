@@ -445,9 +445,7 @@ void search_pointer(void) {
 void search_draw(struct vx_surface *view, int ox, int oy) {
     struct rect r = search_rect();
     r.x += ox, r.y += oy;
-    draw_shadow(view, r, 170);
-    fill_rounded(view, r, 12, vx_theme.menu);
-    outline_rounded(view, r, 12, vx_theme.line);
+    draw_glass_popup(view, r, 12, 170);
     draw_magnifier(view, r.x + 16, r.y + 14, 20, vx_theme.dim);
     const struct vx_font *big = vx_font(VX_FACE_SANS, 20);
     int text_y = r.y + (FIELD_HEIGHT - vx_font_height(big)) / 2;
@@ -469,8 +467,7 @@ void search_draw(struct vx_surface *view, int ox, int oy) {
         struct result *res = &results[i];
         int y = top + i * ROW_HEIGHT;
         if (i == selected) {
-            fill_rounded(view, (struct rect){r.x + 6, y, r.width - 12, ROW_HEIGHT}, 6,
-                         vx_theme.accent);
+            vx_draw_gel(view, r.x + 6, y, r.width - 12, ROW_HEIGHT, 7, vx_theme.accent);
         }
         struct vx_image *icon = res->kind == R_APP ? app_icons[res->index]
                                 : res->kind == R_FILE ? file_icon(files[res->index],

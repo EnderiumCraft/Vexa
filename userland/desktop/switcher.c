@@ -114,16 +114,14 @@ void switcher_click(void) {
 void switcher_draw(struct vx_surface *view, int ox, int oy) {
     struct rect r = switcher_rect();
     r.x += ox, r.y += oy;
-    draw_shadow(view, r, 160);
-    fill_rounded(view, r, 12, vx_mix(vx_theme.menu, 0x000000, 40));
-    outline_rounded(view, r, 12, vx_theme.line);
+    draw_glass_popup(view, r, 12, 160);
     for (int i = 0; i < count; i++) {
         struct window *w = list[i];
         struct rect t = tile_rect(i);
         t.x += ox, t.y += oy;
         if (i == chosen) {
-            fill_rounded(view, (struct rect){t.x + 2, t.y + 2, t.width - 4, t.height - 4}, 8,
-                         vx_theme.selected);
+            fill_gel(view, (struct rect){t.x + 2, t.y + 2, t.width - 4, t.height - 4}, 8,
+                     vx_theme.accent, 150);
             outline_rounded(view, (struct rect){t.x + 2, t.y + 2, t.width - 4, t.height - 4}, 8,
                             vx_theme.accent);
         }

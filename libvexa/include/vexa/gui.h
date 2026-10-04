@@ -197,6 +197,25 @@ uint32_t vx_mix(uint32_t a, uint32_t b, int amount);
 
 /* ---- A few widgets' worth of drawing (the look of Vexa's own apps) ---- */
 
+/* Vexa's look is glossy, like gel or glass: round shapes, light on their top
+ * half, a glow along the bottom. */
+
+/* How far in from the side row `row` (counted from the top or the bottom)
+ * of a round corner of `radius` starts, and how much of the pixel just
+ * outside it is covered (0 to 255), for a smooth edge. */
+int vx_corner_inset(int radius, int row, int *coverage);
+/* A rectangle with round corners, filled: `alpha` (0 to 255) of `color`
+ * over what's there. */
+void vx_fill_rounded(struct vx_surface *s, int x, int y, int width, int height, int radius,
+                     uint32_t color, int alpha);
+/* A glossy shape with round corners (like Aqua's buttons): `color`, lighter
+ * and shiny on top, deeper in the middle, glowing at the bottom, with a
+ * darker edge. */
+void vx_draw_gel(struct vx_surface *s, int x, int y, int width, int height, int radius,
+                 uint32_t color);
+/* The color of a gel's row `row` of `height` (for drawing parts of one). */
+uint32_t vx_gel_color(uint32_t color, int row, int height);
+
 /* A rectangle's outline, one pixel wide, inside it. */
 void vx_draw_outline(struct vx_surface *s, int x, int y, int width, int height, uint32_t color);
 /* Text cut to `width` pixels (ending in "..." when it doesn't fit). */
@@ -205,6 +224,8 @@ void vx_draw_text_fit(struct vx_surface *s, int x, int y, int width, const char 
 /* A push button with its label centered; `hot`: under the pointer. */
 void vx_draw_button(struct vx_surface *s, int x, int y, int width, int height, const char *label,
                     bool hot);
+/* A check box, 16 by 16: on, a gel of the accent with a white tick. */
+void vx_draw_check(struct vx_surface *s, int x, int y, bool on);
 /* A one-line text field: the text (its end, if it's long), and a cursor
  * after it when `focused`. */
 void vx_draw_field(struct vx_surface *s, int x, int y, int width, const char *text, bool focused);

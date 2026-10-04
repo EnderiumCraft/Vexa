@@ -67,8 +67,7 @@
 #define COLOR_TITLE (vx_theme.title)
 #define COLOR_TITLE_FOCUSED (vx_theme.title_focused)
 #define COLOR_TITLE_TEXT (vx_theme.title_text)
-#define COLOR_BORDER (vx_theme.line)
-#define COLOR_CLOSE 0xff5f6d
+#define COLOR_BORDER (vx_theme.dark ? 0x08070e : 0x8c8c9c)
 #define COLOR_OUTLINE (vx_theme.accent)
 #define COLOR_MENU (vx_theme.menu)
 #define COLOR_MENU_HOT (vx_theme.selected)
@@ -645,64 +644,91 @@ static void draw_line(struct vx_surface *view, int x0, int y0, int x1, int y1, u
     }
 }
 
+/* The title bar's glass: its tint, and how much of it. */
+static uint32_t title_tint(bool on, int *alpha) {
+    if (on) { /* The accent, as glass. */
+        *alpha = vx_theme.dark ? 150 : 135;
+        return vx_mix(COLOR_OUTLINE, vx_theme.dark ? 0x101018 : 0xffffff, 105);
+    }
+    *alpha = vx_theme.dark ? 205 : 215;
+    return vx_theme.dark ? 0x2a2838 : 0xe4e4ea;
+}
+
+/* A glyph on a title bar button: a cross, a bar, a plus or two boxes. */
+static void draw_glyph(struct vx_surface *view, int button, bool maximized, int cx, int cy,
+                       uint32_t color) {
+    if (button == 0) {
+        for (int t = 0; t < 2; t++) {
+            draw_line(view, cx - 3 + t, cy - 3, cx + 2 + t, cy + 2, color);
+            draw_line(view, cx + 2 + t, cy - 3, cx - 3 + t, cy + 2, color);
+        }
+    } else if (button == 1 && maximized) {
+        vx_draw_outline(view, cx - 3, cy - 2, 5, 5, color);
+        vx_fill(view, cx - 1, cy - 4, 5, 1, color);
+        vx_fill(view, cx + 3, cy - 4, 1, 5, color);
+    } else if (button == 1) {
+        vx_fill(view, cx - 3, cy - 1, 7, 2, color);
+        vx_fill(view, cx - 1, cy - 3, 2, 7, color);
+    } else {
+        vx_fill(view, cx - 3, cy - 1, 7, 2, color);
+    }
+}
+
 static void draw_title_bar(struct vx_surface *view, struct window *w, int x, int y) {
     /* x, y: the content's corner. */
     int width = w->content.width, top = y - TITLE_HEIGHT;
     bool on = w == focused;
-    uint32_t bar = on ? COLOR_TITLE_FOCUSED : COLOR_TITLE;
-    uint32_t text = on ? COLOR_TITLE_TEXT : vx_mix(COLOR_TITLE_TEXT, bar, 110);
-    /* The frame and the bar, their top corners round. */
-    fill_rounded(view, (struct rect){x - BORDER, top - BORDER, width + 2 * BORDER,
-                                     TITLE_HEIGHT + 2 * CORNER},
-                 CORNER + 1, COLOR_BORDER);
-    fill_rounded(view, (struct rect){x, top, width, TITLE_HEIGHT + 2 * CORNER}, CORNER, bar);
+    /* Glass: what's behind, blurred and tinted, with a shine on the top
+     * half; the top corners round, a dark edge and a bright line inside it. */
+    int alpha;
+    uint32_t tint = title_tint(on, &alpha);
+    draw_glass(view, (struct rect){x - BORDER, top - BORDER, width + 2 * BORDER, TITLE_HEIGHT + BORDER},
+               CORNER + 1, 0, tint, alpha, on ? 120 : 85);
+    outline_rounded(view, (struct rect){x - BORDER, top - BORDER, width + 2 * BORDER,
+                                        TITLE_HEIGHT + 2 * CORNER},
+                    CORNER + 1, COLOR_BORDER);
+    blend_rect(view, (struct rect){x + CORNER - 2, top, width - 2 * CORNER + 4, 1}, 0xffffff,
+               vx_theme.dark ? 70 : 150);
+    blend_rect(view, (struct rect){x, y - 1, width, 1}, 0x000000, 50);
     int button_count = w->resizable ? 3 : 2;
-    /* The title, in the middle of the room the buttons leave. */
+    /* The title, in the middle of the room the buttons leave: light on dark
+     * glass over a shadow, dark on light glass over a glow. */
+    uint32_t text = vx_theme.dark ? (on ? 0xffffff : 0xa8a4b8) : (on ? 0x101420 : 0x6c6c78);
+    uint32_t halo = vx_theme.dark ? 0x000000 : 0xffffff;
     const struct vx_font *bold = vx_font(VX_FACE_BOLD, 13);
     int room = width - 16 - button_count * BUTTON_WIDTH;
     int tw = vx_text_width_font(bold, w->title);
     int tx = tw < room ? x + 8 + (room - tw) / 2 : x + 8;
+    char shown[80];
     if (tw <= room) {
-        vx_text(view, bold, tx, top + 3, w->title, text, VX_TRANSPARENT);
+        snprintf(shown, sizeof(shown), "%s", w->title);
     } else {
-        char shown[80];
         static const char ellipsis[] = "\xe2\x80\xa6";
         size_t n = vx_text_fit_bytes(bold, w->title, room - vx_text_width_font(bold, ellipsis));
         snprintf(shown, sizeof(shown), "%.*s%s", (int)n, w->title, ellipsis);
-        vx_text(view, bold, tx, top + 3, shown, text, VX_TRANSPARENT);
     }
-    /* Close: an x at the right end; then maximize (a box) and minimize (a bar). */
-    int hot = w == hot_window ? hot_button : -1;
+    if (on || !vx_theme.dark) {
+        vx_text(view, bold, tx, top + 4, shown, vx_mix(tint, halo, 200), VX_TRANSPARENT);
+    }
+    vx_text(view, bold, tx, top + 3, shown, text, VX_TRANSPARENT);
+    /* The buttons, glossy balls: close (red) at the right end, then maximize
+     * (green) and minimize (yellow); grey on windows in the back. Their
+     * signs show while the pointer is over them. */
+    static const uint32_t colors[3] = {0xff5f57, 0x2ac845, 0xfebc2e};
+    bool lit = w == hot_window && hot_button >= 0;
     int bx = x + width - BUTTON_WIDTH, cy = top + TITLE_HEIGHT / 2;
-    if (hot == 0) {
-        fill_rounded(view, (struct rect){bx + 2, cy - 8, 16, 16}, 8, COLOR_CLOSE);
-    }
-    uint32_t cross = hot == 0 ? 0xffffff : on ? COLOR_CLOSE : text;
-    for (int t = 0; t < 2; t++) {
-        draw_line(view, bx + 6 + t, cy - 4, bx + 13 + t - 1, cy + 3, cross);
-        draw_line(view, bx + 13 + t - 1, cy - 4, bx + 6 + t, cy + 3, cross);
-    }
-    if (w->resizable) {
+    for (int i = 0; i < 3; i++) {
+        if (i == 1 && !w->resizable) {
+            continue;
+        }
+        uint32_t color = on || lit ? colors[i] : vx_theme.dark ? 0x6a6878 : 0xbcbcc4;
+        int cx = bx + BUTTON_WIDTH / 2;
+        draw_orb(view, cx, cy, 7, color);
+        if (lit) {
+            draw_glyph(view, i, w->maximized, cx, cy, vx_mix(color, 0x000000, 175));
+        }
         bx -= BUTTON_WIDTH;
-        if (hot == 1) {
-            fill_rounded(view, (struct rect){bx + 2, cy - 8, 16, 16}, 8, vx_mix(bar, 0xffffff, 40));
-        }
-        int size = w->maximized ? 7 : 9;
-        int bxx = bx + 5 + (w->maximized ? 1 : 0), byy = cy - 4 + (w->maximized ? 1 : 0);
-        vx_fill(view, bxx, byy, size, 2, text);
-        vx_fill(view, bxx, byy + size - 1, size, 1, text);
-        vx_fill(view, bxx, byy, 1, size, text);
-        vx_fill(view, bxx + size - 1, byy, 1, size, text);
-        if (w->maximized) { /* Two boxes: "restore". */
-            vx_fill(view, bxx + 2, byy - 2, size, 1, text);
-            vx_fill(view, bxx + size + 1, byy - 2, 1, size, text);
-        }
     }
-    bx -= BUTTON_WIDTH;
-    if (hot == (w->resizable ? 2 : 1)) {
-        fill_rounded(view, (struct rect){bx + 2, cy - 8, 16, 16}, 8, vx_mix(bar, 0xffffff, 40));
-    }
-    vx_fill(view, bx + 5, cy + 3, 9, 2, text);
 }
 
 /* A window, frame and all; (x, y) is where its frame's corner goes. */
@@ -718,58 +744,72 @@ void draw_window_at(struct vx_surface *view, struct window *w, int x, int y) {
 }
 
 static void draw_panel(struct vx_surface *view, int ox, int oy) {
-    vx_fill(view, ox, oy, screen.width, PANEL_HEIGHT - 1, COLOR_PANEL);
-    vx_fill(view, ox, oy + PANEL_HEIGHT - 1, screen.width, 1, COLOR_PANEL_LINE);
-    /* The Vexa menu's button: a diamond and the name. */
-    fill_rounded(view, (struct rect){ox + 3, oy + 3, MENU_BUTTON_WIDTH, PANEL_HEIGHT - 6}, 6,
-                 menu_open ? COLOR_BUTTON_HOT : COLOR_BUTTON);
+    /* Glass across the top, a little darker than the windows', with a bright
+     * line along its top and a dark one under it. */
+    struct rect bar = {ox, oy, screen.width, PANEL_HEIGHT};
+    draw_glass(view, bar, 0, 0, COLOR_PANEL, vx_theme.dark ? 175 : 165, 90);
+    blend_rect(view, (struct rect){ox, oy, screen.width, 1}, 0xffffff, vx_theme.dark ? 40 : 140);
+    blend_rect(view, (struct rect){ox, oy + PANEL_HEIGHT - 1, screen.width, 1}, 0x000000,
+               vx_theme.dark ? 160 : 70);
+    /* The Vexa menu's button: a gel of the accent, a white diamond and the name. */
+    struct rect m = {ox + 3, oy + 3, MENU_BUTTON_WIDTH, PANEL_HEIGHT - 6};
+    vx_draw_gel(view, m.x, m.y, m.width, m.height, m.height / 2,
+                menu_open ? vx_mix(COLOR_OUTLINE, 0x000000, 50) : COLOR_OUTLINE);
     for (int i = 0; i < 5; i++) {
-        vx_fill(view, ox + 14 - i, oy + 8 + i, 2 * i + 1, 1, COLOR_OUTLINE);
-        vx_fill(view, ox + 14 - i, oy + 16 - i, 2 * i + 1, 1, COLOR_OUTLINE);
+        vx_fill(view, ox + 15 - i, oy + 8 + i, 2 * i + 1, 1, 0xffffff);
+        vx_fill(view, ox + 15 - i, oy + 16 - i, 2 * i + 1, 1, 0xffffff);
     }
-    vx_text(view, vx_font(VX_FACE_BOLD, 13), ox + 26, oy + 5, "Vexa", COLOR_PANEL_TEXT,
+    const struct vx_font *bold = vx_font(VX_FACE_BOLD, 13);
+    vx_text(view, bold, ox + 27, oy + 6, "Vexa", vx_mix(COLOR_OUTLINE, 0x000000, 120),
             VX_TRANSPARENT);
+    vx_text(view, bold, ox + 27, oy + 5, "Vexa", 0xffffff, VX_TRANSPARENT);
 
+    /* The windows: glassy buttons, the focused one a gel of the accent. */
     struct window *list[MAX_WINDOWS];
     int n = windows_by_id(list);
     for (int i = 0; i < n; i++) {
         struct rect b = task_button(i, n);
         struct window *w = list[i];
-        uint32_t color = w->minimized ? COLOR_BUTTON_OFF
-                         : w == focused ? COLOR_BUTTON_HOT : COLOR_BUTTON;
-        fill_rounded(view, (struct rect){ox + b.x, oy + b.y, b.width, b.height}, 5, color);
-        if (w == focused && !w->minimized) {
-            vx_fill(view, ox + b.x + 6, oy + b.y + b.height - 2, b.width - 12, 2, COLOR_OUTLINE);
+        struct rect r = {ox + b.x, oy + b.y, b.width, b.height};
+        bool on = w == focused && !w->minimized;
+        if (on) {
+            vx_draw_gel(view, r.x, r.y, r.width, r.height, 6, COLOR_OUTLINE);
+        } else {
+            fill_gel(view, r, 6, vx_theme.dark ? 0x504a66 : 0xffffff, w->minimized ? 40 : 90);
+            outline_rounded(view, r, 6, vx_mix(COLOR_PANEL, 0x000000, w->minimized ? 40 : 80));
         }
-        vx_draw_text_fit(view, ox + b.x + 8, oy + b.y + 2, b.width - 14, w->title,
-                         w->minimized ? COLOR_PANEL_DIM : COLOR_PANEL_TEXT, VX_TRANSPARENT);
+        uint32_t color = on ? 0xffffff : w->minimized ? COLOR_PANEL_DIM : COLOR_PANEL_TEXT;
+        if (on) { /* (White over a darker copy: it reads on the light top.) */
+            vx_draw_text_fit(view, r.x + 8, r.y + 3, b.width - 14, w->title,
+                             vx_mix(COLOR_OUTLINE, 0x000000, 120), VX_TRANSPARENT);
+        }
+        vx_draw_text_fit(view, r.x + 8, r.y + 2, b.width - 14, w->title, color, VX_TRANSPARENT);
     }
 
     /* Search, and the clock (with a dot for notifications not seen yet). */
     struct rect s = search_button_rect();
     if (search_open) {
-        fill_rounded(view, (struct rect){ox + s.x, oy + s.y, s.width, s.height}, 6, COLOR_BUTTON_HOT);
+        fill_gel(view, (struct rect){ox + s.x, oy + s.y, s.width, s.height}, 6, COLOR_OUTLINE, 255);
     }
-    draw_magnifier(view, ox + s.x + 7, oy + s.y + 4, 14, COLOR_PANEL_TEXT);
+    draw_magnifier(view, ox + s.x + 7, oy + s.y + 4, 14, search_open ? 0xffffff : COLOR_PANEL_TEXT);
     struct rect c = clock_button_rect();
     if (clock_open) {
-        fill_rounded(view, (struct rect){ox + c.x, oy + c.y, c.width, c.height}, 6, COLOR_BUTTON_HOT);
+        fill_gel(view, (struct rect){ox + c.x, oy + c.y, c.width, c.height}, 6, COLOR_OUTLINE, 255);
     }
     char text[48];
     if (clock_text(text, sizeof(text))) {
-        vx_draw_text(view, ox + c.x + 8, oy + 5, text, COLOR_PANEL_TEXT, VX_TRANSPARENT);
+        vx_draw_text(view, ox + c.x + 8, oy + 5, text, clock_open ? 0xffffff : COLOR_PANEL_TEXT,
+                     VX_TRANSPARENT);
     }
     if (unread_notes) {
-        fill_rounded(view, (struct rect){ox + c.x + c.width - 14, oy + 9, 7, 7}, 4, COLOR_OUTLINE);
+        draw_orb(view, ox + c.x + c.width - 10, oy + 12, 4, COLOR_OUTLINE);
     }
 }
 
 static void draw_menu(struct vx_surface *view, int ox, int oy) {
     struct rect r = menu_rect();
     struct rect shifted = {ox + r.x, oy + r.y, r.width, r.height};
-    draw_shadow(view, shifted, 140);
-    fill_rounded(view, shifted, 8, COLOR_MENU);
-    outline_rounded(view, shifted, 8, COLOR_PANEL_LINE);
+    draw_glass_popup(view, shifted, 8, 140);
     int top = r.y + 4;
     for (int i = 0; i < MENU_ITEMS; i++) {
         int h = menu_item_height(i);
@@ -777,8 +817,7 @@ static void draw_menu(struct vx_surface *view, int ox, int oy) {
             vx_fill(view, ox + r.x + 8, oy + top + h / 2, r.width - 16, 1, COLOR_PANEL_LINE);
         } else {
             if (i == menu_hot) {
-                fill_rounded(view, (struct rect){ox + r.x + 4, oy + top, r.width - 8, h}, 5,
-                             COLOR_MENU_HOT);
+                vx_draw_gel(view, ox + r.x + 4, oy + top, r.width - 8, h, 6, COLOR_OUTLINE);
             }
             int text_x = ox + r.x + 12;
             if (menu_items[i].action == RUN_APP && app_icons[menu_items[i].app]) {
@@ -787,11 +826,17 @@ static void draw_menu(struct vx_surface *view, int ox, int oy) {
             if (menu_items[i].action == RUN_APP || menu_items[i].action == RUN_LINUX_APP) {
                 text_x += 24;
             }
-            vx_draw_text(view, text_x, oy + top + 4, menu_items[i].label, COLOR_PANEL_TEXT,
-                         VX_TRANSPARENT);
+            bool lit = i == menu_hot;
+            if (lit) {
+                vx_draw_text(view, text_x, oy + top + 5, menu_items[i].label,
+                             vx_mix(COLOR_OUTLINE, 0x000000, 120), VX_TRANSPARENT);
+            }
+            vx_draw_text(view, text_x, oy + top + 4, menu_items[i].label,
+                         lit ? 0xffffff : COLOR_PANEL_TEXT, VX_TRANSPARENT);
             int keys = vx_text_width(menu_items[i].keys);
             vx_draw_text(view, ox + r.x + r.width - keys - 12, oy + top + 4, menu_items[i].keys,
-                         COLOR_PANEL_DIM, VX_TRANSPARENT);
+                         lit ? vx_mix(COLOR_OUTLINE, 0xffffff, 190) : COLOR_PANEL_DIM,
+                         VX_TRANSPARENT);
         }
         top += h;
     }
@@ -1308,7 +1353,56 @@ static void show(struct rect area) {
     }
 }
 
+/* Glass blurs what's behind it, so drawing part of a glass area again would
+ * blur only that part: damage that touches one takes all of it. */
+static bool touches(struct rect a, struct rect b) {
+    return a.width > 0 && b.width > 0 && a.x < b.x + b.width && b.x < a.x + a.width &&
+           a.y < b.y + b.height && b.y < a.y + a.height;
+}
+
+static bool take_glass(struct rect r) {
+    if (!touches(damage, r)) {
+        return false;
+    }
+    struct rect before = damage;
+    add_damage(r);
+    return damage.x != before.x || damage.y != before.y || damage.width != before.width ||
+           damage.height != before.height;
+}
+
+static void grow_damage_for_glass(void) {
+    if (locked || saver_on) {
+        return;
+    }
+    for (int round = 0; round < 4; round++) {
+        bool grew = take_glass(panel_rect());
+        for (int i = 0; i < window_count; i++) {
+            struct window *w = stack[i];
+            if (!w->minimized && !w->popup && !w->undecorated && w->animation == ANIM_NONE) {
+                struct rect f = frame_rect(w);
+                grew |= take_glass((struct rect){f.x, f.y, f.width, TITLE_HEIGHT + BORDER});
+            }
+        }
+        if (menu_open) {
+            grew |= take_glass(menu_rect());
+        }
+        if (clock_open) {
+            grew |= take_glass(clock_rect());
+        }
+        if (search_open) {
+            grew |= take_glass(search_rect());
+        }
+        if (switcher_open) {
+            grew |= take_glass(switcher_rect());
+        }
+        if (!grew) {
+            break;
+        }
+    }
+}
+
 static void redraw_damage(void) {
+    grow_damage_for_glass();
     if (damage.width > 0) {
         compose(damage);
         show(damage);
@@ -1910,7 +2004,7 @@ static void client_message(int client) {
         }
         damage_all();
         printf("desktop: settings reloaded (%s, %s)\n", vx_theme.dark ? "dark" : "light",
-               vx_settings_get(&config, "accent", "purple"));
+               vx_settings_get(&config, "accent", "blue"));
         break;
     }
     case DESKTOP_INFO: {
@@ -3231,9 +3325,12 @@ int main(int argc, char **argv) {
     fflush(stdout);
     /* The first program: a terminal, unless told otherwise (or Settings
      * says not to); then the apps Settings chose to start with the desktop. */
-    if (argc > 1) {
-        launch(argv[1]);
-    } else if (vx_settings_bool(&config, "startup_terminal", true)) {
+    /* (--boot: started by vinit when the computer starts, where a terminal
+     * isn't wanted unless Settings asks for one; then maybe a program.) */
+    bool boot = argc > 1 && strcmp(argv[1], "--boot") == 0;
+    if (argc > (boot ? 2 : 1)) {
+        launch(argv[boot ? 2 : 1]);
+    } else if (vx_settings_bool(&config, "startup_terminal", !boot)) {
         launch("/bin/term");
     }
     const char *startup = vx_settings_get(&config, "startup_apps", "");

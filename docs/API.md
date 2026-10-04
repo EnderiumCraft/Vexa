@@ -313,7 +313,8 @@ The look of Vexa's own apps: `VX_COLOR_WINDOW`, `VIEW`, `TEXT`, `DIM`, `ACCENT`,
 `SELECTED`, `BUTTON`, `BUTTON_HOT`, `LINE`. They come from the theme, `vx_theme` (a
 `struct vx_theme`: `dark`, and those colors plus `sidebar`, `stripe`, `shadow` and the
 desktop's), which libvexa reads from `/etc/desktop.conf` when a window opens and again
-when it changes. `vx_theme_make(&theme, "light", "blue")` makes one (for a preview);
+when it changes. `vx_theme_make(&theme, "light", "blue")` makes one (for a preview; light with blue is
+the default);
 `vx_accents[]` (`vx_accent_count`) are the accent colors; `vx_mix(a, b, amount)` mixes
 two colors.
 
@@ -321,8 +322,13 @@ two colors.
 | --- | --- |
 | `void vx_draw_outline(s, x, y, width, height, color)` | a one-pixel outline |
 | `void vx_draw_text_fit(s, x, y, width, text, fg, bg)` | text cut to fit, ending in "…" |
-| `void vx_draw_button(s, x, y, width, height, label, bool hot)` | a push button |
-| `void vx_draw_field(s, x, y, width, text, bool focused)` | a one-line text field |
+| `void vx_draw_button(s, x, y, width, height, label, bool hot)` | a glossy push button (`hot`: the accent) |
+| `void vx_draw_check(s, x, y, bool on)` | a 16x16 check box (on: a gel of the accent with a tick) |
+| `void vx_draw_field(s, x, y, width, text, bool focused)` | a one-line text field (focused: a ring of the accent) |
+| `void vx_fill_rounded(s, x, y, width, height, radius, color, alpha)` | a rectangle with smooth round corners, `alpha` (0-255) of `color` over what's there |
+| `void vx_draw_gel(s, x, y, width, height, radius, color)` | a glossy gel shape like Aqua's buttons: shiny on top, a glow at the bottom, a darker edge (`radius` = half the height: a pill; a square with it: a ball) |
+| `uint32_t vx_gel_color(color, row, height)` | the color of a gel's row, for drawing one's parts |
+| `int vx_corner_inset(radius, row, int *coverage)` | where a round corner's row starts, and how much of the pixel before it is covered |
 | `bool vx_field_key(char *text, size_t size, const struct vx_gui_event *e)` | edits a field's text (UTF-8) with a key event; true if it changed |
 | `bool vx_inside(px, py, x, y, width, height)` | a point in a rectangle |
 | `void vx_menu_size(items, count, int *width, int *height)` | a pop-up menu's size |

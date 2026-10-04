@@ -109,6 +109,17 @@ void blend_rect(struct vx_surface *view, struct rect r, uint32_t color, int alph
 /* A rectangle with round corners (radius), filled; and its outline. */
 void fill_rounded(struct vx_surface *view, struct rect r, int radius, uint32_t color);
 void outline_rounded(struct vx_surface *view, struct rect r, int radius, uint32_t color);
+/* Glass: what's behind a rectangle (already drawn), blurred, `tint_alpha` of
+ * `tint` over it, and a shine on its top half (`shine`: 0 to 255); its top
+ * and bottom corners round. */
+void draw_glass(struct vx_surface *view, struct rect r, int top_radius, int bottom_radius,
+                uint32_t tint, int tint_alpha, int shine);
+/* A popup (menu, calendar, search...) of glass: shadow, glass, edge. */
+void draw_glass_popup(struct vx_surface *view, struct rect r, int radius, int shadow);
+/* A glossy ball of `color` (the title bar's buttons). */
+void draw_orb(struct vx_surface *view, int cx, int cy, int radius, uint32_t color);
+/* A glossy gel shape (vx_draw_gel without the edge), `alpha` of it. */
+void fill_gel(struct vx_surface *view, struct rect r, int radius, uint32_t color, int alpha);
 /* `from` drawn into a rectangle of `to`, made smaller smoothly (averaging) or
  * bigger, `alpha` of it over what's there. */
 void blit_smooth(struct vx_surface *to, struct rect r, const struct vx_surface *from, int alpha);

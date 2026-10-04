@@ -86,8 +86,8 @@ TYPED_COMMANDS = ([
     ("df", "iso9660", 10),
     ("ls /", "README.txt", 10),
     ("ls /bin", "vsh", 10, 2),
-    ("cat /etc/motd", "Welcome to Vexa", 10, 2),
-    ("ln -s /etc/motd /tmp/motd-link ; cat /tmp/motd-link", "Welcome to Vexa", 10, 3),
+    ("cat /etc/motd", "Welcome to Vexa", 10),
+    ("ln -s /etc/motd /tmp/motd-link ; cat /tmp/motd-link", "Welcome to Vexa", 10, 2),
     ("ls /proc", "meminfo", 10),
     # Native programs use libvexa.so through /lib/vexa-ld.so.
     ("ls /lib", "vexa-ld.so", 10),
@@ -246,16 +246,16 @@ TYPED_COMMANDS = ([
     ("@mouse_button 1", 'desktop: menu item "About Vexa"', 10),
     ("@mouse_button 0", 'desktop: window 6 "About Vexa"', 20),
     ] + move(1020, 762, 40, 150) + [
-    # Settings (from the Vexa menu; window 7, at 272,49): the light theme
-    # (every window changes), dark again, a time zone, and 1024x768 (which
+    # Settings (from the Vexa menu; window 7, at 272,49): the dark theme
+    # (every window changes), light again, a time zone, and 1024x768 (which
     # goes back by itself after 15 seconds), then closed.
     ] + click(40, 150, 31, 13, "desktop: left button at 31,13") + [
     ("@mouse_move 0 100", None, 3),
     ("@mouse_button 1", None, 3),
     ("@mouse_button 0", 'desktop: window 7 "Settings"', 20),
-    ] + click(31, 113, 756, 190, "desktop: settings reloaded (light, purple)", 20)
-      + click(756, 190, 576, 190, "desktop: settings reloaded (dark, purple)", 20)
-      + click(576, 190, 372, 218, "settings: showing Date & Time")
+    ] + click(31, 113, 576, 190, "desktop: settings reloaded (dark, blue)", 20)
+      + click(576, 190, 756, 190, "desktop: settings reloaded (light, blue)", 20)
+      + click(756, 190, 372, 218, "settings: showing Date & Time")
       + click(372, 218, 706, 392, "settings: time_zone=Denver")
       + click(706, 392, 372, 286, "settings: showing Display")
       + click(372, 286, 769, 154, "desktop: display now 1024x768", 30) + [
@@ -416,7 +416,7 @@ LINUX_COMMANDS = [
     ("@mouse_move 53 -150", None, 5),
     ("@mouse_button 1", "desktop: asked window 2 to close", 10),
     ("@mouse_button 0", 'desktop: closed window 2 "xterm"', 30),
-    # GTK 3: gtk3-demo from the Vexa menu (at 144,138, with GTK's own title
+    # GTK 3: gtk3-demo from the Vexa menu (below the native apps; at 144,138, with GTK's own title
     # bar); a click on "Change Display" in its list shows that demo, which is
     # its title then.
     ("@mouse_move -357 -43", None, 5),
@@ -424,10 +424,10 @@ LINUX_COMMANDS = [
     ("@mouse_button 1", "desktop: left button at 31,13", 10),
     ("@mouse_button 0", None, 5),
     ("@mouse_move 0 199", None, 5),
-    ("@mouse_move 0 199", None, 5),
-    ("@mouse_button 1", "desktop: left button at 31,411", 10),
+    ("@mouse_move 0 223", None, 5),
+    ("@mouse_button 1", "desktop: left button at 31,435", 10),
     ("@mouse_button 0", "desktop: window 3", 300),
-    ("@mouse_move 181 -103", None, 10),
+    ("@mouse_move 181 -127", None, 10),
     ("@mouse_button 1", "desktop: left button at 212,308", 10),
     ("@mouse_button 0", 'desktop: window 3 is now called "Change Display"', 60),
     # GTK draws its own title bar (the desktop draws none for it); its
@@ -552,8 +552,8 @@ USB_DESKTOP_COMMANDS = [
 
 USB_COMMANDS = [
     ("#usb",),
-    # (Typing goes to the newest keyboard: first, everything's found.)
-    ("@sendkey shift", "hub port 1: QEMU USB Mouse", 30),
+    # (Everything was found while the desktop was up, at the start.)
+    ("devices usb", "QEMU USB Mouse", 10),
     ("devices usb", "QEMU USB Keyboard  [usb-hid]", 10),
     ("devices -l usb", "port 1 of a hub", 10),
     ("devices keyboard", "PS/2 keyboard", 10),
@@ -572,7 +572,7 @@ USB_COMMANDS = [
     ("cat /mnt/usb0/note.txt", "written over usb\r\n", 10),
     ("@device_del stick2", "usb0 is gone", 20, 2),  # (QEMU opens an image only once.)
     # A second keyboard, plugged in and out.
-    ("@device_add usb-kbd,bus=usb.0,id=kbd2", "usb-hid] QEMU USB Keyboard: keyboard", 20, 2),
+    ("@device_add usb-kbd,bus=usb.0,id=kbd2", "usb-hid] QEMU USB Keyboard: keyboard", 20),
     ("@device_del kbd2", "QEMU USB Keyboard unplugged", 20),
     ("echo still typing", "still typing\r\n", 10),
 ]
@@ -588,7 +588,7 @@ SDK_APP_COMMANDS = [
     # and Escape (quits) through SDL's events.
     ("@type open /mnt/vda1/SDLDemo.vxapp", '"SDL Demo" (640x400)', 30),
     ("@sound 660", None, 10),
-    ("@sendkey spc", 'is now called "SDL Demo (paused)"', 10),
+    ("@sendkey spc", 'is now called "SDL Demo (paused)"', 60),  # (Slow in safe mode.)
     ("@sendkey esc", "desktop: closed window", 10),
     ("@type exit", None, 5),
 ]
@@ -1042,24 +1042,46 @@ def main():
           flush=True)
     qemu = subprocess.Popen(command)
     failures = []
+    log_base = 0
     try:
         monitor = Monitor(mon_path)
         for text in EXPECTED_BOOT_LEGACY if args.safe_mode else EXPECTED_BOOT_APIC:
             if not wait_for(log_path, text, BOOT_TIMEOUT):
                 failures.append("boot: missing " + repr(text))
                 break
+        # Vexa starts the desktop (from the CD, with the Installer open);
+        # leaving it gives the console, where the checks are typed.
+        boot_desktop = ["desktop: started on a"]
+        if not (args.installed or args.no_cd):
+            boot_desktop.append('desktop: window 1 "Installer"')
+        for text in boot_desktop if not failures else []:
+            if not wait_for(log_path, text, BOOT_TIMEOUT):
+                failures.append("boot: missing " + repr(text))
+                break
+        if not failures:
+            for attempt in range(3):
+                time.sleep(1)
+                monitor.command("sendkey ctrl-alt-q")
+                if wait_for(log_path, "desktop: asking before leaving", 10):
+                    break
+            monitor.command("sendkey ret")
+            if not wait_for(log_path, "desktop: back to the console", 30):
+                failures.append("boot: couldn't leave the desktop for the console")
+        # (The checks below look only at what comes after this.)
+        log_base = len(read_log(log_path))
 
         if not failures:
             typed = 0
-            previous_start = 0
+            previous_start = log_base
             sound_heard = 44  # How much of QEMU's sound recording "@sound" has looked at.
             for command, expected, timeout, *count in commands:
-                # Normally, how many times the text is in the whole log;
+                # Normally, how many times the text is in the log since the
+                # desktop started at boot was left;
                 # with --only (earlier checks skipped), whether it's in what
                 # came since the command before this one was sent (what a
                 # command causes can show up before the next one is sent);
                 # twice if typing it echoes it.
-                start = 0
+                start = log_base
                 if only is not None:
                     start, previous_start = previous_start, len(read_log(log_path))
                     echoed = expected and not command.startswith("@") and expected in command

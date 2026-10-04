@@ -8,7 +8,9 @@
  *   noapic     use the legacy 8259 PIC and PIT instead of the APICs
  *   nosmp      use only the first CPU
  *   root=UUID=<uuid>, root=<disk>   the root file system: an ext2 file system
- *              (an installed Vexa), instead of the initramfs in memory */
+ *              (an installed Vexa), instead of the initramfs in memory
+ *   console    (for vinit) a shell on the console, not the desktop
+ * /proc/cmdline shows it. */
 void cmdline_init(const char *cmdline);
 const char *cmdline_get(void);
 /* True if `option` appears as a whole space-separated word. */

@@ -1,5 +1,6 @@
 #include <stdarg.h>
 #include <vexa/arch.h>
+#include <vexa/cmdline.h>
 #include <vexa/cpu.h>
 #include <vexa/fs.h>
 #include <vexa/kprintf.h>
@@ -382,6 +383,11 @@ static void gen_version(struct text *text) {
                 VEXA_VERSION);
 }
 
+/* The kernel's command line (limine.conf's cmdline:), as on Linux. */
+static void gen_cmdline_global(struct text *text) {
+    text_printf(text, "%s\n", cmdline_get());
+}
+
 static void gen_mounts(struct text *text) {
     /* Reads of /proc files run with the VFS lock held, which also keeps the
      * mount list steady. */
@@ -557,6 +563,7 @@ static const struct global_entry global_entries[] = {
     {"meminfo", gen_meminfo},   {"uptime", gen_uptime},   {"loadavg", gen_loadavg},
     {"stat", gen_stat_global},  {"cpuinfo", gen_cpuinfo}, {"version", gen_version},
     {"mounts", gen_mounts},     {"filesystems", gen_filesystems},
+    {"cmdline", gen_cmdline_global},
 };
 #define GLOBAL_ENTRY_COUNT (int)(sizeof(global_entries) / sizeof(global_entries[0]))
 

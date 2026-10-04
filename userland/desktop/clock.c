@@ -192,9 +192,7 @@ static void draw_arrow(struct vx_surface *view, struct rect r, bool left, bool l
 void clock_draw(struct vx_surface *view, int ox, int oy) {
     struct rect r = clock_rect();
     struct rect shifted = {r.x + ox, r.y + oy, r.width, r.height};
-    draw_shadow(view, shifted, 150);
-    fill_rounded(view, shifted, 12, vx_theme.menu);
-    outline_rounded(view, shifted, 12, vx_theme.line);
+    draw_glass_popup(view, shifted, 12, 150);
     int x = r.x + ox, y = r.y + oy;
 
     /* The time, big, and the date. */
@@ -251,8 +249,7 @@ void clock_draw(struct vx_surface *view, int ox, int oy) {
         snprintf(number, sizeof(number), "%d", day);
         int w = vx_text_width(number);
         if (today) {
-            fill_rounded(view, (struct rect){cx + (grid_w - 26) / 2, cy - 1, 26, 26}, 13,
-                         vx_theme.accent);
+            draw_orb(view, cx + grid_w / 2, cy + 12, 13, vx_theme.accent);
         }
         vx_draw_text(view, cx + (grid_w - w) / 2, cy + 4, number,
                      today ? 0xffffff : vx_theme.text, VX_TRANSPARENT);
@@ -270,9 +267,7 @@ void clock_draw(struct vx_surface *view, int ox, int oy) {
     if (history_count) {
         struct rect c = clear_rect();
         c.x += ox, c.y += oy;
-        fill_rounded(view, c, 6, hot == HOT_CLEAR ? vx_theme.button_hot : vx_theme.button);
-        vx_draw_text(view, c.x + (c.width - vx_text_width("Clear")) / 2, c.y + 4, "Clear",
-                     vx_theme.text, VX_TRANSPARENT);
+        vx_draw_button(view, c.x, c.y, c.width, c.height, "Clear", hot == HOT_CLEAR);
     }
     ny += 34;
     if (!history_count) {

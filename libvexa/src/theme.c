@@ -22,14 +22,14 @@ uint32_t vx_mix(uint32_t a, uint32_t b, int amount) {
 }
 
 void vx_theme_make(struct vx_theme *t, const char *name, const char *accent) {
-    uint32_t color = vx_accents[0].color;
+    uint32_t color = vx_accents[1].color; /* Blue, unless another is named. */
     for (int i = 0; i < vx_accent_count; i++) {
         if (accent && !strcmp(accent, vx_accents[i].name)) {
             color = vx_accents[i].color;
         }
     }
     t->accent = color;
-    t->dark = !name || strcmp(name, "light") != 0;
+    t->dark = name && !strcmp(name, "dark");
     if (t->dark) {
         t->window = 0x1a1030;
         t->view = 0x120b22;
@@ -47,33 +47,35 @@ void vx_theme_make(struct vx_theme *t, const char *name, const char *accent) {
         t->title = 0x2c1d4a;
         t->title_text = 0xe4dcf2;
     } else {
-        t->window = 0xf3f1f7;
+        /* Cool, quiet greys (like Aqua's), so the glass and the accent stand out. */
+        t->window = 0xeef0f4;
         t->view = 0xffffff;
-        t->text = 0x1d1830;
-        t->dim = 0x6f6885;
+        t->text = 0x1a1d24;
+        t->dim = 0x6b7080;
         t->selected = vx_mix(0xffffff, color, 90);
-        t->button = 0xe6e2ee;
-        t->button_hot = 0xd9d3e6;
-        t->line = 0xcfc9dc;
-        t->sidebar = 0xeae7f1;
-        t->stripe = 0xf8f7fb;
-        t->shadow = 0x9d97ab;
-        t->panel = 0xe7e4ee;
-        t->menu = 0xfbfaff;
-        t->title = 0xe2dfe9;
-        t->title_text = 0x1d1830;
+        t->button = 0xe2e5eb;
+        t->button_hot = 0xd5dae3;
+        t->line = 0xc4c9d3;
+        t->sidebar = 0xe6e9ef;
+        t->stripe = 0xf5f7fa;
+        t->shadow = 0x9aa0ab;
+        t->panel = 0xe9ecf2;
+        t->menu = 0xf8f9fc;
+        t->title = 0xe0e3ea;
+        t->title_text = 0x1a1d24;
     }
     t->title_focused = t->selected;
 }
 
+/* (Until vx_theme_load: the default, light with blue.) */
 struct vx_theme vx_theme = {
-    true, 0x1a1030, 0x120b22, 0xe4dcf2, 0x8a80a3, 0xb07cff, 0x5b3a96, 0x2c1d4a, 0x3f2a66,
-    0x3a2a5c, 0x140c26, 0x160e29, 0x06030c, 0x140c24, 0x1c1230, 0x2c1d4a, 0x5b3a96, 0xe4dcf2,
+    false, 0xeef0f4, 0xffffff, 0x1a1d24, 0x6b7080, 0x4c8dff, 0xbfd6ff, 0xe2e5eb, 0xd5dae3,
+    0xc4c9d3, 0xe6e9ef, 0xf5f7fa, 0x9aa0ab, 0xe9ecf2, 0xf8f9fc, 0xe0e3ea, 0xbfd6ff, 0x1a1d24,
 };
 
 void vx_theme_load(void) {
     struct vx_settings s;
     vx_settings_load(&s, "desktop.conf");
-    vx_theme_make(&vx_theme, vx_settings_get(&s, "theme", "dark"),
-                  vx_settings_get(&s, "accent", "purple"));
+    vx_theme_make(&vx_theme, vx_settings_get(&s, "theme", "light"),
+                  vx_settings_get(&s, "accent", "blue"));
 }

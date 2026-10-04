@@ -15,7 +15,7 @@ SDL 2, on another machine), the [API reference](docs/API.md) (libvexa), the
 
 ![Vexa running in QEMU](docs/screenshot.png)
 
-![The Vexa desktop: Files with Get Info, and the desktop's menu](docs/desktop-screenshot.png)
+![The Vexa desktop: glass title bars and panel, Settings and the Installer](docs/desktop-screenshot.png)
 
 ## Status
 
@@ -42,6 +42,11 @@ runs X programs such as `xterm` in windows of their own on it. The kernel:
   in plain words
 - reads PS/2 and USB keyboards and mice (with scroll wheels) and tablets, as input
   events programs can read (the text console types a US layout; the desktop, the layout Settings chose)
+- boots straight to its desktop (from the CD: the Installer first), with a glossy look
+  in the spirit of Aqua and Aero: glass title bars and panel that blur what's behind
+  them, red, yellow and green gel buttons, gel-like buttons, switches and menus in
+  Vexa's apps, light by default with a blue accent (a dark theme and other accents in
+  Settings)
 - has a graphical desktop: a compositor that draws programs' windows (shared buffers)
   on the screen, with soft shadows, round corners and animations, a panel (the Vexa
   menu, a button per window, search, a clock with a calendar and the notifications),
@@ -52,7 +57,7 @@ runs X programs such as `xterm` in windows of their own on it. The kernel:
   and its own apps: a terminal with tabs, Files, a text editor with tabs, undo and
   syntax colouring, an image viewer (PNG, BMP, PPM), Settings, Activity Monitor, a
   calculator, a calendar, Notes, Paint and Help, sharing Open and Save dialogs and
-  one clipboard (with X programs too); the default wallpaper is `/share/pictures/aurora.png`
+  one clipboard (with X programs too); the default wallpaper is `/share/pictures/glass.png`
 - draws text smooth with TrueType fonts (DejaVu, through stb_truetype) in UTF-8, so
   Vexa's apps show and type any language's letters, with whole keyboard layouts
   (German, French, Spanish, UK, Dvorak: AltGr and accent keys)

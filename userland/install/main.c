@@ -185,6 +185,10 @@ static void make_limine_conf(const uint8_t uuid[16]) {
              "    protocol: limine\n"
              "    path: boot():/boot/vexa-kernel\n"
              "    cmdline: root=UUID=%s monitor\n\n"
+             "/Vexa (console: a shell, not the desktop)\n"
+             "    protocol: limine\n"
+             "    path: boot():/boot/vexa-kernel\n"
+             "    cmdline: root=UUID=%s console\n\n"
              "/Vexa at 1024x768\n"
              "    protocol: limine\n"
              "    path: boot():/boot/vexa-kernel\n"
@@ -195,7 +199,7 @@ static void make_limine_conf(const uint8_t uuid[16]) {
              "    path: boot():/boot/vexa-kernel\n"
              "    cmdline: root=UUID=%s\n"
              "    resolution: 1280x720x32\n",
-             id, id, id, id, id);
+             id, id, id, id, id, id);
     step("the system's UUID is %s", id);
 }
 

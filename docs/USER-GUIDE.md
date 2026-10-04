@@ -42,6 +42,7 @@ The boot menu (Limine) has these entries:
 | **Vexa** | the normal boot |
 | **Vexa (safe mode)** | machines where the normal boot fails: ignores ACPI and uses only the oldest interrupt and timer hardware |
 | **Vexa (kernel monitor)** | the kernel's own command line, instead of the normal programs, for when something is badly broken |
+| **Vexa (console: a shell, not the desktop)** | the normal boot, but it stops at the shell instead of starting the desktop |
 | **Vexa at 1024x768**, **Vexa at 1280x720** | the normal boot, with the screen at that resolution: the firmware (UEFI or VESA) is asked for it, so it works on real PCs too, where Vexa can't change the resolution later |
 
 Other resolutions: copy one of those entries in `limine.conf` and change its
@@ -54,7 +55,14 @@ first CPU core) and `noaml` (keep ACPI's tables, but don't run their code: older
 controllers and some IDE ones are then polled), can also be written into `limine.conf`.
 
 While it starts, the kernel prints what it finds (memory, CPUs, disks, the network).
-Then `vinit`, the first program, shows a welcome message and starts the shell:
+Then `vinit`, the first program, starts the desktop. Started from the CD, the desktop
+opens the **Installer** first: install Vexa on a disk from there, or close it to try
+Vexa from the CD (it's in the Vexa menu as **Install Vexa** later). Started from a
+disk, it's just the desktop.
+
+Leaving the desktop (Ctrl+Alt+Q, or **Back to the console...** in the Vexa menu) goes to the shell;
+`desktop` there starts it again. To get the shell at the start, pick the **console**
+entry in the boot menu (it adds `console` to the kernel's command line):
 
 ```
 vexa:/>
@@ -190,7 +198,7 @@ Vexa's file system starts in memory and has these folders:
 | `/apps` | the desktop's apps, as `.vxapp` bundles |
 | `/home` | your folders: `Desktop` (its files are the desktop's icons), `Documents`, `Pictures` (screenshots go here) |
 | `/etc` | settings: `motd`, `desktop.conf`, `hosts`, `resolv.conf` |
-| `/share/pictures` | pictures (the default wallpaper, `aurora.png`, and `meadow.png`) |
+| `/share/pictures` | pictures (the default wallpaper, `glass.png`, and `aurora.png` and `meadow.png`) |
 | `/share/fonts` | the fonts Vexa's apps draw text with (DejaVu Sans, Sans Bold, Sans Mono) |
 | `/tmp` | scratch space |
 | `/Trash` | what Files moved to the Trash |
@@ -208,8 +216,17 @@ the Desktop, Documents and Pictures folders stay from one boot to the next.
 
 ## The desktop
 
-Type `desktop` at the shell. The desktop takes the screen and opens a terminal window.
-Ctrl+Alt+Q (it asks first) goes back to the text console.
+Vexa starts it by itself (see [Starting Vexa](#starting-vexa)); at the shell, type
+`desktop`, which also opens a terminal window. Ctrl+Alt+Q (it asks first) goes back to
+the text console.
+
+Its look is glossy, in the spirit of Aqua and Aero: the title bars and the panel are
+glass (what's behind them shows through, blurred and tinted with the accent color on
+the window you're using), a window's buttons are gel balls (close is red, maximize
+green, minimize yellow; grey on windows in the back, and they show their signs when
+the pointer is over them), and menus, buttons, switches and fields in Vexa's apps are
+gel-like too. It's light by default, with a blue accent; Settings → Appearance has a
+dark theme and other colours.
 
 ![The desktop](desktop-screenshot.png)
 
@@ -537,7 +554,7 @@ at once. `settings Display` opens a section directly.
 
 | Section | What's there |
 | --- | --- |
-| **Appearance** | Dark or Light, and the accent color (Purple, Blue, Teal, Green, Orange, Pink, Red, Graphite): the panel, menus, title bars and Vexa's apps follow; the terminal stays dark |
+| **Appearance** | Light (the default) or Dark, and the accent color (Blue by default; Purple, Teal, Green, Orange, Pink, Red, Graphite): the panel, menus, title bars and Vexa's apps follow; the terminal stays dark |
 | **Wallpaper** | the pictures in `/share/pictures` (as thumbnails), five gradients, how a picture fits (Fill, Fit, Center, Tile, Stretch), and any other PNG, BMP or PPM file by its path |
 | **Desktop & Panel** | desktop icons on or off, and which apps have one; the clock (24 or 12 hours, the weekday, the date, seconds); snapping windows to the edges; animations; what a double click on a title bar does (maximize, minimize, nothing); how long notifications stay |
 | **Date & Time** | the time now, and the time zone: a city (54 of them) from a list, with summer time handled by itself (the European, North American, Australian and New Zealand rules) |

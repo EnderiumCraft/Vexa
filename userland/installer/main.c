@@ -119,11 +119,7 @@ static void draw_choose(struct vx_surface *s) {
                          VX_TRANSPARENT);
     }
     int cy = HEIGHT - 100;
-    vx_fill(s, 28, cy, 16, 16, VX_COLOR_VIEW);
-    vx_draw_outline(s, 28, cy, 16, 16, VX_COLOR_LINE);
-    if (with_linux) {
-        vx_fill(s, 32, cy + 4, 8, 8, VX_COLOR_ACCENT);
-    }
+    vx_draw_check(s, 28, cy, with_linux);
     vx_draw_text(s, 52, cy, "The Linux programs too (bash, Python, X, GTK...: about 190 MB)",
                  VX_COLOR_TEXT, VX_TRANSPARENT);
     button(s, 0, WIDTH - 148, HEIGHT - 52, 120, "Install...", chosen >= 0);

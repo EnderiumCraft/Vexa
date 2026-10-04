@@ -101,7 +101,7 @@ struct desktop_message {
 
 /* The wallpaper without a DESKTOP_CONFIG: this picture (or, if it can't be
  * read, the first gradient). */
-#define DESKTOP_DEFAULT_WALLPAPER "/share/pictures/aurora.png"
+#define DESKTOP_DEFAULT_WALLPAPER "/share/pictures/glass.png"
 
 struct desktop_wallpaper {
     const char *name, *label;

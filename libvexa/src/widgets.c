@@ -4,6 +4,119 @@
 
 /* Drawing for the widgets of Vexa's own apps (see <vexa/gui.h>). */
 
+/* ---- Round, glossy shapes ---- */
+
+static inline uint32_t blend(uint32_t dst, uint32_t src, unsigned a) {
+    uint32_t rb = dst & 0xff00ff, g = dst & 0x00ff00;
+    rb += (((src & 0xff00ff) - rb) * a >> 8) & 0xff00ff;
+    g += (((src & 0x00ff00) - g) * a >> 8) & 0x00ff00;
+    return (rb & 0xff00ff) | (g & 0x00ff00);
+}
+
+/* `alpha` of `color` over a row of pixels, clipped to the surface. */
+static void blend_span(struct vx_surface *s, int x, int y, int width, uint32_t color, int alpha) {
+    if (y < 0 || y >= s->height || alpha <= 0) {
+        return;
+    }
+    if (x < 0) {
+        width += x, x = 0;
+    }
+    if (x + width > s->width) {
+        width = s->width - x;
+    }
+    uint32_t *p = s->pixels + (long)y * s->stride + x;
+    unsigned a = alpha >= 255 ? 256 : (unsigned)alpha;
+    for (int i = 0; i < width; i++) {
+        p[i] = a == 256 ? color : blend(p[i], color, a);
+    }
+}
+
+int vx_corner_inset(int radius, int row, int *coverage) {
+    /* The circle's x at the middle of the row, from its center. */
+    int dy2 = (2 * (radius - row) - 1) * (2 * (radius - row) - 1); /* (2*dy)^2 */
+    int r2 = 4 * radius * radius;
+    int inset = 0;
+    while (inset < radius) {
+        int dx = 2 * (radius - inset) - 1;
+        if (dx * dx + dy2 <= r2) {
+            break;
+        }
+        inset++;
+    }
+    /* The pixel just outside: part of it is in. */
+    *coverage = 0;
+    if (inset > 0) {
+        int dx = 2 * (radius - inset) + 1;
+        int over = dx * dx + dy2 - r2; /* How far past the edge. */
+        int span = 4 * (radius - inset) + 2;
+        *coverage = over >= span ? 0 : 255 - over * 255 / span;
+    }
+    return inset;
+}
+
+/* Where row `row` of a rounded rectangle starts (inset from each side), and
+ * the coverage of the pixel outside that. */
+static int row_inset(int radius, int height, int row, int *coverage) {
+    int from_edge = row < radius ? row : height - 1 - row < radius ? height - 1 - row : -1;
+    *coverage = 0;
+    return from_edge >= 0 ? vx_corner_inset(radius, from_edge, coverage) : 0;
+}
+
+static int fit_radius(int radius, int width, int height) {
+    radius = radius * 2 > height ? height / 2 : radius;
+    return radius * 2 > width ? width / 2 : radius;
+}
+
+void vx_fill_rounded(struct vx_surface *s, int x, int y, int width, int height, int radius,
+                     uint32_t color, int alpha) {
+    radius = fit_radius(radius, width, height);
+    for (int row = 0; row < height; row++) {
+        int coverage, inset = row_inset(radius, height, row, &coverage);
+        blend_span(s, x + inset, y + row, width - 2 * inset, color, alpha);
+        if (inset > 0 && coverage > 0) {
+            int edge = coverage * (alpha >= 255 ? 255 : alpha) / 255;
+            blend_span(s, x + inset - 1, y + row, 1, color, edge);
+            blend_span(s, x + width - inset, y + row, 1, color, edge);
+        }
+    }
+}
+
+uint32_t vx_gel_color(uint32_t color, int row, int height) {
+    int t = height > 1 ? row * 255 / (height - 1) : 0;
+    if (t < 128) { /* The shine: bright at the top, fading to the middle. */
+        return vx_mix(color, 0xffffff, 150 - t * 90 / 128);
+    }
+    /* Below it, a little deeper, and lighter again at the bottom: a glow. */
+    return vx_mix(vx_mix(color, 0x000000, 20), 0xffffff, (t - 128) * 100 / 127);
+}
+
+void vx_draw_gel(struct vx_surface *s, int x, int y, int width, int height, int radius,
+                 uint32_t color) {
+    if (width < 3 || height < 3) {
+        return;
+    }
+    vx_fill_rounded(s, x, y, width, height, radius, vx_mix(color, 0x000000, 100), 255);
+    x++, y++, width -= 2, height -= 2;
+    radius = fit_radius(radius > 1 ? radius - 1 : radius, width, height);
+    for (int row = 0; row < height; row++) {
+        int coverage, inset = row_inset(radius, height, row, &coverage);
+        uint32_t c = vx_gel_color(color, row, height);
+        blend_span(s, x + inset, y + row, width - 2 * inset, c, 255);
+        if (inset > 0 && coverage > 0) {
+            blend_span(s, x + inset - 1, y + row, 1, c, coverage);
+            blend_span(s, x + width - inset, y + row, 1, c, coverage);
+        }
+    }
+    /* A thin highlight along the top, inside the edge. */
+    int coverage, inset = row_inset(radius, height, 0, &coverage);
+    blend_span(s, x + inset + 1, y, width - 2 * inset - 2, 0xffffff, 120);
+}
+
+/* The neutral color of buttons (gel), for the theme. */
+static uint32_t button_color(bool hot) {
+    return hot ? VX_COLOR_ACCENT : vx_theme.dark ? 0x3e3852 : 0xdcdce4;
+}
+
 void vx_draw_outline(struct vx_surface *s, int x, int y, int width, int height, uint32_t color) {
     vx_fill(s, x, y, width, 1, color);
     vx_fill(s, x, y + height - 1, width, 1, color);
@@ -37,25 +150,51 @@ void vx_draw_text_fit(struct vx_surface *s, int x, int y, int width, const char 
 
 void vx_draw_button(struct vx_surface *s, int x, int y, int width, int height, const char *label,
                     bool hot) {
-    vx_fill(s, x, y, width, height, hot ? VX_COLOR_BUTTON_HOT : VX_COLOR_BUTTON);
-    vx_draw_outline(s, x, y, width, height, VX_COLOR_LINE);
+    uint32_t color = button_color(hot);
+    vx_draw_gel(s, x, y, width, height, height / 2 < 9 ? height / 2 : 9, color);
     int text = vx_text_width(label);
-    vx_draw_text_fit(s, x + (width > text + 8 ? (width - text) / 2 : 4),
-                     y + (height - VX_LINE_HEIGHT) / 2, width - 8, label, VX_COLOR_TEXT,
-                     VX_TRANSPARENT);
+    int tx = x + (width > text + 8 ? (width - text) / 2 : 4), ty = y + (height - VX_LINE_HEIGHT) / 2;
+    /* On the accent: white, over a darker copy (the text looks set in). */
+    if (hot) {
+        vx_draw_text_fit(s, tx, ty + 1, width - 8, label, vx_mix(color, 0x000000, 110),
+                         VX_TRANSPARENT);
+    }
+    vx_draw_text_fit(s, tx, ty, width - 8, label, hot ? 0xffffff : VX_COLOR_TEXT, VX_TRANSPARENT);
+}
+
+void vx_draw_check(struct vx_surface *s, int x, int y, bool on) {
+    if (!on) {
+        vx_fill_rounded(s, x, y, 16, 16, 4, vx_mix(VX_COLOR_LINE, 0x000000, 30), 255);
+        vx_fill_rounded(s, x + 1, y + 1, 14, 14, 3, VX_COLOR_VIEW, 255);
+        vx_fill(s, x + 3, y + 1, 10, 1, vx_mix(VX_COLOR_VIEW, 0x000000, 28));
+        return;
+    }
+    vx_draw_gel(s, x, y, 16, 16, 4, VX_COLOR_ACCENT);
+    for (int i = 0; i < 4; i++) {
+        vx_fill(s, x + 3 + i, y + 7 + i, 2, 2, 0xffffff);
+    }
+    for (int i = 0; i < 7; i++) {
+        vx_fill(s, x + 6 + i, y + 10 - i, 2, 2, 0xffffff);
+    }
 }
 
 void vx_draw_field(struct vx_surface *s, int x, int y, int width, const char *text, bool focused) {
     int height = VX_LINE_HEIGHT + 8;
-    vx_fill(s, x, y, width, height, VX_COLOR_VIEW);
-    vx_draw_outline(s, x, y, width, height, focused ? VX_COLOR_ACCENT : VX_COLOR_LINE);
+    /* A sunken, rounded box; focused: a ring of the accent. */
+    vx_fill_rounded(s, x, y, width, height, 5, focused ? VX_COLOR_ACCENT : VX_COLOR_LINE, 255);
+    if (focused) {
+        vx_fill_rounded(s, x + 1, y + 1, width - 2, height - 2, 4,
+                        vx_mix(VX_COLOR_ACCENT, VX_COLOR_VIEW, 120), 255);
+    }
+    vx_fill_rounded(s, x + 2, y + 2, width - 4, height - 4, 3, VX_COLOR_VIEW, 255);
+    vx_fill(s, x + 4, y + 2, width - 8, 1, vx_mix(VX_COLOR_VIEW, 0x000000, 28));
     const char *shown = text; /* Its end, if it's long. */
     while (*shown && vx_text_width(shown) > width - 12) {
         vx_utf8_next(&shown);
     }
     struct vx_surface inside = {s->pixels, x + width - 2 < s->width ? x + width - 2 : s->width,
                                 s->height, s->stride};
-    int end = vx_draw_text(&inside, x + 4, y + 4, shown, VX_COLOR_TEXT, VX_TRANSPARENT);
+    int end = vx_draw_text(&inside, x + 5, y + 4, shown, VX_COLOR_TEXT, VX_TRANSPARENT);
     if (focused) {
         vx_fill(s, end + 1, y + 4, 1, VX_LINE_HEIGHT, VX_COLOR_ACCENT);
     }
@@ -113,25 +252,34 @@ void vx_draw_menu(struct vx_surface *s, int x, int y, const struct vx_menu_item 
                   int hot) {
     int width, height;
     vx_menu_size(items, count, &width, &height);
-    vx_fill(s, x + 3, y + 3, width, height, vx_theme.shadow); /* A shadow. */
-    vx_fill(s, x, y, width, height, VX_COLOR_VIEW);
-    vx_draw_outline(s, x, y, width, height, VX_COLOR_LINE);
+    /* A soft shadow, then the menu: rounded, a little lighter at the top. */
+    vx_fill_rounded(s, x + 1, y + 2, width + 2, height + 1, 8, 0x000000, 40);
+    vx_fill_rounded(s, x + 2, y + 3, width, height, 7, 0x000000, 50);
+    vx_fill_rounded(s, x, y, width, height, 7, VX_COLOR_LINE, 255);
+    vx_fill_rounded(s, x + 1, y + 1, width - 2, height - 2, 6, VX_COLOR_VIEW, 255);
+    vx_fill(s, x + 6, y + 1, width - 12, 1, vx_mix(VX_COLOR_VIEW, 0xffffff, 70));
     int top = y + 4;
     for (int i = 0; i < count; i++) {
         int h = menu_item_height(&items[i]);
         if (!items[i].label) {
             vx_fill(s, x + 8, top + h / 2, width - 16, 1, VX_COLOR_LINE);
         } else {
-            if (i == hot && !items[i].disabled) {
-                vx_fill(s, x + 4, top, width - 8, h, VX_COLOR_SELECTED);
+            bool lit = i == hot && !items[i].disabled;
+            if (lit) {
+                vx_draw_gel(s, x + 4, top, width - 8, h, 5, VX_COLOR_ACCENT);
             }
-            uint32_t color = items[i].disabled ? VX_COLOR_DIM : VX_COLOR_TEXT;
+            uint32_t color = lit ? 0xffffff : items[i].disabled ? VX_COLOR_DIM : VX_COLOR_TEXT;
+            if (lit) {
+                vx_draw_text(s, x + 14, top + (h - VX_LINE_HEIGHT) / 2 + 1, items[i].label,
+                             vx_mix(VX_COLOR_ACCENT, 0x000000, 120), VX_TRANSPARENT);
+            }
             vx_draw_text(s, x + 14, top + (h - VX_LINE_HEIGHT) / 2, items[i].label, color,
                          VX_TRANSPARENT);
             if (items[i].keys) {
                 int keys = vx_text_width(items[i].keys);
                 vx_draw_text(s, x + width - keys - 14, top + (h - VX_LINE_HEIGHT) / 2, items[i].keys,
-                             VX_COLOR_DIM, VX_TRANSPARENT);
+                             lit ? vx_mix(VX_COLOR_ACCENT, 0xffffff, 190) : VX_COLOR_DIM,
+                             VX_TRANSPARENT);
             }
         }
         top += h;

@@ -1,5 +1,5 @@
-/* The desktop's look: shadows, round corners, smooth scaling, blur, and the
- * pointer's shapes. */
+/* The desktop's look: shadows, round corners, glass and gel, smooth scaling,
+ * blur, and the pointer's shapes. */
 #include <stdlib.h>
 #include <string.h>
 #include <vexa/syscall.h>
@@ -89,31 +89,7 @@ void draw_shadow(struct vx_surface *view, struct rect r, int strength) {
 
 /* ---- Round corners ---- */
 
-/* How far in from the side row `row` of a corner of `radius` starts, and
- * how much of the pixel there is inside (0-255), for a smooth edge. */
-static int corner_inset(int radius, int row, int *coverage) {
-    /* The circle's x at the middle of the row, from its center. */
-    int dy2 = (2 * (radius - row) - 1) * (2 * (radius - row) - 1); /* (2*dy)^2 */
-    int r2 = 4 * radius * radius;
-    int inset = 0;
-    while (inset < radius) {
-        int dx = 2 * (radius - inset) - 1;
-        if (dx * dx + dy2 <= r2) {
-            break;
-        }
-        inset++;
-    }
-    /* The pixel just outside: part of it is in. */
-    if (inset > 0) {
-        int dx = 2 * (radius - inset) + 1;
-        int over = dx * dx + dy2 - r2; /* How far past the edge. */
-        int span = 4 * (radius - inset) + 2;
-        *coverage = over >= span ? 0 : 255 - over * 255 / span;
-    } else {
-        *coverage = 0;
-    }
-    return inset;
-}
+#define corner_inset vx_corner_inset
 
 void fill_rounded(struct vx_surface *view, struct rect r, int radius, uint32_t color) {
     if (radius * 2 > r.height) {
@@ -158,6 +134,162 @@ void outline_rounded(struct vx_surface *view, struct rect r, int radius, uint32_
         } else {
             vx_fill(view, r.x, r.y + row, 1, 1, color);
             vx_fill(view, r.x + r.width - 1, r.y + row, 1, 1, color);
+        }
+    }
+}
+
+/* ---- Glass (Aero's) and gel (Aqua's) ---- */
+
+#define GLASS_BLUR 7 /* How far the blur behind glass reaches (two passes). */
+
+static uint32_t *glass_pixels;
+static size_t glass_room;
+
+/* Blurs a line of n pixels, `step` apart, in place: each the average of the
+ * 2 * radius + 1 around it (the ends repeated). */
+static void blur_line(uint32_t *p, int n, long step, int radius, uint32_t *tmp) {
+    for (int i = 0; i < n; i++) {
+        tmp[i] = p[i * step];
+    }
+    unsigned red = 0, green = 0, blue = 0, count = 2 * (unsigned)radius + 1;
+    for (int k = -radius; k <= radius; k++) {
+        uint32_t q = tmp[k < 0 ? 0 : k >= n ? n - 1 : k];
+        red += q >> 16 & 0xff, green += q >> 8 & 0xff, blue += q & 0xff;
+    }
+    for (int i = 0; i < n; i++) {
+        p[i * step] = (red / count) << 16 | (green / count) << 8 | blue / count;
+        int in = i + radius + 1, out = i - radius;
+        uint32_t qi = tmp[in >= n ? n - 1 : in], qo = tmp[out < 0 ? 0 : out];
+        red += (qi >> 16 & 0xff) - (qo >> 16 & 0xff);
+        green += (qi >> 8 & 0xff) - (qo >> 8 & 0xff);
+        blue += (qi & 0xff) - (qo & 0xff);
+    }
+}
+
+void draw_glass(struct vx_surface *view, struct rect r, int top_radius, int bottom_radius,
+                uint32_t tint, int tint_alpha, int shine) {
+    struct rect c = r;
+    if (!clip(view, &c)) {
+        return;
+    }
+    int w = c.width, h = c.height;
+    size_t need = (size_t)w * h + (size_t)(w > h ? w : h);
+    if (need > glass_room) {
+        free(glass_pixels);
+        glass_pixels = malloc(need * 4);
+        glass_room = glass_pixels ? need : 0;
+        if (!glass_pixels) {
+            blend_rect(view, c, tint, 255);
+            return;
+        }
+    }
+    uint32_t *buf = glass_pixels, *tmp = glass_pixels + (size_t)w * h;
+    for (int y = 0; y < h; y++) {
+        memcpy(buf + (long)y * w, view->pixels + (long)(c.y + y) * view->stride + c.x,
+               (size_t)w * 4);
+    }
+    /* What's behind, blurred (twice: smoother than once). */
+    for (int pass = 0; pass < 2; pass++) {
+        for (int y = 0; y < h; y++) {
+            blur_line(buf + (long)y * w, w, 1, GLASS_BLUR, tmp);
+        }
+        for (int x = 0; x < w; x++) {
+            blur_line(buf + x, h, w, GLASS_BLUR, tmp);
+        }
+    }
+    /* Tinted, then lit: a shine over the top half, fading down, and a faint
+     * glow along the bottom. */
+    unsigned ta = tint_alpha >= 255 ? 256 : tint_alpha <= 0 ? 0 : (unsigned)tint_alpha;
+    int half = r.height / 2 > 0 ? r.height / 2 : 1;
+    for (int y = 0; y < h; y++) {
+        int row = c.y + y - r.y;
+        int coverage = 0, inset = 0;
+        if (row < top_radius) {
+            inset = corner_inset(top_radius, row, &coverage);
+        } else if (r.height - 1 - row < bottom_radius) {
+            inset = corner_inset(bottom_radius, r.height - 1 - row, &coverage);
+        }
+        int light = row < half ? shine - shine * row * 9 / (half * 20)
+                               : shine / 6 * (row - half) / (r.height - half);
+        unsigned la = light <= 0 ? 0 : (unsigned)light;
+        uint32_t *from = buf + (long)y * w, *to = view->pixels + (long)(c.y + y) * view->stride;
+        for (int x = 0; x < w; x++) {
+            int col = c.x + x - r.x;
+            if (col < inset - 1 || col > r.width - inset) {
+                continue; /* Outside a round corner. */
+            }
+            uint32_t q = mix_pixel(from[x], tint, ta);
+            q = la ? mix_pixel(q, 0xffffff, la) : q;
+            bool edge = inset > 0 && (col == inset - 1 || col == r.width - inset);
+            to[c.x + x] = edge ? mix_pixel(to[c.x + x], q, (unsigned)coverage) : q;
+        }
+    }
+}
+
+void draw_glass_popup(struct vx_surface *view, struct rect r, int radius, int shadow) {
+    draw_shadow(view, r, shadow);
+    draw_glass(view, r, radius, radius, vx_theme.menu, vx_theme.dark ? 205 : 195, 34);
+    outline_rounded(view, r, radius, vx_mix(vx_theme.line, 0x000000, vx_theme.dark ? 60 : 30));
+    blend_rect(view, (struct rect){r.x + radius, r.y + 1, r.width - 2 * radius, 1}, 0xffffff,
+               vx_theme.dark ? 50 : 160);
+}
+
+void draw_orb(struct vx_surface *view, int cx, int cy, int radius, uint32_t color) {
+    /* A glossy ball: deeper at the top, lit from inside at the bottom, a
+     * darker rim, and a bright highlight over the top. In quarter pixels,
+     * for smooth edges. */
+    uint32_t top = vx_mix(color, 0x000000, 50), bottom = vx_mix(color, 0xffffff, 70);
+    uint32_t rim = vx_mix(color, 0x000000, 130);
+    int r4 = radius * 4;
+    for (int py = -radius; py < radius; py++) {
+        for (int px = -radius; px < radius; px++) {
+            int dx = px * 4 + 2, dy = py * 4 + 2; /* The pixel's middle. */
+            int d2 = dx * dx + dy * dy;
+            if (d2 > (r4 + 2) * (r4 + 2)) {
+                continue;
+            }
+            /* Coverage at the edge: how far inside, over about a pixel. */
+            int inside = r4 * r4 - d2; /* > 0 inside */
+            int coverage = inside >= 4 * r4 ? 255 : inside <= -4 * r4 ? 0
+                                                    : 128 + inside * 127 / (4 * r4);
+            if (coverage <= 0) {
+                continue;
+            }
+            int t = (dy + r4) * 255 / (2 * r4);
+            uint32_t q = vx_mix(top, bottom, t < 0 ? 0 : t > 255 ? 255 : t);
+            int ring = r4 * r4 - (r4 - 5) * (r4 - 5);
+            if (inside < ring) { /* The rim. */
+                q = vx_mix(q, rim, 170 - (inside > 0 ? inside * 120 / ring : 0));
+            }
+            /* The highlight: an ellipse over the top half, brightest at its
+             * top, its edge soft. (In hundredths of its radii.) */
+            int ex = dx * 100 / (r4 * 62 / 100 + 1);
+            int ey = (dy + r4 * 45 / 100) * 100 / (r4 * 40 / 100 + 1);
+            int e2 = ex * ex + ey * ey;
+            if (e2 < 10000) {
+                int a = 225 - (ey + 100) * 160 / 200;
+                int soft = 10000 - e2 < 3000 ? (10000 - e2) * 255 / 3000 : 255;
+                q = vx_mix(q, 0xffffff, a * soft / 255);
+            }
+            blend_rect(view, (struct rect){cx + px, cy + py, 1, 1}, q, coverage);
+        }
+    }
+}
+
+void fill_gel(struct vx_surface *view, struct rect r, int radius, uint32_t color, int alpha) {
+    radius = radius * 2 > r.height ? r.height / 2 : radius;
+    for (int row = 0; row < r.height; row++) {
+        int from_edge = row < radius ? row : r.height - 1 - row < radius ? r.height - 1 - row : -1;
+        int inset = 0, coverage = 0;
+        if (from_edge >= 0) {
+            inset = corner_inset(radius, from_edge, &coverage);
+        }
+        uint32_t c = vx_gel_color(color, row, r.height);
+        blend_rect(view, (struct rect){r.x + inset, r.y + row, r.width - 2 * inset, 1}, c, alpha);
+        if (inset > 0 && coverage > 0) {
+            blend_rect(view, (struct rect){r.x + inset - 1, r.y + row, 1, 1}, c, coverage * alpha / 255);
+            blend_rect(view, (struct rect){r.x + r.width - inset, r.y + row, 1, 1}, c,
+                       coverage * alpha / 255);
         }
     }
 }

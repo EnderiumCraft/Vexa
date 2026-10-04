@@ -193,9 +193,19 @@ static int big_text(int x, int y, const char *t, int size, uint32_t color) {
 }
 
 static void rounded(int x, int y, int w, int h, uint32_t color) {
-    vx_fill(S(), x + 2, y, w - 4, h, color);
-    vx_fill(S(), x, y + 2, w, h - 4, color);
-    vx_fill(S(), x + 1, y + 1, w - 2, h - 2, color);
+    vx_fill_rounded(S(), x, y, w, h, h / 2 < 8 ? h / 2 : 8, color, 255);
+}
+
+/* A sunken track (switches, sliders, bars): darker at the top. */
+static void track(int x, int y, int w, int h, uint32_t color) {
+    vx_fill_rounded(S(), x, y, w, h, h / 2, vx_mix(color, 0x000000, 60), 255);
+    vx_fill_rounded(S(), x + 1, y + 1, w - 2, h - 2, (h - 2) / 2, color, 255);
+    vx_fill(S(), x + h / 2, y + 1, w - h, 1, vx_mix(color, 0x000000, 35));
+}
+
+/* A white, glossy knob. */
+static void knob(int x, int y, int w, int h) {
+    vx_draw_gel(S(), x, y, w, h, h / 2, vx_theme.dark ? 0xd8d6e0 : 0xf4f5f8);
 }
 
 static void heading(const char *t, int y) {
@@ -217,8 +227,12 @@ static void toggle(int y, const char *title, const char *key, bool fallback) {
     label(y, title);
     bool on = vx_settings_bool(&desk, key, fallback);
     int x = CONTROL;
-    rounded(x, y + 3, 40, 20, on ? VX_COLOR_ACCENT : VX_COLOR_BUTTON_HOT);
-    rounded(on ? x + 22 : x + 2, y + 5, 16, 16, 0xffffff);
+    if (on) {
+        vx_draw_gel(S(), x, y + 3, 40, 20, 10, VX_COLOR_ACCENT);
+    } else {
+        track(x, y + 3, 40, 20, VX_COLOR_BUTTON_HOT);
+    }
+    knob(on ? x + 21 : x + 1, y + 4, 18, 18);
     struct hit *h = add_hit(x, y, 40 + 64, 26, H_TOGGLE);
     h->key = key;
     h->index = fallback;
@@ -240,9 +254,7 @@ static void segments(int y, const char *title, const char *key, const struct opt
     for (int i = 0; i < count; i++) {
         int w = vx_text_width(options[i].title) + 20;
         bool on = !strcmp(value, options[i].value);
-        vx_fill(S(), x, y + 1, w, 26, on ? VX_COLOR_SELECTED : VX_COLOR_BUTTON);
-        vx_draw_outline(S(), x, y + 1, w, 26, on ? VX_COLOR_ACCENT : VX_COLOR_LINE);
-        text(x + 10, y + 6, options[i].title, VX_COLOR_TEXT);
+        vx_draw_button(S(), x, y + 1, w, 26, options[i].title, on);
         struct hit *h = add_hit(x, y + 1, w, 26, H_SEGMENT);
         h->key = key;
         h->value = options[i].value;
@@ -257,11 +269,12 @@ static void slider(int y, const char *title, const char *key, int min, int max, 
     int value = vx_settings_int(&desk, key, fallback);
     value = value < min ? min : value > max ? max : value;
     int x = CONTROL, w = 180;
-    vx_fill(S(), x, y + 12, w, 4, VX_COLOR_BUTTON_HOT);
+    track(x, y + 11, w, 6, VX_COLOR_BUTTON_HOT);
     int at = x + (int)((long)(value - min) * w / (max - min));
-    vx_fill(S(), x, y + 12, at - x, 4, VX_COLOR_ACCENT);
-    rounded(at - 7, y + 6, 14, 16, 0xffffff);
-    vx_draw_outline(S(), at - 7, y + 6, 14, 16, VX_COLOR_LINE);
+    if (at - x > 3) {
+        vx_draw_gel(S(), x, y + 11, at - x + 3, 6, 3, VX_COLOR_ACCENT);
+    }
+    knob(at - 8, y + 6, 16, 16);
     char shown[32];
     snprintf(shown, sizeof(shown), format, value);
     text(x + w + 16, y + 5, shown, VX_COLOR_DIM);
@@ -273,16 +286,7 @@ static void slider(int y, const char *title, const char *key, int min, int max, 
 }
 
 static void checkbox(int x, int y, bool on, const char *title) {
-    vx_fill(S(), x, y + 3, 16, 16, on ? VX_COLOR_ACCENT : VX_COLOR_VIEW);
-    vx_draw_outline(S(), x, y + 3, 16, 16, on ? VX_COLOR_ACCENT : VX_COLOR_LINE);
-    if (on) { /* A tick. */
-        for (int i = 0; i < 4; i++) {
-            vx_fill(S(), x + 3 + i, y + 10 + i, 2, 2, 0xffffff);
-        }
-        for (int i = 0; i < 7; i++) {
-            vx_fill(S(), x + 6 + i, y + 13 - i, 2, 2, 0xffffff);
-        }
-    }
+    vx_draw_check(S(), x, y + 3, on);
     text(x + 24, y + 3, title, VX_COLOR_TEXT);
 }
 
@@ -298,11 +302,11 @@ static void format_bytes(char *out, size_t size, unsigned long long bytes) {
 
 /* A bar: used out of total. */
 static void bar(int x, int y, int w, unsigned long long used, unsigned long long total) {
-    rounded(x, y, w, 10, VX_COLOR_BUTTON_HOT);
+    track(x, y, w, 10, VX_COLOR_BUTTON_HOT);
     if (total) {
         int filled = (int)((unsigned long long)w * used / total);
-        if (filled > 2) {
-            rounded(x, y, filled, 10, VX_COLOR_ACCENT);
+        if (filled > 4) {
+            vx_draw_gel(S(), x, y, filled, 10, 5, VX_COLOR_ACCENT);
         }
     }
 }
@@ -329,25 +333,38 @@ static void open_menu(int x, int y) {
 
 static void draw_preview(int x, int y, const char *theme, bool on) {
     struct vx_theme t;
-    vx_theme_make(&t, theme, vx_settings_get(&desk, "accent", "purple"));
+    vx_theme_make(&t, theme, vx_settings_get(&desk, "accent", "blue"));
     vx_draw_outline(S(), x - 3, y - 3, 146, 96, on ? VX_COLOR_ACCENT : VX_COLOR_LINE);
     if (on) {
         vx_draw_outline(S(), x - 2, y - 2, 144, 94, VX_COLOR_ACCENT);
     }
-    vx_fill(S(), x, y, 140, 90, t.panel);
-    vx_fill(S(), x + 14, y + 16, 112, 14, t.title_focused);
+    /* A little desktop: the wallpaper's blue, a window with a glass title bar
+     * (its three balls) and a button. */
+    for (int row = 0; row < 90; row++) {
+        vx_fill(S(), x, y + row, 140, 1, vx_mix(0x2a64c4, 0x0a1e5a, row * 255 / 89));
+    }
+    vx_fill(S(), x, y, 140, 8, vx_mix(t.panel, 0x2a64c4, 90));
+    uint32_t bar = t.dark ? vx_mix(t.accent, 0x101018, 105) : vx_mix(t.accent, 0xffffff, 105);
+    vx_fill_rounded(S(), x + 14, y + 16, 112, 22, 5, bar, 255);
+    for (int row = 0; row < 7; row++) {
+        vx_fill(S(), x + 16, y + 17 + row, 108, 1, vx_mix(bar, 0xffffff, 120 - row * 12));
+    }
+    static const uint32_t balls[3] = {0xfebc2e, 0x2ac845, 0xff5f57};
+    for (int i = 0; i < 3; i++) {
+        vx_draw_gel(S(), x + 92 + i * 10, y + 19, 8, 8, 4, balls[i]);
+    }
     vx_fill(S(), x + 14, y + 30, 112, 50, t.window);
     vx_fill(S(), x + 20, y + 38, 60, 6, t.text);
     vx_fill(S(), x + 20, y + 50, 90, 4, t.dim);
     vx_fill(S(), x + 20, y + 58, 80, 4, t.dim);
-    vx_fill(S(), x + 84, y + 66, 36, 10, t.accent);
+    vx_draw_gel(S(), x + 84, y + 65, 36, 12, 6, t.accent);
 }
 
 static void draw_appearance(void) {
     int y = 64;
     heading("Look", y);
     y += 32;
-    const char *theme = vx_settings_get(&desk, "theme", "dark");
+    const char *theme = vx_settings_get(&desk, "theme", "light");
     static const char *const themes[] = {"dark", "light"};
     for (int i = 0; i < 2; i++) {
         int x = LEFT + i * 180;
@@ -360,14 +377,14 @@ static void draw_appearance(void) {
     y += 140;
     heading("Accent color", y);
     y += 32;
-    const char *accent = vx_settings_get(&desk, "accent", "purple");
+    const char *accent = vx_settings_get(&desk, "accent", "blue");
     for (int i = 0; i < vx_accent_count; i++) {
         int x = LEFT + i * 62;
         bool on = !strcmp(accent, vx_accents[i].name);
         if (on) {
-            rounded(x - 3, y - 3, 38, 38, VX_COLOR_TEXT);
+            vx_fill_rounded(S(), x - 3, y - 3, 38, 38, 19, VX_COLOR_ACCENT, 120);
         }
-        rounded(x, y, 32, 32, vx_accents[i].color);
+        vx_draw_gel(S(), x, y, 32, 32, 16, vx_accents[i].color);
         vx_draw_text_fit(S(), x - 10, y + 40, 56, vx_accents[i].label,
                          on ? VX_COLOR_TEXT : VX_COLOR_DIM, VX_TRANSPARENT);
         struct hit *h = add_hit(x - 3, y - 3, 38, 60, H_ACCENT);
@@ -625,8 +642,7 @@ static void draw_input(void) {
     slider(y, "Double click speed", "double_click_ms", 200, 900, 50, 500, "%d ms");
     int tx = window->surface.width - 130;
     bool lit = vx_uptime() - test_clicked_ms < 800;
-    rounded(tx, y - 2, 100, 30, lit ? VX_COLOR_ACCENT : VX_COLOR_BUTTON);
-    text(tx + 10, y + 5, lit ? "It works!" : "Try it here", lit ? 0xffffff : VX_COLOR_DIM);
+    vx_draw_button(S(), tx, y - 2, 100, 30, lit ? "It works!" : "Try it here", lit);
     add_hit(tx, y - 2, 100, 30, H_TEST_AREA);
     y += ROW;
     toggle(y, "Natural scrolling", "natural_scroll", false);
@@ -785,7 +801,7 @@ static void draw_startup(void) {
     int y = 64;
     heading("When the desktop starts", y);
     y += 28;
-    toggle(y, "Open a terminal", "startup_terminal", true);
+    toggle(y, "Open a terminal", "startup_terminal", false);
     y += ROW + 6;
     heading("Also open", y);
     y += 28;
@@ -1050,13 +1066,14 @@ static void draw_sidebar(void) {
         if (!section_matches(i)) {
             continue;
         }
-        if (i == (int)current) {
-            rounded(8, y, SIDEBAR - 16, 30, VX_COLOR_SELECTED);
+        bool on = i == (int)current;
+        if (on) {
+            vx_draw_gel(S(), 8, y, SIDEBAR - 16, 30, 8, VX_COLOR_ACCENT);
         }
-        rounded(16, y + 5, 20, 20, sections[i].color);
+        vx_draw_gel(S(), 16, y + 5, 20, 20, 6, sections[i].color);
         char symbol[2] = {sections[i].symbol, 0};
         text(26 - vx_text_width(symbol) / 2, y + 7, symbol, 0xffffff);
-        text(46, y + 7, sections[i].label, VX_COLOR_TEXT);
+        text(46, y + 7, sections[i].label, on ? 0xffffff : VX_COLOR_TEXT);
         struct hit *hit = add_hit(8, y, SIDEBAR - 16, 30, H_SECTION);
         hit->index = i;
         y += 34;
