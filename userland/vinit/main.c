@@ -15,6 +15,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <vexa/app.h>
 #include <vexa/desktop.h>
 #include <vexa/settings.h>
 #include <vexa/syscall.h>
@@ -178,6 +179,9 @@ int main(int argc, char **argv, char **envp) {
         }
     }
     make_homes();
+    /* Apps are installed by copying them into /apps: administrators may. */
+    vx_chown(VX_APPS_DIR, VX_ID_KEEP, VX_GROUP_ADMIN, 0);
+    vx_chmod(VX_APPS_DIR, 0775, 0);
     show("/etc/motd");
     fflush(stdout);
 
