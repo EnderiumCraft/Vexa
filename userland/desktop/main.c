@@ -3473,8 +3473,10 @@ void session_start(const struct vx_user *user) {
     session_user = *user;
     if (me.uid == 0 && user->uid != 0) {
         session_has_password = vx_user_has_password(user->name);
-        /* Its socket is theirs too: the desktop takes it away when it ends. */
+        /* Its socket is theirs too, theirs alone (other accounts can't
+         * connect to their desktop); the desktop takes it away when it ends. */
         vx_chown(DESKTOP_SOCKET, user->uid, user->gid, 0);
+        vx_chmod(DESKTOP_SOCKET, 0600, 0);
         long error = vx_become_user(user);
         if (error) {
             fprintf(stderr, "desktop: can't become %s: %s\n", user->name, vx_strerror(error));

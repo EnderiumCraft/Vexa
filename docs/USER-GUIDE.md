@@ -246,7 +246,9 @@ with `sudo`.
   administrator. **Settings → Lock Screen** changes your own password (it asks for the
   current one first).
 - **Your settings are yours**: what you change in Settings is kept in your home folder
-  (`.config/vexa/desktop.conf`), over the system's (`/etc/desktop.conf`).
+  (`.config/vexa/desktop.conf`), over the system's (`/etc/desktop.conf`). So are your
+  desktop and your clipboard: other accounts can't open windows on your desktop
+  (`/run/desktop` is yours alone while you're logged in) or read what you copied.
 
 At the shell:
 

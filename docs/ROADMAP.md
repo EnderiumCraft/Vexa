@@ -111,6 +111,8 @@ registers survive being interrupted.
       on one doesn't hold up the others (0.30.0)
 - [x] Reading ext4 as Linux's `mkfs.ext4` makes it: extent trees, 64-bit group
       descriptors, flexible block groups (mounted read-only) (0.30.0)
+- [x] FAT12/16/32 (with long names) and exFAT, read and written; USB sticks and other
+      systems' disks mounted by themselves, `eject` (0.30.0)
 - [ ] Moved to later phases: writing ext4 (extent allocation, metadata checksums)
 
 **Milestone:** boot from a disk image and read files from it. Reached: disks are
@@ -265,6 +267,18 @@ Native track:
       dialogs and a clipboard shared by every app and X programs; Activity Monitor,
       Calculator, Calendar, Notes, Paint and Help; Files windows refresh themselves;
       the aurora wallpaper (0.21.0)
+- [x] Boot to the desktop, the Installer first from the CD (alone on the wallpaper), and
+      a glossy look in the spirit of Aqua and Aero: glass title bars and panel, gel
+      controls in every app, rounded square window buttons in the accent's colors, a
+      matching GTK theme; a new Installer (0.30.0)
+- [x] User accounts: owners and Unix permissions checked by the kernel, set-user-id
+      programs, `/etc/passwd`, `group` and `shadow` (salted SHA-256), a login screen and
+      a console login, Log Out, `sudo`, `accounts`, Settings → Users, each account's own
+      home folder and settings (0.30.0)
+- [x] Sound for everyone: programs mixed, the volume and mute (the panel, the keys,
+      Settings → Sound), outputs to choose, USB Audio Class sound cards (0.30.0)
+- [x] Music (MP3, Ogg Vorbis, FLAC, WAV: a library, artists and albums, a live
+      spectrum) and Videos (MPEG-1: a library with pictures, floating controls) (0.30.0)
 
 Linux track:
 - [x] The X Window System built from source with musl: the X libraries, X.Org's

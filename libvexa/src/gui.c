@@ -403,6 +403,7 @@ void vx_clipboard_set(const char *text, size_t length) {
     if (handle < 0) {
         return;
     }
+    vx_handle_chmod(handle, 0600); /* Its owner's alone. */
     vx_write(handle, text, length);
     vx_close(handle);
     vx_rename(temporary, DESKTOP_CLIPBOARD_FILE);

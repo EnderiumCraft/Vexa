@@ -68,7 +68,9 @@ static void remember_file(void) {
 static void write_file(const char *text, size_t length) {
     char temporary[64];
     snprintf(temporary, sizeof(temporary), "%s.x%d", CLIPBOARD_FILE, (int)getpid());
+    mode_t old_mask = umask(077); /* The clipboard is its owner's alone. */
     FILE *f = fopen(temporary, "w");
+    umask(old_mask);
     if (!f) {
         return;
     }
