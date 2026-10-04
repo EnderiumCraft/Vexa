@@ -674,18 +674,31 @@ anyway. The desktop itself still draws on the processor.
 
 ## Sound
 
-With an HD Audio sound card (the kind in most PCs, and QEMU's `intel-hda`; `make run`
-adds one), Vexa plays sound through `/dev/audio0`:
+Vexa plays sound on an HD Audio sound card (the kind in most PCs, and QEMU's
+`intel-hda`; `make run` adds one) and on **USB sound cards, headsets and speakers**
+(USB Audio Class 1, on an xHCI controller; QEMU's `usb-audio`). A USB one plays as soon
+as it's plugged in, and when it's pulled out the built-in one takes over again.
+
+Programs play through `/dev/audio0`, several at the same time: each gets a stream of
+its own, and Vexa mixes them (at any rate from 8000 to 96000 Hz) at the system's
+volume.
 
 ```sh
 play --tone 440 3        # a 440 Hz tone for three seconds
-play music.wav           # a WAV file (16-bit, 44100 or 48000 Hz, mono or stereo)
+play music.wav           # a WAV file (16-bit, 8000 to 96000 Hz, mono or stereo)
+play --chime             # the notification sound
 ```
+
+**The volume**: the speaker on the panel (next to the clock) shows it; scrolling over
+it turns it up or down, and a click opens a slider, Mute, and the outputs to choose
+from. The keyboard's volume keys (up, down, mute) work too, and show a bubble with the
+level. **Settings → Sound** has all of that, a test sound, and a sound for
+notifications (off at first). The volume is kept from one start to the next (with a
+disk to keep settings on).
 
 Linux programs play through ALSA, as on Linux: `aplay file.wav` and `speaker-test -t
 sine` work, and so do programs built with alsa-lib (its "default" device converts
-whatever they play to what the card takes). There's no recording, mixer or volume
-control yet; the volume is the card's.
+whatever they play to what the card takes). There's no recording yet.
 
 ## D-Bus
 
@@ -805,8 +818,11 @@ same port; Vexa hands them over by itself.
 - The desktop says what was connected (and where a stick is) and what was
   disconnected. `devices usb` and Device Manager show what's plugged in and where.
 
-Other kinds of USB devices (printers, cameras, sound, network adapters) are listed,
-without a driver yet.
+- **USB sound cards and headsets** play sound (see [Sound](#sound)), on xHCI
+  controllers (USB 3 ones; older controllers list them, but can't send them sound).
+
+Other kinds of USB devices (printers, cameras, network adapters) are listed, without a
+driver yet.
 
 The older controllers have no MSI interrupts, so Vexa checks on them every few
 milliseconds instead (a tiny amount of work).

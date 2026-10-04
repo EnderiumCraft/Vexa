@@ -52,6 +52,9 @@ static uint16_t extended_keycode(uint8_t code) {
     switch (code) {
     case 0x1c: return 96;  /* Keypad Enter */
     case 0x1d: return VX_KEY_RIGHTCTRL;
+    case 0x20: return 113; /* Mute */
+    case 0x2e: return 114; /* Volume down */
+    case 0x30: return 115; /* Volume up */
     case 0x35: return 98;  /* Keypad / */
     case 0x37: return 99;  /* PrintScreen (SysRq) */
     case 0x38: return VX_KEY_RIGHTALT;

@@ -494,8 +494,8 @@ struct rect clock_button_rect(void) {
 }
 
 static struct rect search_button_rect(void) {
-    struct rect c = clock_button_rect();
-    return (struct rect){c.x - SEARCH_BUTTON_WIDTH - 4, 2, SEARCH_BUTTON_WIDTH, PANEL_HEIGHT - 4};
+    struct rect c = volume_button_rect();
+    return (struct rect){c.x - SEARCH_BUTTON_WIDTH - 2, 2, SEARCH_BUTTON_WIDTH, PANEL_HEIGHT - 4};
 }
 
 static struct rect task_button(int index, int count) {
@@ -804,6 +804,7 @@ static void draw_panel(struct vx_surface *view, int ox, int oy) {
     if (unread_notes) {
         draw_orb(view, ox + c.x + c.width - 10, oy + 12, 4, COLOR_OUTLINE);
     }
+    volume_draw_button(view, ox, oy);
 }
 
 static void draw_menu(struct vx_surface *view, int ox, int oy) {
@@ -938,6 +939,8 @@ static struct rect notes_area(void) {
                          NOTE_WIDTH + 2 * SHADOW, MAX_NOTES * (NOTE_HEIGHT + 10) + 2 * SHADOW};
 }
 
+static void launch_argv(const char *const *argv, int argc);
+
 void add_note(const char *text) {
     if (note_count == MAX_NOTES) {
         memmove(notes, notes + 1, (MAX_NOTES - 1) * sizeof(notes[0]));
@@ -950,6 +953,10 @@ void add_note(const char *text) {
     add_damage(notes_area());
     clock_remember(note->text);
     printf("desktop: notification \"%s\"\n", note->text);
+    if (vx_settings_bool(&config, "notification_sound", false)) {
+        static const char *const chime[] = {"/bin/play", "--chime"};
+        launch_argv(chime, 2);
+    }
 }
 
 /* Takes away old notifications; returns how long until the next one goes
@@ -1289,6 +1296,10 @@ static void compose(struct rect area) {
         if (clock_open) {
             clock_draw(&view, ox, oy);
         }
+        if (volume_open) {
+            volume_draw(&view, ox, oy);
+        }
+        volume_draw_osd(&view, ox, oy);
         if (popup_open) {
             vx_draw_menu(&view, ox + popup_x, oy + popup_y, popup_items, popup_count, popup_hot);
         }
@@ -1388,6 +1399,12 @@ static void grow_damage_for_glass(void) {
         }
         if (clock_open) {
             grew |= take_glass(clock_rect());
+        }
+        if (volume_open) {
+            grew |= take_glass(volume_rect());
+        }
+        if (volume_osd_wait() >= 0) {
+            grew |= take_glass((struct rect){(screen.width - 180) / 2, screen.height - 300, 180, 180});
         }
         if (search_open) {
             grew |= take_glass(search_rect());
@@ -2518,6 +2535,7 @@ static void close_overlays(void) {
     set_menu(false);
     close_popup();
     clock_close();
+    volume_close();
 }
 
 static void key_event(int key, int value) {
@@ -2540,6 +2558,9 @@ static void key_event(int key, int value) {
         break;
     }
     if (!lock_input()) {
+        return;
+    }
+    if (volume_key(key, value)) { /* (Even on the lock screen.) */
         return;
     }
     if (locked) {
@@ -2638,7 +2659,7 @@ static void key_event(int key, int value) {
         add_damage(popup_rect());
         return;
     }
-    if (key == VX_KEY_ESC && value == 1 && (menu_open || popup_open || clock_open)) {
+    if (key == VX_KEY_ESC && value == 1 && (menu_open || popup_open || clock_open || volume_open)) {
         close_overlays();
         return;
     }
@@ -2707,8 +2728,8 @@ static void update_cursor(void) {
         set_cursor(grab->cursor);
         return;
     }
-    struct window *w = menu_open || popup_open || clock_open ? NULL
-                                                            : window_at(pointer_x, pointer_y);
+    struct window *w = menu_open || popup_open || clock_open || volume_open
+                           ? NULL : window_at(pointer_x, pointer_y);
     bool left, right, bottom;
     if (w && on_edges(w, pointer_x, pointer_y, &left, &right, &bottom)) {
         set_cursor(edge_cursor(left, right, bottom));
@@ -2729,10 +2750,16 @@ static void panel_click(void) {
     }
     set_menu(false);
     if (inside(clock_button_rect(), pointer_x, pointer_y)) {
+        volume_close();
         clock_toggle();
         return;
     }
     clock_close();
+    if (inside(volume_button_rect(), pointer_x, pointer_y)) {
+        volume_toggle();
+        return;
+    }
+    volume_close();
     if (inside(search_button_rect(), pointer_x, pointer_y)) {
         search_show();
         return;
@@ -2859,6 +2886,22 @@ static void button_event(int bit, bool down) {
         }
         return;
     }
+    if (bit == 1 && !down && volume_sliding()) {
+        volume_button(false);
+        return;
+    }
+    if ((left_down || right_down) && volume_open) {
+        if (inside(volume_rect(), pointer_x, pointer_y)) {
+            if (left_down) {
+                volume_button(true);
+            }
+            return;
+        }
+        volume_close();
+        if (inside(volume_button_rect(), pointer_x, pointer_y)) {
+            return; /* Its own button: closed, not opened again. */
+        }
+    }
     if ((left_down || right_down) && clock_open) {
         if (inside(clock_rect(), pointer_x, pointer_y)) {
             clock_button(true);
@@ -2946,6 +2989,10 @@ static void pointer_moved(int dx, int dy, int wheel) {
     if (locked) {
         return;
     }
+    if (wheel && !dx && !dy && inside(volume_button_rect(), pointer_x, pointer_y)) {
+        volume_wheel(wheel); /* (Scrolling over the panel's speaker.) */
+        return;
+    }
     if (dx || dy) {
         add_damage(cursor_rect(cursor_shape, pointer_x, pointer_y));
         pointer_x += dx;
@@ -2963,6 +3010,9 @@ static void pointer_moved(int dx, int dy, int wheel) {
         }
         if (clock_open) {
             clock_pointer();
+        }
+        if (volume_open) {
+            volume_pointer();
         }
         if (desktop_press) {
             icons_pointer();
@@ -3351,6 +3401,7 @@ int main(int argc, char **argv) {
             }
         }
         frames_wanted = false;
+        volume_check(); /* (At most twice a second.) */
         animate();
         shot_tick();
         lock_tick();
@@ -3382,6 +3433,8 @@ int main(int argc, char **argv) {
         wait = wait < 0 || wait > most ? most : wait + 1;
         long lock_wait = lock_wait_ms();
         wait = lock_wait < wait ? lock_wait : wait;
+        long osd_wait = volume_osd_wait();
+        wait = osd_wait >= 0 && osd_wait + 1 < wait ? osd_wait + 1 : wait;
         if (frames_wanted) {
             wait = 16; /* About 60 frames a second. */
         }

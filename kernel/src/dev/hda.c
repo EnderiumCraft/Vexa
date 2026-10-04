@@ -7,6 +7,7 @@
 #include <vexa/mutex.h>
 #include <vexa/pci.h>
 #include <vexa/sched.h>
+#include <vexa/sound.h>
 #include <vexa/string.h>
 #include <vexa/vfs.h>
 
@@ -19,10 +20,11 @@
  *
  * Here: the first codec's first output path (a DAC, through mixers or
  * selectors, to a pin that can drive a speaker or headphones), and one output
- * stream from a 64 KiB ring. /dev/audio0 takes 16-bit samples; a kernel
- * thread follows where the controller is playing (its position register, so
- * no interrupts are needed), lets writers wait for room, and silences what has
- * played, so that if nobody writes the ring plays silence, not old sound.
+ * stream from a 64 KiB ring, at 48 kHz, 16-bit stereo. It's an output of the
+ * sound core (dev/sound.c): a kernel thread follows where the controller is
+ * playing (its position register, so no interrupts are needed), keeps the
+ * ring filled a little ahead of that with what the core mixes, and silences
+ * what has played; after a while of silence it stops the stream.
  */
 
 #define GCAP 0x00
@@ -81,6 +83,8 @@
 #define PIECES 4
 #define GUARD 4096 /* Never written ahead of: the controller may be reading there. */
 #define TICK_MS 5
+#define LEAD (100 * 48 * 4) /* Bytes kept filled ahead of the controller: 100 ms. */
+#define IDLE_MS 2000 /* Stops after this much silence. */
 
 struct bdl_entry {
     uint64_t address;
@@ -105,9 +109,9 @@ static int path_length;
 static uint64_t written, played;
 static uint32_t last_position;
 static bool running;
-static struct vx_audio_format format = {48000, 2};
-static struct file *writer;
-static struct wait_queue room = WAIT_QUEUE_INIT;
+static volatile bool want_start;
+static uint64_t last_sound; /* When the core last had something to play. */
+static struct sound_output output;
 
 static uint8_t r8(unsigned at) { return regs[at]; }
 static uint16_t r16(unsigned at) { return *(volatile uint16_t *)(regs + at); }
@@ -203,7 +207,7 @@ static void unmute(uint8_t node) {
 }
 
 static uint16_t format_word(void) {
-    return (uint16_t)((format.rate == 44100 ? 1u << 14 : 0) | 1u << 4 | 1u); /* 16-bit, stereo */
+    return (uint16_t)(1u << 4 | 1u); /* 48 kHz, 16-bit, stereo */
 }
 
 /* ---- The ring ---- */
@@ -248,172 +252,50 @@ static void stop(void) {
     written = played = 0;
 }
 
+/* With the lock: fills the ring up to LEAD ahead of the controller. */
+static void fill(void) {
+    static int16_t mixed[1024 * 2];
+    while (delay_bytes() + 4 <= LEAD) {
+        unsigned frames = (unsigned)((LEAD - delay_bytes()) / 4);
+        frames = frames < 1024 ? frames : 1024;
+        if (sound_mix(&output, mixed, frames)) {
+            last_sound = timer_ms();
+        }
+        const uint8_t *from = (const uint8_t *)mixed;
+        for (unsigned i = 0; i < frames * 4; i++) {
+            ring[(written + i) % RING_SIZE] = from[i];
+        }
+        written += frames * 4;
+    }
+}
+
 static void ticker(void *arg) {
     (void)arg;
     for (;;) {
         thread_sleep_ms(TICK_MS);
         mutex_lock(&lock);
-        advance();
-        mutex_unlock(&lock);
-        wait_queue_wake_all(&room);
-    }
-}
-
-/* ---- /dev/audio0 ---- */
-
-static int audio_open(struct file *file) {
-    mutex_lock(&lock);
-    int error = writer ? -VX_EBUSY : 0;
-    if (!error && (file->flags & VX_OPEN_WRITE)) {
-        writer = file;
-    }
-    mutex_unlock(&lock);
-    return error;
-}
-
-static bool drained(void *arg) {
-    (void)arg;
-    return !running || delay_bytes() == 0;
-}
-
-static int drain(void) {
-    uint64_t deadline = timer_ms() + 5000;
-    while (!drained(NULL) && timer_ms() < deadline) {
-        thread_sleep_ms(TICK_MS);
-    }
-    return 0;
-}
-
-static void audio_close(struct file *file) {
-    if (writer != file) {
-        return;
-    }
-    drain();
-    mutex_lock(&lock);
-    stop();
-    writer = NULL;
-    mutex_unlock(&lock);
-}
-
-static uint64_t frame_bytes(void) {
-    return format.channels * 2;
-}
-
-static bool has_room(void *arg) {
-    (void)arg;
-    return delay_bytes() + GUARD < RING_SIZE;
-}
-
-static int64_t audio_write(struct file *file, const void *buffer, size_t size) {
-    if (file != writer) {
-        return -VX_EACCES;
-    }
-    const uint8_t *in = buffer;
-    size -= size % frame_bytes();
-    size_t done = 0;
-    while (done < size) {
-        mutex_lock(&lock);
-        if (!running) {
+        if (want_start && !running) {
             start();
+            last_sound = timer_ms();
         }
-        advance();
-        uint64_t space = RING_SIZE - GUARD - delay_bytes();
-        /* Room for this many input frames (mono becomes stereo: twice the room). */
-        size_t frames = (size_t)(space / 4);
-        size_t want = (size - done) / frame_bytes();
-        frames = frames < want ? frames : want;
-        for (size_t i = 0; i < frames; i++) {
-            const uint8_t *frame = in + done + i * frame_bytes();
-            uint64_t at = (written + i * 4) % RING_SIZE;
-            ring[at] = frame[0];
-            ring[(at + 1) % RING_SIZE] = frame[1];
-            ring[(at + 2) % RING_SIZE] = frame[format.channels == 2 ? 2 : 0];
-            ring[(at + 3) % RING_SIZE] = frame[format.channels == 2 ? 3 : 1];
-        }
-        written += frames * 4;
-        done += frames * frame_bytes();
-        mutex_unlock(&lock);
-        if (done < size) {
-            if (file->object.flags & OBJECT_NONBLOCK) {
-                return done ? (int64_t)done : -VX_EAGAIN;
-            }
-            int error = wait_queue_wait_interruptible(&room, has_room, NULL);
-            if (error) {
-                return done ? (int64_t)done : error;
-            }
-        }
-    }
-    return (int64_t)done;
-}
-
-static uint32_t audio_poll(struct file *file) {
-    (void)file;
-    return has_room(NULL) ? OBJECT_WRITABLE : 0;
-}
-
-static int audio_control(struct file *file, uint32_t request, void *arg, size_t size) {
-    switch (request) {
-    case VX_AUDIO_INFO: {
-        if (size < sizeof(struct vx_audio_info)) {
-            return -VX_EINVAL;
-        }
-        struct vx_audio_info *info = arg;
-        memset(info, 0, sizeof(*info));
-        memcpy(info->name, "HD Audio", 9);
-        info->format = format;
-        info->buffer_frames = (RING_SIZE - GUARD) / 4;
-        return 0;
-    }
-    case VX_AUDIO_SET_FORMAT: {
-        const struct vx_audio_format *f = arg;
-        if (size < sizeof(*f) || (f->rate != 44100 && f->rate != 48000) ||
-            (f->channels != 1 && f->channels != 2)) {
-            return -VX_EINVAL;
-        }
-        if (file != writer) {
-            return -VX_EACCES;
-        }
-        mutex_lock(&lock);
-        int error = running && delay_bytes() ? -VX_EBUSY : 0;
-        if (!error) {
-            if (running && f->rate != format.rate) {
+        want_start = false;
+        if (running) {
+            advance();
+            fill();
+            if (timer_ms() - last_sound > IDLE_MS && delay_bytes() == 0) {
                 stop();
             }
-            format = *f;
         }
+        output.queued = running ? (unsigned)(delay_bytes() / 4) : 0;
         mutex_unlock(&lock);
-        return error;
-    }
-    case VX_AUDIO_DELAY:
-        if (size < sizeof(unsigned)) {
-            return -VX_EINVAL;
-        }
-        mutex_lock(&lock);
-        advance();
-        *(unsigned *)arg = (unsigned)(delay_bytes() / 4);
-        mutex_unlock(&lock);
-        return 0;
-    case VX_AUDIO_DRAIN:
-        return drain();
-    case VX_AUDIO_DROP:
-        mutex_lock(&lock);
-        if (running) {
-            stop();
-        }
-        mutex_unlock(&lock);
-        return 0;
-    default:
-        return -VX_ENOTTY;
     }
 }
 
-static const struct vnode_ops audio_ops = {
-    .open = audio_open,
-    .close = audio_close,
-    .file_write = audio_write,
-    .file_poll = audio_poll,
-    .control = audio_control,
-};
+/* The core has something to play (with its lock held: just take note). */
+static void hda_start(struct sound_output *o) {
+    (void)o;
+    want_start = true;
+}
 
 /* ---- Bringing it up ---- */
 
@@ -599,9 +481,11 @@ void hda_init(void) {
         if (pci->class_code == 0x04 && pci->subclass == 0x03 && probe(pci)) {
             pci_claim(pci, "hda", NULL);
             device_set_details(pci->node, "/dev/audio0, codec %u", codec);
-            devfs_add("audio0", &audio_ops, NULL);
+            memcpy(output.name, "Built-in (HD Audio)", 20);
+            output.rate = 48000;
+            output.start = hda_start;
             thread_create("hda", ticker, NULL);
-            kprintf("[hda] audio0: 16-bit, 44100 or 48000 Hz\n");
+            sound_register(&output);
             return;
         }
     }

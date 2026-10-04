@@ -1,7 +1,8 @@
 /* play: plays sound on /dev/audio0.
  *
- *   play file.wav             a WAV file (16-bit PCM, 44100 or 48000 Hz, mono or stereo)
- *   play --tone HZ [SECONDS]  a sine wave (one second unless told) */
+ *   play file.wav             a WAV file (16-bit PCM, 8000 to 96000 Hz, mono or stereo)
+ *   play --tone HZ [SECONDS]  a sine wave (one second unless told)
+ *   play --chime              two short notes (the sound for notifications) */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -117,13 +118,47 @@ static int play_tone(unsigned hz, unsigned seconds) {
     return 0;
 }
 
+/* Two bell-like notes, each fading out: E6, then A6. */
+static int play_chime(void) {
+    const unsigned rate = 48000;
+    static const unsigned notes[2] = {1319, 1760};
+    static const float lengths[2] = {0.12f, 0.35f};
+    size_t frames = (size_t)(rate * (lengths[0] + lengths[1]));
+    short *samples = calloc(frames, 4);
+    if (!samples) {
+        return 1;
+    }
+    size_t at = 0;
+    for (int n = 0; n < 2; n++) {
+        double w = 2 * 3.14159265358979 * notes[n] / rate, w2 = w * w;
+        double c = 1 - w2 / 2 + w2 * w2 / 24 - w2 * w2 * w2 / 720;
+        double previous = 0, now = w - w * w2 / 6 + w * w2 * w2 / 120, level = 9000;
+        size_t count = (size_t)(rate * lengths[n]);
+        double fade = 1 - 6.0 / (double)count; /* (About 1/400 left at the end.) */
+        for (size_t i = 0; i < count && at < frames; i++, at++) {
+            short value = (short)(previous * level);
+            samples[2 * at] = samples[2 * at + 1] = value;
+            double next = 2 * c * now - previous;
+            previous = now, now = next;
+            level *= fade;
+        }
+    }
+    if (open_audio(rate, 2) || play_all(samples, frames * 4)) {
+        return 1;
+    }
+    return 0;
+}
+
 int main(int argc, char **argv) {
+    if (argc == 2 && !strcmp(argv[1], "--chime")) {
+        return play_chime();
+    }
     if (argc >= 3 && !strcmp(argv[1], "--tone")) {
         return play_tone((unsigned)atoi(argv[2]), argc > 3 ? (unsigned)atoi(argv[3]) : 1);
     }
     if (argc == 2 && argv[1][0] != '-') {
         return play_wav(argv[1]);
     }
-    fprintf(stderr, "usage: play file.wav | play --tone HZ [SECONDS]\n");
+    fprintf(stderr, "usage: play file.wav | play --tone HZ [SECONDS] | play --chime\n");
     return 2;
 }

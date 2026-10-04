@@ -991,27 +991,28 @@ limine/limine:
 
 # $(call make_iso,limine config file,output ISO)
 define make_iso
-	rm -rf $(BUILD)/iso_root
-	mkdir -p $(BUILD)/iso_root/boot/limine $(BUILD)/iso_root/EFI/BOOT
-	cp $(KERNEL) $(BUILD)/iso_root/boot/
-	cp $(INITRAMFS) $(BUILD)/iso_root/boot/
-	cp $(1) $(BUILD)/iso_root/boot/limine/limine.conf
+	rm -rf $(2).root
+	mkdir -p $(2).root/boot/limine $(2).root/EFI/BOOT
+	cp $(KERNEL) $(2).root/boot/
+	cp $(INITRAMFS) $(2).root/boot/
+	cp $(1) $(2).root/boot/limine/limine.conf
 	cp limine/limine-bios.sys limine/limine-bios-cd.bin \
-		limine/limine-uefi-cd.bin $(BUILD)/iso_root/boot/limine/
-	cp limine/BOOTX64.EFI limine/BOOTIA32.EFI $(BUILD)/iso_root/EFI/BOOT/
-	if [ -n "$(LINUX_TREE)" ]; then mkdir -p $(BUILD)/iso_root/linux && \
-		for dir in $(LINUX_ON_CD); do cp -a $(LINUX_ROOT)/$$dir $(BUILD)/iso_root/linux/; done; fi
-	mkdir -p $(BUILD)/iso_root/lib
-	cp $(MESA_VEXA_LIB) $(BUILD)/iso_root/lib/
-	mkdir -p $(BUILD)/iso_root/doom
+		limine/limine-uefi-cd.bin $(2).root/boot/limine/
+	cp limine/BOOTX64.EFI limine/BOOTIA32.EFI $(2).root/EFI/BOOT/
+	if [ -n "$(LINUX_TREE)" ]; then mkdir -p $(2).root/linux && \
+		for dir in $(LINUX_ON_CD); do cp -a $(LINUX_ROOT)/$$dir $(2).root/linux/; done; fi
+	mkdir -p $(2).root/lib
+	cp $(MESA_VEXA_LIB) $(2).root/lib/
+	mkdir -p $(2).root/doom
 	cp $(FREEDOOM_DIR)/freedoom1.wad $(FREEDOOM_DIR)/COPYING.txt $(FREEDOOM_DIR)/CREDITS.txt \
-		$(BUILD)/iso_root/doom/
+		$(2).root/doom/
 	xorriso -as mkisofs -R -r -J -D -b boot/limine/limine-bios-cd.bin \
 		-no-emul-boot -boot-load-size 4 -boot-info-table -hfsplus \
 		-apm-block-size 2048 --efi-boot boot/limine/limine-uefi-cd.bin \
 		-efi-boot-part --efi-boot-image --protective-msdos-label \
-		$(BUILD)/iso_root -o $(2) 2>/dev/null
+		$(2).root -o $(2) 2>/dev/null
 	./limine/limine bios-install $(2)
+	rm -rf $(2).root
 endef
 
 $(ISO): $(KERNEL) $(INITRAMFS) $(BUILD)/limine.conf limine/limine $(LINUX_TREE) \

@@ -191,6 +191,23 @@ struct rect clock_rect(void);
 struct rect clock_button_rect(void); /* On the panel. */
 void clock_remember(const char *text); /* A notification, for the list. */
 
+/* ---- volume.c: the sound volume (the panel's speaker, the volume keys) ---- */
+extern bool volume_open;
+void volume_check(void); /* Looks at the sound core now and then. */
+struct rect volume_button_rect(void); /* On the panel. */
+void volume_draw_button(struct vx_surface *view, int ox, int oy);
+void volume_toggle(void);
+void volume_close(void);
+struct rect volume_rect(void);
+void volume_draw(struct vx_surface *view, int ox, int oy);
+void volume_button(bool down);
+void volume_pointer(void);
+bool volume_sliding(void);
+void volume_wheel(int wheel); /* Scrolling over the panel's speaker. */
+bool volume_key(int key, int value); /* The volume keys: true if it was one. */
+void volume_draw_osd(struct vx_surface *view, int ox, int oy);
+long volume_osd_wait(void); /* Milliseconds the level bubble still shows, or -1. */
+
 /* ---- shot.c: screenshots (PrintScreen) ---- */
 enum shot_kind { SHOT_SCREEN, SHOT_WINDOW, SHOT_AREA };
 extern bool shot_selecting;

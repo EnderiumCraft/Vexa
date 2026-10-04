@@ -1168,7 +1168,7 @@ static int64_t sys_net_info(uint64_t out, uint64_t count, uint64_t a2, uint64_t 
 
 /* ---- Devices ---- */
 
-#define CONTROL_MAX 256 /* Bytes of argument a device request may have. */
+#define CONTROL_MAX 1024 /* Bytes of argument a device request may have. */
 
 static int64_t sys_control(uint64_t handle, uint64_t request, uint64_t arg, uint64_t size) {
     if (size > CONTROL_MAX || (size && !user_range_ok(arg, size))) {

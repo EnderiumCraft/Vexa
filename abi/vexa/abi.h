@@ -453,15 +453,41 @@ struct vx_block_info {
 
 /* ---- Sound: /dev/audio0 ----
  * Write 16-bit signed little-endian samples (interleaved when stereo) and
- * they play; a write waits while the device's buffer is full. vx_control
- * sets the format before playing, and tells how much is still to play.
- * Closing the handle lets what was written finish. */
+ * they play; a write waits while the handle's buffer is full. Each handle
+ * opened for writing is a stream of its own: several programs play at once,
+ * mixed, at the system's volume, on the current output (HD Audio, a USB
+ * sound card...). vx_control sets a stream's format before it plays, and
+ * tells how much is still to play. Closing the handle lets what was written
+ * finish. A handle opened only for reading can ask about and set the volume
+ * and the output. */
 #define VX_AUDIO_INFO 0x4101       /* struct vx_audio_info (out) */
-#define VX_AUDIO_SET_FORMAT 0x4102 /* struct vx_audio_format (in): 44100 or 48000 Hz, 1 or 2
+#define VX_AUDIO_SET_FORMAT 0x4102 /* struct vx_audio_format (in): 8000 to 96000 Hz, 1 or 2
                                       channels; -VX_EBUSY while playing */
 #define VX_AUDIO_DELAY 0x4103      /* unsigned int (out): frames written, not played yet */
 #define VX_AUDIO_DRAIN 0x4104      /* no argument: waits until all of it has played */
 #define VX_AUDIO_DROP 0x4105       /* no argument: stops, throwing away what's left */
+#define VX_AUDIO_GET_VOLUME 0x4106 /* struct vx_audio_volume (out) */
+#define VX_AUDIO_SET_VOLUME 0x4107 /* struct vx_audio_volume (in) */
+#define VX_AUDIO_OUTPUTS 0x4108    /* struct vx_audio_outputs (out) */
+#define VX_AUDIO_SET_OUTPUT 0x4109 /* unsigned int (in): an output's id */
+
+struct vx_audio_volume {
+    unsigned int volume; /* 0 to 100. */
+    unsigned int muted;
+    unsigned int changes; /* (out) Goes up each time the volume or the outputs change. */
+    unsigned int reserved;
+};
+
+#define VX_AUDIO_MAX_OUTPUTS 8
+struct vx_audio_outputs {
+    unsigned int count;
+    unsigned int current; /* Its id (0: none). */
+    struct {
+        unsigned int id;
+        unsigned int rate;
+        char name[48];
+    } output[VX_AUDIO_MAX_OUTPUTS];
+};
 
 struct vx_audio_format {
     unsigned int rate;     /* Frames a second. */

@@ -83,7 +83,7 @@ struct trb {
 #define TRB_TYPE_OF(control) (((control) >> 10) & 0x3f)
 
 enum {
-    TRB_NORMAL = 1, TRB_SETUP = 2, TRB_DATA = 3, TRB_STATUS = 4, TRB_LINK = 6,
+    TRB_NORMAL = 1, TRB_SETUP = 2, TRB_DATA = 3, TRB_STATUS = 4, TRB_ISOCH = 5, TRB_LINK = 6,
     TRB_ENABLE_SLOT = 9, TRB_DISABLE_SLOT = 10, TRB_ADDRESS_DEVICE = 11,
     TRB_CONFIGURE_ENDPOINT = 12, TRB_EVALUATE_CONTEXT = 13, TRB_RESET_ENDPOINT = 14,
     TRB_STOP_ENDPOINT = 15, TRB_SET_DEQUEUE = 16,
@@ -92,8 +92,12 @@ enum {
 
 enum {
     CODE_SUCCESS = 1, CODE_DATA_BUFFER = 2, CODE_BABBLE = 3, CODE_TRANSACTION = 4,
-    CODE_TRB = 5, CODE_STALL = 6, CODE_SHORT_PACKET = 13,
+    CODE_TRB = 5, CODE_STALL = 6, CODE_SHORT_PACKET = 13, CODE_RING_UNDERRUN = 14,
+    CODE_RING_OVERRUN = 15, CODE_MISSED_SERVICE = 23,
 };
+
+#define TRB_SIA (1U << 31) /* Isoch TRBs: start as soon as possible. */
+#define ISO_SLOTS 16       /* Isochronous packets kept queued. */
 
 #define RING_TRBS 256 /* One page; the last is the link back to the start. */
 #define MAX_SLOTS 64
@@ -122,6 +126,11 @@ struct endpoint {
     uint32_t transferred;
     bool partial;      /* A control transfer's data stage came back short. */
     uint32_t partial_length;
+    /* An isochronous OUT endpoint kept fed: packets in `buffer`, refilled
+     * in turn as each is sent. */
+    usb_iso_fill_fn iso_fill;
+    uint16_t iso_packet;
+    int iso_next, iso_slots;
     /* An interrupt IN endpoint kept polled. */
     usb_report_fn callback;
     void *arg;
@@ -309,8 +318,24 @@ static void fill_slot_context(struct xhci *hc, struct slot *slot, struct usb_dev
 
 /* ---- Events ---- */
 
+/* Fills the next isochronous packet and queues it. */
+static void iso_queue(struct endpoint *ep) {
+    uint8_t *packet = ep->buffer + ep->iso_next * ep->iso_packet;
+    int length = ep->iso_fill(ep->arg, packet, ep->iso_packet);
+    length = length < 0 ? 0 : length > ep->iso_packet ? ep->iso_packet : length;
+    ring_push(&ep->ring, virt_to_phys(packet), (uint32_t)length,
+              TRB_TYPE(TRB_ISOCH) | TRB_IOC | TRB_SIA);
+    ep->iso_next = (ep->iso_next + 1) % ep->iso_slots;
+}
+
 static void endpoint_event(struct xhci *hc, struct endpoint *ep, struct trb *event) {
     uint32_t code = event->status >> 24, residual = event->status & 0xffffff;
+    if (ep->iso_fill) { /* A packet went (or its moment did): the next one. */
+        if (code != CODE_RING_UNDERRUN && code != CODE_RING_OVERRUN) {
+            iso_queue(ep);
+        }
+        return;
+    }
     if (ep->callback) { /* An interrupt endpoint: a report, then queue it again. */
         if (code == CODE_SUCCESS || code == CODE_SHORT_PACKET) {
             int length = ep->size > residual ? (int)(ep->size - residual) : 0;
@@ -381,9 +406,9 @@ static void process_events(struct xhci *hc) {
             struct slot *slot = slot_id <= MAX_SLOTS ? hc->slots[slot_id] : NULL;
             struct endpoint *ep = slot ? slot->endpoints[dci] : NULL;
             if (ep) {
-                bool polled = ep->callback != NULL;
+                bool polled = ep->callback != NULL || ep->iso_fill != NULL;
                 endpoint_event(hc, ep, event);
-                if (polled && ep->callback) {
+                if (polled && (ep->callback || ep->iso_fill)) {
                     hc->doorbells[slot_id] = dci;
                 }
             }
@@ -795,6 +820,79 @@ static int xhci_interrupt_in(struct usb_hc *usb, struct usb_device *device, uint
     return 0;
 }
 
+/* Starts an isochronous OUT endpoint of an alternate setting (which the
+ * driver chose with SET_INTERFACE): adds it to the slot, then keeps
+ * ISO_SLOTS packets queued, each filled by `fill` just before it's queued. */
+static int xhci_iso_out(struct usb_hc *usb, struct usb_device *device,
+                        const struct usb_endpoint *e, uint16_t packet, usb_iso_fill_fn fill,
+                        void *arg) {
+    struct xhci *hc = usb->data;
+    struct slot *slot = device->hc_data;
+    int dci = dci_of(e->address & ~USB_DIR_IN);
+    if (!slot || !packet || packet > PAGE_SIZE / 2 || (e->address & USB_DIR_IN)) {
+        return -VX_EINVAL;
+    }
+    if (!slot->endpoints[dci] && !(slot->endpoints[dci] = new_endpoint())) {
+        return -VX_ENOMEM;
+    }
+    struct endpoint *ep = slot->endpoints[dci];
+    if (!ep->buffer && !(ep->buffer = dma_page())) {
+        return -VX_ENOMEM;
+    }
+    ep->max_packet = e->max_packet & 0x7ff;
+    int last = dci;
+    for (int i = 1; i < 32; i++) {
+        if (slot->endpoints[i] && slot->endpoints[i]->configured && i > last) {
+            last = i;
+        }
+    }
+    memset(slot->input, 0, PAGE_SIZE);
+    uint32_t *control = input_context(hc, slot, 0);
+    control[1] = 1U | 1U << dci;
+    /* bInterval: 2^(n-1) frames at full speed (8 microframes each), 2^(n-1)
+     * microframes at high speed. */
+    uint32_t n = e->interval ? e->interval - 1U : 0;
+    uint32_t interval = device->speed == USB_SPEED_HIGH || device->speed == USB_SPEED_SUPER ? n : n + 3;
+    interval = interval > 15 ? 15 : interval;
+    uint32_t *ctx = input_context(hc, slot, dci + 1);
+    ctx[0] = interval << 16;
+    ctx[1] = 1U << 3 /* Isoch OUT, no error retries */ | (uint32_t)ep->max_packet << 16;
+    ctx[2] = (uint32_t)ring_dequeue_pointer(&ep->ring);
+    ctx[3] = (uint32_t)(ring_dequeue_pointer(&ep->ring) >> 32);
+    ctx[4] = packet | (uint32_t)ep->max_packet << 16;
+    fill_slot_context(hc, slot, device, last);
+    if (command(hc, virt_to_phys(slot->input), TRB_TYPE(TRB_CONFIGURE_ENDPOINT) | slot->id << 24,
+                NULL) != CODE_SUCCESS) {
+        return -VX_EIO;
+    }
+    ep->configured = true;
+    ep->iso_packet = packet;
+    ep->iso_slots = (int)(PAGE_SIZE / packet) < ISO_SLOTS ? (int)(PAGE_SIZE / packet) : ISO_SLOTS;
+    ep->iso_next = 0;
+    ep->arg = arg;
+    ep->iso_fill = fill;
+    for (int i = 0; i < ep->iso_slots; i++) {
+        iso_queue(ep);
+    }
+    hc->doorbells[slot->id] = (uint32_t)dci;
+    return 0;
+}
+
+static void xhci_iso_stop(struct usb_hc *usb, struct usb_device *device, uint8_t endpoint) {
+    struct xhci *hc = usb->data;
+    struct slot *slot = device->hc_data;
+    int dci = dci_of(endpoint & ~USB_DIR_IN);
+    struct endpoint *ep = slot ? slot->endpoints[dci] : NULL;
+    if (!ep || !ep->iso_fill) {
+        return;
+    }
+    __atomic_store_n(&ep->iso_fill, NULL, __ATOMIC_RELEASE);
+    if (!device->gone) {
+        command(hc, 0, TRB_TYPE(TRB_STOP_ENDPOINT) | (uint32_t)dci << 16 | (uint32_t)slot->id << 24,
+                NULL);
+    }
+}
+
 static int xhci_reset_endpoint(struct usb_hc *usb, struct usb_device *device, uint8_t endpoint) {
     struct xhci *hc = usb->data;
     struct slot *slot = device->hc_data;
@@ -853,6 +951,8 @@ static const struct usb_hc_ops xhci_ops = {
     .control = xhci_control,
     .bulk = xhci_bulk,
     .interrupt_in = xhci_interrupt_in,
+    .iso_out = xhci_iso_out,
+    .iso_stop = xhci_iso_stop,
     .reset_endpoint = xhci_reset_endpoint,
     .reset_port = xhci_reset_port,
     .port_connected = xhci_port_connected,

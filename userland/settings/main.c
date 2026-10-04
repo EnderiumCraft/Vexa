@@ -41,7 +41,7 @@ static int pointer_x, pointer_y;
 /* ---- Sections ---- */
 
 enum section {
-    S_APPEARANCE, S_WALLPAPER, S_DESKTOP, S_DATE, S_INPUT, S_DISPLAY, S_LOCK, S_DEFAULTS,
+    S_APPEARANCE, S_WALLPAPER, S_DESKTOP, S_DATE, S_INPUT, S_DISPLAY, S_SOUND, S_LOCK, S_DEFAULTS,
     S_STARTUP, S_NETWORK, S_STORAGE, S_ABOUT, SECTION_COUNT
 };
 
@@ -59,6 +59,8 @@ static const struct {
      "pointer speed double click scroll natural left handed buttons layout key repeat shortcuts",
      0x8e8ea0, 'M'},
     {"Display", "resolution screen size scale bigger mode monitor", 0x2ec4b6, 'S'},
+    {"Sound", "volume mute speaker headphones headset output usb audio notifications chime",
+     0xffa424, 'V'},
     {"Lock Screen", "screensaver password lock idle security", 0x5a6acf, 'K'},
     {"Default Apps", "open with file types extensions", 0xff5fa2, 'O'},
     {"Startup", "login start apps terminal", 0xf0524f, 'L'},
@@ -81,7 +83,7 @@ enum hit_kind {
     H_SECTION, H_SEGMENT, H_TOGGLE, H_SLIDER, H_ACCENT, H_PICTURE, H_GRADIENT, H_PICTURE_FIELD,
     H_USE_PICTURE, H_ICON_APP, H_STARTUP_APP, H_ZONE, H_MODE, H_DEFAULT_APP, H_NAME_FIELD,
     H_SAVE_NAME, H_POWER, H_KEEP, H_REVERT, H_SEARCH_FIELD, H_TEST_AREA, H_PASSWORD_FIELD,
-    H_SET_PASSWORD, H_REMOVE_PASSWORD, H_LOCK_NOW,
+    H_SET_PASSWORD, H_REMOVE_PASSWORD, H_LOCK_NOW, H_OUTPUT, H_TEST_SOUND,
 };
 
 struct hit {
@@ -113,11 +115,16 @@ static void changed(const char *key, const char *value) {
     fflush(stdout);
 }
 
+static void apply_volume(void);
+
 /* Sets a desktop setting, saves, and tells the desktop. */
 static void set(const char *key, const char *value) {
     vx_settings_set(&desk, key, value);
     vx_settings_save(&desk);
     changed(key, value);
+    if (!strcmp(key, "volume") || !strcmp(key, "muted")) {
+        apply_volume();
+    }
     vx_desktop_reload();
 }
 
@@ -704,6 +711,83 @@ static void read_display(void) {
     }
 }
 
+/* ---- Sound ---- */
+
+static int audio_handle = -1;
+static struct vx_audio_volume sound_volume;
+static struct vx_audio_outputs sound_outputs;
+
+static bool read_sound(void) {
+    if (audio_handle < 0) {
+        audio_handle = vx_open("/dev/audio0", VX_OPEN_READ);
+    }
+    return audio_handle >= 0 &&
+           vx_control(audio_handle, VX_AUDIO_GET_VOLUME, &sound_volume, sizeof(sound_volume)) == 0 &&
+           vx_control(audio_handle, VX_AUDIO_OUTPUTS, &sound_outputs, sizeof(sound_outputs)) == 0;
+}
+
+static void apply_volume(void) {
+    if (read_sound()) {
+        sound_volume.volume = (unsigned)vx_settings_int(&desk, "volume", 80);
+        sound_volume.muted = vx_settings_bool(&desk, "muted", false);
+        vx_control(audio_handle, VX_AUDIO_SET_VOLUME, &sound_volume, sizeof(sound_volume));
+    }
+}
+
+static void play_chime(void) {
+    const char *argv[] = {"play", "--chime"};
+    struct vx_spawn spawn = {.argv = argv, .argc = 2, .handles = {0, 1, 2}};
+    long child = vx_spawn("/bin/play", &spawn);
+    if (child >= 0) {
+        vx_close((int)child);
+    }
+}
+
+static void draw_sound(void) {
+    int y = 64;
+    heading("Output", y);
+    y += 28;
+    if (!read_sound()) {
+        note(y, "No sound device.");
+        return;
+    }
+    int w = window->surface.width - LEFT - 24;
+    for (unsigned i = 0; i < sound_outputs.count; i++) {
+        bool on = sound_outputs.output[i].id == sound_outputs.current;
+        if (on) {
+            vx_draw_gel(S(), LEFT, y, w, 30, 8, VX_COLOR_ACCENT);
+        } else {
+            vx_fill_rounded(S(), LEFT, y, w, 30, 8, VX_COLOR_BUTTON, 255);
+        }
+        uint32_t color = on ? 0xffffff : VX_COLOR_TEXT;
+        text(LEFT + 14, y + 7, sound_outputs.output[i].name, color);
+        char rate[24];
+        snprintf(rate, sizeof(rate), "%u Hz", sound_outputs.output[i].rate);
+        text(LEFT + w - vx_text_width(rate) - 14, y + 7, rate, on ? 0xffffff : VX_COLOR_DIM);
+        struct hit *h = add_hit(LEFT, y, w, 30, H_OUTPUT);
+        h->index = (int)sound_outputs.output[i].id;
+        y += 36;
+    }
+    y += 12;
+    heading("Volume", y);
+    y += 28;
+    /* (What the sound core has now: the panel or the volume keys may have changed it.) */
+    vx_settings_set_int(&desk, "volume", (int)sound_volume.volume);
+    vx_settings_set_bool(&desk, "muted", sound_volume.muted != 0);
+    slider(y, "Volume", "volume", 0, 100, 5, 80, "%d%%");
+    y += ROW;
+    toggle(y, "Mute", "muted", false);
+    y += ROW;
+    toggle(y, "A sound for notifications", "notification_sound", false);
+    y += ROW + 8;
+    vx_draw_button(S(), LEFT, y, 170, 28, "Play a test sound", false);
+    add_hit(LEFT, y, 170, 28, H_TEST_SOUND);
+    y += 48;
+    note(y, "Programs play at the same time, mixed together. A USB sound card or headset");
+    note(y + 18, "plays as soon as it's plugged in; choose the output here, or with the speaker");
+    note(y + 36, "on the panel, which also has the volume (and the volume keys change it).");
+}
+
 static void draw_display(void) {
     int y = 64;
     read_display();
@@ -1096,6 +1180,7 @@ static void draw(void) {
     case S_DATE: draw_date(); break;
     case S_INPUT: draw_input(); break;
     case S_DISPLAY: draw_display(); break;
+    case S_SOUND: draw_sound(); break;
     case S_LOCK: draw_lock(); break;
     case S_DEFAULTS: draw_defaults(); break;
     case S_STARTUP: draw_startup(); break;
@@ -1283,6 +1368,17 @@ static void click(struct hit *h, int px) {
     case H_REMOVE_PASSWORD:
         set("lock_password", "");
         break;
+    case H_OUTPUT: {
+        unsigned id = (unsigned)h->index;
+        if (read_sound() && vx_control(audio_handle, VX_AUDIO_SET_OUTPUT, &id, sizeof(id)) == 0) {
+            changed("sound_output", "chosen");
+        }
+        break;
+    }
+    case H_TEST_SOUND:
+        changed("sound", "test");
+        play_chime();
+        break;
     case H_LOCK_NOW:
         changed("lock", "now");
         vx_desktop_lock();
@@ -1435,7 +1531,7 @@ int main(int argc, char **argv) {
          * made when nothing else is happening. */
         bool busy = current == S_WALLPAPER && picture_count && !pictures[picture_count - 1].tried;
         long wait = busy ? 0 : (current == S_DATE || current == S_ABOUT || revert_at ||
-                                current == S_INPUT) ? 500 : -1;
+                                current == S_INPUT || current == S_SOUND) ? 500 : -1;
         struct vx_gui_event e;
         int got = vx_gui_wait(&e, wait);
         if (got < 0) {

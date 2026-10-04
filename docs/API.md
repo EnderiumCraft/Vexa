@@ -179,10 +179,18 @@ others are the devices one by one. Mice report `VX_EV_REL` motion (and
 Reading or writing a disk that was unplugged gives `-VX_ENODEV` or `-VX_EIO`.
 
 `/dev/audio0` plays sound: write 16-bit little-endian samples (interleaved, when
-stereo). `VX_AUDIO_SET_FORMAT` (`struct vx_audio_format`: 44100 or 48000 Hz, 1 or 2
-channels) comes first; a write waits while the buffer is full; `VX_AUDIO_DELAY` says how
+stereo). Each handle opened for writing is a stream of its own, mixed with the others.
+`VX_AUDIO_SET_FORMAT` (`struct vx_audio_format`: 8000 to 96000 Hz, 1 or 2 channels)
+comes first; a write waits while the stream's buffer is full; `VX_AUDIO_DELAY` says how
 many frames are still to play, `VX_AUDIO_DRAIN` waits for them, `VX_AUDIO_DROP` throws
-them away, and closing the handle lets them finish. `VX_AUDIO_INFO` describes the device.
+them away, and closing the handle lets them finish. `VX_AUDIO_INFO` describes the
+stream and the output it plays on.
+
+A handle opened only for reading controls the system: `VX_AUDIO_GET_VOLUME` and
+`VX_AUDIO_SET_VOLUME` (`struct vx_audio_volume`: `volume` 0-100, `muted`, and
+`changes`, which goes up whenever the volume or the outputs change), `VX_AUDIO_OUTPUTS`
+(`struct vx_audio_outputs`: each output's id, rate and name, and the current one's id)
+and `VX_AUDIO_SET_OUTPUT` (an id).
 
 ## `<vexa/thread.h>`: threads
 

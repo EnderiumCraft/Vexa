@@ -162,6 +162,8 @@ TYPED_COMMANDS = ([
     # recording should be the tone.
     ("play --tone 1000 2", "play: done", 60),
     ("@sound 1000", None, 10),
+    # Two at once, mixed (each handle is a stream of its own).
+    ("play --tone 700 1 & play --tone 700 1", "play: done", 30, 3),
     ("#desktop",),
     # Graphics: the mouse, then the desktop with a terminal window. Typing
     # goes to the window's shell; dragging its title bar moves it (the pointer
@@ -179,6 +181,10 @@ TYPED_COMMANDS = ([
     ("input", "PS/2 mouse", 10),
     ("desktop", 'desktop: window 1 "Terminal"', 30),
     ("@type echo from-the-window > /dev/console", "from-the-window", 30),
+    # The volume keys: up a step, muted, and back.
+    ("@sendkey volumeup", "desktop: volume 85\r\n", 10),
+    ("@sendkey audiomute", "desktop: volume 85 (muted)", 10),
+    ("@sendkey audiomute", "desktop: volume 85\r\n", 10, 2),
     ("@mouse_move -440 -330", None, 5),
     ("@mouse_button 1", "desktop: left button at 200,70", 10),
     ("@mouse_move 100 50", None, 5),
@@ -576,6 +582,16 @@ USB_COMMANDS = [
     ("@device_add usb-kbd,bus=usb.0,id=kbd2", "usb-hid] QEMU USB Keyboard: keyboard", 20),
     ("@device_del kbd2", "QEMU USB Keyboard unplugged", 20),
     ("echo still typing", "still typing\r\n", 10),
+]
+
+# With --usb (xHCI only: isochronous transfers): a USB sound card plugged
+# in becomes the output (QEMU records what it plays), and when it's pulled
+# out, the built-in one plays again.
+USB_AUDIO_COMMANDS = [
+    ("@device_add usb-audio,audiodev=usbsnd,bus=usb.0,id=usbaudio", "[usb-audio]", 30),
+    ("play --tone 880 2", "play: done", 60),
+    ("@usbsound 880", None, 10),
+    ("@device_del usbaudio", "playing on Built-in", 20),
 ]
 
 # On the test disks (so only with --disks): apps built with the SDK (make
@@ -1009,7 +1025,7 @@ def main():
         commands[at:at] = LINUX_COMMANDS
     if args.usb:
         at = next((i for i, c in enumerate(commands) if c[0] == "#network"), len(commands))
-        commands[at:at] = USB_COMMANDS
+        commands[at:at] = USB_COMMANDS + (USB_AUDIO_COMMANDS if args.usb == "xhci" else [])
         insert_before_leaving_desktop(commands, USB_DESKTOP_COMMANDS)
     if args.disks:
         for name, qemu_args, offset in TEST_DISKS:
@@ -1066,6 +1082,8 @@ def main():
         command += ["-bios", OVMF]
     if args.usb:
         command += USB_DEVICES[args.usb] + USB_ATTACHED
+        if args.usb == "xhci":
+            command += ["-audiodev", "wav,id=usbsnd,path=" + os.path.join(tmp, "usb-sound.wav")]
     if args.cpu:
         command += ["-cpu", args.cpu]
     accel = args.accel
@@ -1145,12 +1163,16 @@ def main():
                         if seconds < 1:
                             failures.append(f"{command!r}: heard {seconds:.1f} s of sound")
                         continue
-                    if command.startswith("@sound "):
-                        # What QEMU recorded should be a tone of that pitch.
+                    if command.startswith("@sound ") or command.startswith("@usbsound "):
+                        # What QEMU recorded should be a tone of that pitch (the
+                        # HD Audio's recording, or the USB sound card's).
                         want = float(command.split()[1])
                         time.sleep(3)  # (QEMU records a little behind what's played.)
-                        hz, seconds, sound_heard = sound_frequency(os.path.join(tmp, "sound.wav"),
-                                                                   sound_heard)
+                        if command.startswith("@usbsound "):
+                            hz, seconds, _ = sound_frequency(os.path.join(tmp, "usb-sound.wav"))
+                        else:
+                            hz, seconds, sound_heard = sound_frequency(
+                                os.path.join(tmp, "sound.wav"), sound_heard)
                         print(f"qemu-smoke-test: heard {hz:.0f} Hz for {seconds:.1f} s")
                         if abs(hz - want) > want * 0.03:
                             failures.append(f"{command!r}: heard {hz:.0f} Hz")

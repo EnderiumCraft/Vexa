@@ -109,6 +109,23 @@ int usb_interrupt_in(struct usb_device *device, uint8_t endpoint, uint16_t size,
     return device->hc->ops->interrupt_in(device->hc, device, endpoint, size, callback, arg);
 }
 
+int usb_iso_out(struct usb_device *device, const struct usb_endpoint *endpoint, uint16_t packet,
+                usb_iso_fill_fn fill, void *arg) {
+    if (device->gone) {
+        return -VX_ENODEV;
+    }
+    if (!device->hc->ops->iso_out) {
+        return -VX_ENOSYS;
+    }
+    return device->hc->ops->iso_out(device->hc, device, endpoint, packet, fill, arg);
+}
+
+void usb_iso_stop(struct usb_device *device, uint8_t endpoint) {
+    if (device->hc->ops->iso_stop) {
+        device->hc->ops->iso_stop(device->hc, device, endpoint);
+    }
+}
+
 static uint16_t language;
 
 void usb_string(struct usb_device *device, uint8_t index, char *out, int size) {
@@ -204,6 +221,7 @@ static const struct usb_driver *const drivers[] = {
     &usb_hub_driver,
     &usb_hid_driver,
     &usb_storage_driver,
+    &usb_audio_driver,
 };
 
 static const char *class_name(uint8_t c) {

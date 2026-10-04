@@ -162,6 +162,14 @@ int usb_clear_halt(struct usb_device *device, uint8_t endpoint);
 typedef void (*usb_report_fn)(void *arg, const uint8_t *data, int length);
 int usb_interrupt_in(struct usb_device *device, uint8_t endpoint, uint16_t size,
                      usb_report_fn callback, void *arg);
+/* Keeps an isochronous OUT endpoint (of the alternate setting the driver
+ * chose with SET_INTERFACE) sending: `fill` writes each packet (at most
+ * `packet` bytes) and returns its length, from the controller's thread, a
+ * few packets ahead of when it goes. Only on xHCI: -VX_ENOSYS elsewhere. */
+typedef int (*usb_iso_fill_fn)(void *arg, uint8_t *data, int max);
+int usb_iso_out(struct usb_device *device, const struct usb_endpoint *endpoint, uint16_t packet,
+                usb_iso_fill_fn fill, void *arg);
+void usb_iso_stop(struct usb_device *device, uint8_t endpoint);
 /* A string descriptor as ASCII (others become '?'); "" if it has none. */
 void usb_string(struct usb_device *device, uint8_t index, char *out, int size);
 /* "Logitech USB Optical Mouse": the device's names, for driver nodes. */
@@ -183,6 +191,9 @@ struct usb_hc_ops {
                 uint32_t length, uint32_t timeout_ms);
     int (*interrupt_in)(struct usb_hc *hc, struct usb_device *device, uint8_t endpoint,
                         uint16_t size, usb_report_fn callback, void *arg);
+    int (*iso_out)(struct usb_hc *hc, struct usb_device *device, const struct usb_endpoint *e,
+                   uint16_t packet, usb_iso_fill_fn fill, void *arg); /* (Optional.) */
+    void (*iso_stop)(struct usb_hc *hc, struct usb_device *device, uint8_t endpoint);
     int (*reset_endpoint)(struct usb_hc *hc, struct usb_device *device, uint8_t endpoint);
     /* After CLEAR_FEATURE ENDPOINT_HALT: the next packet is DATA0 again
      * (controllers that keep data toggles in software; NULL for xHCI). */
@@ -208,7 +219,8 @@ void usb_port_changed(struct usb_hc *hc, int port);
 void usb_add_controller(struct usb_hc *hc);
 
 /* Class drivers (dev/usb/hub.c, hid.c, storage.c). */
-extern const struct usb_driver usb_hub_driver, usb_hid_driver, usb_storage_driver;
+extern const struct usb_driver usb_hub_driver, usb_hid_driver, usb_storage_driver,
+    usb_audio_driver;
 /* A hub's port changed (from its status endpoint): checked from the "usb" thread. */
 void usb_hub_changed(struct usb_device *hub);
 /* For the hub driver: a device on a hub's port, or gone from one. */

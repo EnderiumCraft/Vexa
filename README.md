@@ -49,7 +49,8 @@ runs X programs such as `xterm` in windows of their own on it. The kernel:
   Settings)
 - has a graphical desktop: a compositor that draws programs' windows (shared buffers)
   on the screen, with soft shadows, round corners and animations, a panel (the Vexa
-  menu, a button per window, search, a clock with a calendar and the notifications),
+  menu, a button per window, search, the volume, a clock with a calendar and the
+  notifications),
   desktop icons (apps, the Desktop folder's files, the Trash), notifications, windows
   you move, resize, maximize, minimize and snap to a half or a quarter (by dragging, or
   Super+arrows), Alt+Tab with pictures of the windows, search (Ctrl+Space: apps,
@@ -209,7 +210,8 @@ of their own: Ctrl+Alt+X opens an `xterm`.
 Linux programs also get the kernel's display and input interfaces, DRM with "dumb
 buffers" on `/dev/dri/card0` and evdev on `/dev/input`, so they can draw on the whole
 screen without X (or run Xorg there: `startxorg`), OpenGL through Mesa's llvmpipe (in X windows, or into memory), a D-Bus
-session bus, and sound: an HD Audio driver, `play`, and ALSA for Linux programs (`aplay`). See [docs/ROADMAP.md](docs/ROADMAP.md) for the
+session bus, and sound: HD Audio and USB sound cards, programs playing at once (mixed, at
+the panel's volume), `play`, and ALSA for Linux programs (`aplay`). See [docs/ROADMAP.md](docs/ROADMAP.md) for the
 full plan from here to Firefox.
 
 ## Download
