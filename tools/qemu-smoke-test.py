@@ -224,13 +224,13 @@ TYPED_COMMANDS = ([
     # The Vexa menu (top left) starts "About Vexa"; its close button closes it.
     ("@mouse_move -299 -187", None, 5),
     ("@mouse_move -299 -187", None, 5),
-    ("@mouse_move -299 -187", None, 5),
+    ("@mouse_move -299 -193", None, 5),
     ("@mouse_button 1", "desktop: left button at 31,13", 10),
     ("@mouse_button 0", None, 5),
     ("@mouse_move 0 125", None, 5),
     ("@mouse_button 1", 'desktop: window 3 "About Vexa"', 20),
     ("@mouse_button 0", None, 5),
-    ("@mouse_move 463 -11", None, 5),
+    ("@mouse_move 460 -8", None, 5),
     ("@mouse_button 1", "desktop: asked window 3 to close", 10),
     ("@mouse_button 0", "desktop: closed window 3", 10),
     # Notifications, and the image viewer (PNG) from the terminal, through
