@@ -105,15 +105,25 @@ int fcntl(int fd, int command, ...) {
         va_start(args, command);
         int lowest = va_arg(args, int);
         va_end(args);
-        struct vx_stat st;
-        if (lowest < 0 || vx_handle_stat(fd, &st)) {
-            errno = lowest < 0 ? EINVAL : EBADF;
+        if (lowest < 0) {
+            errno = EINVAL;
             return -1;
         }
-        while (vx_handle_stat(lowest, &st) == 0) {
-            lowest++;
+        /* vx_dup gives the lowest free handle: take (and then give back) the
+         * ones below `lowest` until it's one at or above it. */
+        int below[64], count = 0;
+        long handle;
+        while ((handle = vx_dup(fd, -1)) >= 0 && handle < lowest && count < 64) {
+            below[count++] = (int)handle;
         }
-        return (int)__vx_errno_result(vx_dup(fd, lowest));
+        while (count) {
+            vx_close(below[--count]);
+        }
+        if (handle >= 0 && handle < lowest) { /* (More than 64 below it.) */
+            vx_close((int)handle);
+            handle = -VX_EMFILE;
+        }
+        return (int)__vx_errno_result(handle);
     }
     case F_GETFD:
     case F_SETFD:

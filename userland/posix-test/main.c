@@ -534,6 +534,17 @@ static void test_tls(void) {
     CHECK(tls_value == 1 && (!main_copy || (*main_copy == 1 && library_tls() == main_copy)));
     pthread_barrier_destroy(&barrier);
 
+    /* F_DUPFD: the lowest free handle from 10 up, past any in use there
+     * (a socket's too). */
+    int socket_fd = socket(AF_INET, SOCK_DGRAM, 0);
+    int dup_low = fcntl(1, F_DUPFD, socket_fd);
+    CHECK(socket_fd >= 0 && dup_low > socket_fd);
+    int dup_high = fcntl(1, F_DUPFD_CLOEXEC, 10);
+    CHECK(dup_high >= 10 && write(dup_high, "", 0) == 0);
+    close(dup_low);
+    close(dup_high);
+    close(socket_fd);
+
     /* Files that are buffers. */
     char *text = NULL;
     size_t size = 0;
