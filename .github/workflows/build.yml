@@ -68,9 +68,10 @@ jobs:
       - name: Mark the restored OpenGL build as up to date
         if: steps.mesa-cache.outputs.cache-hit == 'true'
         run: |
-          # Old, empty stand-ins for the source tarballs, which Make would
-          # otherwise download just to compare their dates with the build's.
-          mkdir -p third_party
+          # The source tarballs, dated older than the build so it isn't made
+          # again (the SDK's libc++ and the native Mesa are built from them).
+          make "third_party/llvm-project-${{ steps.mesa-versions.outputs.llvm }}.src.tar.xz" \
+            "third_party/mesa-${{ steps.mesa-versions.outputs.mesa }}.tar.gz"
           touch -d '2000-01-01' \
             "third_party/llvm-project-${{ steps.mesa-versions.outputs.llvm }}.src.tar.xz" \
             "third_party/mesa-${{ steps.mesa-versions.outputs.mesa }}.tar.gz"
