@@ -1,9 +1,11 @@
 #!/bin/sh
 # Builds OpenGL for native Vexa programs, from source: Mesa's OSMesa
 # (OpenGL drawn into memory) with softpipe (gallium's software renderer, no
-# LLVM), built against libvexa with the SDK's vexa-cc and vexa-c++, as one
-# shared library, libOSMesa.so, with the C++ runtime linked in. SDL's Vexa
-# driver loads it for OpenGL windows; programs can also link to it.
+# LLVM) and virgl (the host's GPU, through the virtio GPU, when there's one),
+# built against libvexa with the SDK's vexa-cc and vexa-c++, as one shared
+# library, libOSMesa.so, with the C++ runtime and a small libdrm
+# (third_party/libdrm-vexa) linked in. SDL's Vexa driver loads it for
+# OpenGL windows; programs can also link to it.
 #
 # Usage: tools/build-mesa-vexa.sh <mesa tarball> <SDK dir> <work dir> <out dir>
 # (<out dir> gets lib/libOSMesa.so, include/GL and include/KHR, and Mesa's
@@ -20,12 +22,32 @@ rm -rf "${work:?}/$name"
 tar -xzf "$mesa_tarball" -C "$work"
 cd "$work/$name"
 patch -p1 -s < "$here/../third_party/mesa-vexa.patch"
+
+# The small libdrm, for virgl's winsys (with a pkg-config file Mesa finds).
+drm="$work/libdrm"
+rm -rf "$drm"
+mkdir -p "$drm/pkgconfig"
+"$sdk/bin/vexa-cc" -O2 -fvisibility=hidden -I"$work/$name/include" \
+    -c "$here/../third_party/libdrm-vexa/xf86drm.c" -o "$drm/xf86drm.o"
+ar rcs "$drm/libdrm.a" "$drm/xf86drm.o"
+cat > "$drm/pkgconfig/libdrm.pc" <<PC
+Name: libdrm
+Description: A small libdrm for Vexa
+Version: 2.4.122
+Cflags: -I$here/../third_party/libdrm-vexa
+Libs: -L$drm -ldrm
+PC
+
 cat > cross.ini <<INI
 [binaries]
 c = '$sdk/bin/vexa-cc'
 cpp = '$sdk/bin/vexa-c++'
 ar = 'ar'
 strip = 'strip'
+pkg-config = 'pkg-config'
+
+[properties]
+pkg_config_libdir = ['$drm/pkgconfig']
 
 [host_machine]
 system = 'vexa'
@@ -33,9 +55,8 @@ cpu_family = 'x86_64'
 cpu = 'x86_64'
 endian = 'little'
 INI
-PKG_CONFIG_LIBDIR=/nonexistent PKG_CONFIG_PATH= \
-    meson setup _build --cross-file cross.ini --prefix=/ --libdir=lib \
-    --buildtype=release -Dplatforms= -Dglx=disabled -Dgallium-drivers=swrast \
+PKG_CONFIG_PATH= meson setup _build --cross-file cross.ini --prefix=/ --libdir=lib \
+    --buildtype=release -Dplatforms= -Dglx=disabled -Dgallium-drivers=swrast,virgl \
     -Dvulkan-drivers= -Degl=disabled -Dgbm=disabled -Dgles1=disabled -Dgles2=disabled \
     -Dopengl=true -Dosmesa=true -Dllvm=disabled -Dshared-glapi=disabled \
     -Dxmlconfig=disabled -Dzstd=disabled -Dzlib=disabled -Dvalgrind=disabled -Dlibunwind=disabled \

@@ -275,8 +275,14 @@ int ioctl(int fd, unsigned long request, ...) {
         conf->ifc_len = used * (int)sizeof(struct ifreq);
         return 0;
     }
-    errno = ENOTTY;
-    return -1;
+    /* Anything else goes to the device as it is (Vexa's vx_control): the
+     * argument is the request's size (Linux's encoding: bits 16-29). */
+    long result = vx_control(fd, (unsigned)request, argument, (request >> 16) & 0x3fff);
+    if (result == -VX_ENOTTY) {
+        errno = ENOTTY;
+        return -1;
+    }
+    return (int)__vx_errno_result(result);
 }
 
 unsigned int if_nametoindex(const char *name) {

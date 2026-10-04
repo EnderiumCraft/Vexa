@@ -27,6 +27,7 @@
 #include <vexa/string.h>
 #include <vexa/uaccess.h>
 #include <vexa/vfs.h>
+#include <vexa/virtio_gpu.h>
 #include "linux.h"
 
 /* Linux's ioctl request numbers: direction, size, type and number. */
@@ -976,6 +977,10 @@ bool linux_device_ioctl(struct file *file, uint32_t request, uint64_t arg, int64
     }
     if (file->vnode->ops == &drm_ops) {
         *result = drm_ioctl(file, request, arg);
+        return true;
+    }
+    if (virtio_gpu_file(file)) {
+        *result = virtio_gpu_ioctl(file, request, arg);
         return true;
     }
     return linux_sound_ioctl(file, request, arg, result);

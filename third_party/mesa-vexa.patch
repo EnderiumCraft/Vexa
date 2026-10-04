@@ -1,6 +1,8 @@
 Mesa 24.0.5 for native Vexa programs (tools/build-mesa-vexa.sh): Vexa as an
 OS (DETECT_OS_VEXA, a Unix: sysconf for memory and processors), no siginfo
-signal handler for the HUD, and libOSMesa.so as its soname.
+signal handler for the HUD, libOSMesa.so as its soname, and OSMesa on the
+virtio GPU (virgl, with third_party/libdrm-vexa) when there is one; no
+regex, vtest or build IDs.
 
 --- a/src/util/detect_os.h
 +++ b/src/util/detect_os.h
@@ -78,15 +80,161 @@ signal handler for the HUD, and libOSMesa.so as its soname.
        action.sa_flags = SA_SIGINFO;
 --- a/src/gallium/targets/osmesa/meson.build
 +++ b/src/gallium/targets/osmesa/meson.build
-@@ -32,6 +32,11 @@
+@@ -32,6 +32,14 @@
    osmesa_link_deps += files('osmesa.sym')
  endif
  
 +if host_machine.system() == 'vexa'
 +  # (Vexa: one name, libOSMesa.so, whether a program links it or SDL loads it.)
 +  osmesa_link_args += ['-Wl,-soname,libOSMesa.so']
++  if with_gallium_virgl
++    osmesa_link_with += libgalliumvl # (virgl's video parts want it.)
++  endif
 +endif
 +
  osmesa_def = custom_target(
    'osmesa.def',
    input: 'osmesa.def.in',
+@@ -55,7 +63,8 @@
+     libmesa, libgallium, libws_null, osmesa_link_with,
+   ],
+   dependencies : [
+-    dep_ws2_32, dep_selinux, dep_thread, dep_clock, dep_unwind, driver_swrast
++    dep_ws2_32, dep_selinux, dep_thread, dep_clock, dep_unwind, driver_swrast,
++    driver_virgl, dep_libdrm,
+   ],
+   name_prefix : host_machine.system() == 'windows' ? '' : [],  # otherwise mingw will create libosmesa.dll
+   soversion : host_machine.system() == 'windows' ? '' : '8',
+--- a/src/gallium/targets/osmesa/target.c
++++ b/src/gallium/targets/osmesa/target.c
+@@ -21,11 +21,42 @@
+  */
+ 
+ 
++#ifdef GALLIUM_VIRGL
++/* (Vexa: virgl on the virtio GPU below; not sw_screen_create's "virpipe",
++ * which needs a vtest server.) */
++#define VEXA_VIRGL 1
++#undef GALLIUM_VIRGL
++#endif
++
+ #include "target-helpers/inline_sw_helper.h"
+ #include "target-helpers/inline_debug_helper.h"
+ 
+ #include "sw/null/null_sw_winsys.h"
+ 
++#ifdef VEXA_VIRGL
++#include <fcntl.h>
++#include <stdlib.h>
++#include <string.h>
++#include <unistd.h>
++#include "virgl/drm/virgl_drm_public.h"
++
++/* Vexa: the host's GPU through the virtio GPU (virgl), when there's one,
++ * unless VEXA_GL=softpipe asks for software. */
++static struct pipe_screen *
++virgl_screen_create(void)
++{
++   const char *choice = getenv("VEXA_GL");
++   if (choice && strcmp(choice, "softpipe") == 0)
++      return NULL;
++   int fd = open("/dev/dri/renderD128", O_RDWR | O_CLOEXEC);
++   if (fd < 0)
++      return NULL;
++   struct pipe_screen *screen = virgl_drm_screen_create(fd, NULL);
++   close(fd); /* (The screen keeps its own copy.) */
++   return screen;
++}
++#endif
++
+ 
+ struct pipe_screen *
+ osmesa_create_screen(void);
+@@ -37,6 +68,12 @@
+    struct sw_winsys *winsys;
+    struct pipe_screen *screen;
+ 
++#ifdef VEXA_VIRGL
++   screen = virgl_screen_create();
++   if (screen)
++      return debug_screen_wrap(screen);
++#endif
++
+    /* We use a null software winsys since we always just render to ordinary
+     * driver resources.
+     */
+--- a/meson.build
++++ b/meson.build
+@@ -1603,7 +1603,7 @@
+ # it's not linux and wont
+ dep_m = cc.find_library('m', required : false)
+ 
+-if host_machine.system() == 'windows'
++if host_machine.system() == 'windows' or host_machine.system() == 'vexa'
+   dep_regex = meson.get_compiler('c').find_library('regex', required : false)
+   if not dep_regex.found()
+     dep_regex = declare_dependency(compile_args : ['-DNO_REGEX'])
+@@ -1672,7 +1672,8 @@
+ endforeach
+ 
+ with_gallium_drisw_kms = false
+-if system_has_kms_drm
++if system_has_kms_drm or (host_machine.system() == 'vexa' and with_gallium_virgl)
++  # (Vexa: a small libdrm of its own, for virgl.)
+   dep_libdrm = dependency(
+     'libdrm', version : '>=' + _drm_ver,
+     # GNU/Hurd includes egl_dri2, without drm.
+--- a/src/meson.build
++++ b/src/meson.build
+@@ -93,6 +93,8 @@
+ endif
+ if system_has_kms_drm
+   subdir('virtio')
++else
++  inc_virtio = include_directories('virtio') # (Vexa: virgl's winsys needs only its headers.)
+ endif
+ if with_gallium_freedreno or with_freedreno_vk or with_tools.contains('freedreno')
+   subdir('freedreno')
+--- a/src/gallium/meson.build
++++ b/src/gallium/meson.build
+@@ -168,7 +168,11 @@
+ if with_gallium_virgl
+   subdir('winsys/virgl/common')
+   subdir('winsys/virgl/drm')
+-  subdir('winsys/virgl/vtest')
++  if host_machine.system() != 'vexa' # (No vtest server on Vexa.)
++    subdir('winsys/virgl/vtest')
++  else
++    libvirglvtest = []
++  endif
+   subdir('drivers/virgl')
+ else
+   driver_virgl = declare_dependency()
+--- a/src/gallium/drivers/virgl/virgl_screen.c
++++ b/src/gallium/drivers/virgl/virgl_screen.c
+@@ -29,6 +29,7 @@
+ #include "util/u_inlines.h"
+ #include "util/os_time.h"
+ #include "util/xmlconfig.h"
++#include "util/detect_os.h"
+ #include "pipe/p_defines.h"
+ #include "pipe/p_screen.h"
+ #include "nir/nir_to_tgsi.h"
+@@ -1054,6 +1055,9 @@
+ 
+ static void virgl_disk_cache_create(struct virgl_screen *screen)
+ {
++#if DETECT_OS_VEXA
++   (void)screen; /* (No shader cache on Vexa: no build IDs to key it on.) */
++#else
+    const struct build_id_note *note =
+       build_id_find_nhdr_for_addr(virgl_disk_cache_create);
+    assert(note);
+@@ -1078,6 +1082,7 @@
+    _mesa_sha1_format(timestamp, sha1);
+ 
+    screen->disk_cache = disk_cache_create("virgl", timestamp, 0);
++#endif
+ }
+ 
+ static bool

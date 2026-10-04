@@ -588,6 +588,21 @@ SDK_APP_COMMANDS = [
     ("@type exit", None, 5),
 ]
 
+# With --virgl: the virtio GPU with 3D (QEMU's virgl, on this machine's
+# OpenGL), and OpenGL on it in a native program (Mesa's virgl driver).
+VIRGL_COMMANDS = [
+    ("#virgl",),
+    ("ls /dev/dri", "renderD128", 10),
+    ("desktop", 'desktop: window 1 "Terminal"', 30),
+    ("@type sdl-gl-test > /dev/console 2> /dev/console", "sdl-gl-test: virgl", 120),
+    ("@mouse_move 0 0", "sdl-gl-test: passed", 120),
+    ("@type VEXA_GL=softpipe sdl-gl-test > /dev/console 2> /dev/console",
+     "sdl-gl-test: softpipe", 120),
+    ("@mouse_move 0 0", "sdl-gl-test: passed", 120),
+    ("@sendkey ctrl-alt-q", "desktop: asking before leaving", 20),
+    ("@sendkey ret", "desktop: back to the console", 20),
+]
+
 DISK_COMMANDS = [
     ("#disks",),
     ("sys disks", "nvme0n1", 10),
@@ -873,7 +888,7 @@ def main():
     parser.add_argument("--cpu", help="QEMU CPU model, e.g. max (adds AVX, SMEP, SMAP)")
     parser.add_argument("--disks", help="directory with the test disk images")
     parser.add_argument("--iso", default="build/vexa.iso", help="ISO image to boot")
-    parser.add_argument("--only", help="run only these sections (comma-separated: "
+    parser.add_argument("--only", help="run only these sections (comma-separated: virgl, "
                         "shell, network, usb, desktop, linux, x, linux-net, disks)")
     parser.add_argument("--no-cd", action="store_true",
                         help="boot from the first disk (an installed Vexa), without the CD")
@@ -897,6 +912,9 @@ def main():
                         help="with --install or --installed: how that disk is attached")
     parser.add_argument("--boot", type=int, default=1,
                         help="with --installed: which time it is that the disk starts")
+    parser.add_argument("--virgl", action="store_true",
+                        help="add QEMU's virtio GPU with 3D (virgl, on this machine's OpenGL; "
+                             "under Xvfb if there's no display) and run the virgl checks")
     parser.add_argument("--safe-mode", action="store_true",
                         help="expect a safe mode boot (use with the ISO from "
                              "`make build/vexa-safe-mode-test.iso`)")
@@ -945,6 +963,20 @@ def main():
             disks.append((copy, offset))
         commands[-1:-1] = DISK_COMMANDS
         insert_before_leaving_desktop(commands, SDK_APP_COMMANDS)
+    xvfb = None
+    if args.virgl:
+        commands[-1:-1] = VIRGL_COMMANDS
+        # virglrenderer needs a GL context from QEMU's display: GTK's, on an
+        # X server (Xvfb when there's none), with the Bochs VGA still the screen.
+        at = command.index("-display")
+        command[at + 1] = "gtk,gl=on"
+        command += ["-device", "virtio-gpu-gl-pci"]
+        if not os.environ.get("DISPLAY"):
+            display = ":%d" % (90 + os.getpid() % 100)
+            xvfb = subprocess.Popen(["Xvfb", display, "-screen", "0", "1280x1024x24", "-nolisten",
+                                     "tcp"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            os.environ["DISPLAY"] = display
+            time.sleep(2)
     # Sections: ("#name",) markers; --only keeps some of them.
     only = set(args.only.split(",")) if args.only else None
     kept, section = [], "shell"
@@ -1078,6 +1110,8 @@ def main():
             qemu.wait(timeout=10)
         except subprocess.TimeoutExpired:
             qemu.kill()
+        if xvfb:
+            xvfb.terminate()
 
     for image, offset in disks:
         clean, report = check_filesystem(image, offset, tmp)

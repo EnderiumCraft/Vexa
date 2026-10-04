@@ -1,5 +1,5 @@
 /* sdl-gl-test: OpenGL in a native Vexa program, through SDL (Vexa's driver
- * loads Mesa's libOSMesa.so, softpipe). A window with an OpenGL context: a
+ * loads Mesa's libOSMesa.so: virgl on the virtio GPU, or softpipe). A window with an OpenGL context: a
  * red clear and a green triangle (read back with glReadPixels), then a
  * spinning, shaded triangle for a moment (or until the window is closed,
  * with --spin). Prints "sdl-gl-test: passed" and the frames per second. */
@@ -57,7 +57,8 @@ int main(int argc, char **argv) {
     const char *renderer = (const char *)glGetString(GL_RENDERER);
     const char *version = (const char *)glGetString(GL_VERSION);
     printf("sdl-gl-test: %s, OpenGL %s\n", renderer ? renderer : "?", version ? version : "?");
-    check(renderer && strstr(renderer, "softpipe"), "the renderer is Mesa's softpipe");
+    check(renderer && (strstr(renderer, "softpipe") || strstr(renderer, "virgl")),
+          "the renderer is Mesa's softpipe, or virgl (the host's GPU)");
 
     /* A red clear, a green triangle over the middle (not the corner). */
     glViewport(0, 0, WIDTH, HEIGHT);

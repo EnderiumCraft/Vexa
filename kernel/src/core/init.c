@@ -19,6 +19,7 @@
 #include <vexa/string.h>
 #include <vexa/usb.h>
 #include <vexa/vfs.h>
+#include <vexa/virtio_gpu.h>
 
 /* The first kernel thread: sets up file systems and devices, which can mean
  * waiting for a disk and so can't happen on a CPU's idle thread, then starts
@@ -127,6 +128,7 @@ void init_thread(void *unused) {
     device_add_processors();
     storage_init();
     display_init();
+    virtio_gpu_init(); /* 3D drawing on the host's GPU (QEMU's virtio-gpu-gl). */
 #ifdef LINUX_COMPAT
     linux_devices_init(); /* /dev/dri/card0 (and evdev) for Linux programs. */
 #endif

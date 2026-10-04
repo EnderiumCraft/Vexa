@@ -217,7 +217,7 @@ USER_OBJS := $(LIBVEXA_OBJS) \
 
 .PHONY: all openssl curl mesa alsa linux-tarballs kernel programs iso run run-disk run-nographic test test-install test-disks clean distclean \
 	busybox busybox-source doom doom-source bash coreutils python x11 test-native test-quick native-iso \
-	test-bios test-uefi test-safe test-native-boot sdk sdk-test
+	test-bios test-uefi test-safe test-native-boot test-virgl run-virgl sdk sdk-test
 
 all: iso
 kernel: $(KERNEL)
@@ -421,7 +421,8 @@ $(SDK_DIR)/.cxx: $(SDK_DIR)/.done $(LIBCXX_VEXA)
 MESA_VEXA_DIR := $(BUILD)/mesa-vexa
 MESA_VEXA := $(MESA_VEXA_DIR)/lib/libOSMesa.so
 MESA_VEXA_LIB ?= $(MESA_VEXA)
-$(MESA_VEXA): $(MESA_TARBALL) tools/build-mesa-vexa.sh third_party/mesa-vexa.patch $(SDK_DIR)/.cxx
+$(MESA_VEXA): $(MESA_TARBALL) tools/build-mesa-vexa.sh third_party/mesa-vexa.patch \
+		$(wildcard third_party/libdrm-vexa/*) $(SDK_DIR)/.cxx
 	tools/build-mesa-vexa.sh $(MESA_TARBALL) $(SDK_DIR) $(BUILD)/mesa-vexa-work $(MESA_VEXA_DIR)
 
 $(SDK_DIR)/.complete: $(SDK_DIR)/.cxx $(SDL2) $(SDL2_MIXER) $(SDL2_NET) $(MBEDTLS_LIBS) $(MESA_VEXA)
@@ -957,6 +958,12 @@ run-disk: $(ISO) $(MY_DISK)
 	$(QEMU) -M q35 -m 512M -cdrom $(ISO) -boot d -serial stdio -no-reboot $(QEMU_NET) $(QEMU_AUDIO) \
 		-drive file=$(MY_DISK),if=virtio,format=raw $(QEMU_USB)
 
+# Like run, with QEMU's virtio GPU with 3D (virgl): native OpenGL programs
+# draw on this machine's GPU. (QEMU needs its GTK display with OpenGL.)
+run-virgl: $(ISO)
+	$(QEMU) -M q35 -m 1G -cdrom $(ISO) -serial stdio -no-reboot $(QEMU_NET) $(QEMU_AUDIO) \
+		$(QEMU_USB) -device virtio-gpu-gl-pci -display gtk,gl=on
+
 run-nographic: $(ISO)
 	$(QEMU) -M q35 -m 512M -cdrom $(ISO) -nographic -no-reboot $(QEMU_NET) $(QEMU_AUDIO)
 
@@ -966,6 +973,11 @@ TEST_JOBS ?= 4
 test: $(ISO) $(SAFE_ISO) $(TEST_DISKS) native-iso
 	$(MAKE) --no-print-directory --output-sync=target -j$(TEST_JOBS) \
 		test-bios test-uefi test-safe test-native-boot test-install
+
+# OpenGL on the virtio GPU (under Xvfb when there's no display). Not part of
+# `make test`: it needs QEMU with virgl and OpenGL on this machine.
+test-virgl: $(ISO)
+	tools/qemu-smoke-test.py --only virgl --virgl
 
 test-bios:
 	tools/qemu-smoke-test.py --disks $(BUILD)/disks
