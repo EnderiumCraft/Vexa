@@ -437,9 +437,12 @@ struct vx_display_info {
  * Reading and writing them reads and writes the disk (or partition) itself.
  * A whole disk also answers VX_BLOCK_RESCAN: its partition table is read
  * again (after it was rewritten) and what's on it mounted; -VX_EBUSY while
- * any of it is mounted. */
+ * any of it is mounted. VX_BLOCK_EJECT takes a disk's (or partition's) file
+ * systems out of /mnt, so it can be unplugged or written over; -VX_EBUSY if
+ * one of them is mounted somewhere else (the system's own, /home...). */
 #define VX_BLOCK_INFO 0x4201   /* struct vx_block_info (out) */
 #define VX_BLOCK_RESCAN 0x4202 /* no argument */
+#define VX_BLOCK_EJECT 0x4203  /* no argument */
 
 struct vx_block_info {
     unsigned long long size;  /* Bytes. */

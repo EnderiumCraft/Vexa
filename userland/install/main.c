@@ -241,8 +241,10 @@ int main(int argc, char **argv) {
     if (info.size < 512ULL * 1024 * 1024) {
         fail("%s is too small (Vexa needs 512 MiB)", disk);
     }
-    if (in_use(disk)) {
-        fail("%s is in use (something on it is mounted)", disk);
+    /* What's mounted from it in /mnt (an old installation, a stick's FAT)
+     * goes; the system's own file systems can't. */
+    if (in_use(disk) && vx_control(fd, VX_BLOCK_EJECT, NULL, 0) < 0) {
+        fail("%s is in use (Vexa itself, or /home, is on it)", disk);
     }
     const char *media = boot_media();
     if (!media) {

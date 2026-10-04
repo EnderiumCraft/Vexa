@@ -151,6 +151,7 @@ Vexa's own programs are in `/bin` (`ls /bin` lists them).
 | `uptime` | time since boot, CPUs and memory |
 | `hello` | says hi, with Vexa's version |
 | `hostname [name]` | the computer's name; sets it with a name |
+| `eject usb0` | takes a disk's (or USB stick's) file systems out of `/mnt`, so it can be unplugged or installed on |
 | `df` | the mounted file systems, and how full they are |
 | `devices [-l] [kind]` | the devices Vexa found, as a tree, with their drivers; `-l` adds ids, places and details; a kind or bus shows only those: `devices usb`, `devices disk`, `devices keyboard` |
 | `shutdown`, `shutdown -r` | turns the machine off (ACPI), or restarts it |
@@ -746,7 +747,7 @@ link-local addresses are reached through the first one.
 
 ## Disks and CDs
 
-Vexa mounts every ext2 file system and CD it finds at `/mnt/<disk>`: `/mnt/vda1` (a
+Vexa mounts every ext2, FAT and exFAT file system and CD it finds at `/mnt/<disk>`: `/mnt/vda1` (a
 virtio disk's first partition), `/mnt/sda1` (SATA), `/mnt/nvme0n1` (NVMe), `/mnt/cd0`
 (a CD). The boot CD is also `/cdrom`. `sys disks` lists the disks and partitions, and
 `sys mount` what's mounted. Files shows them in its sidebar, under Disks.
@@ -762,6 +763,18 @@ turning the machine off in the middle of writing can't leave the disk inconsiste
 next mount (Vexa's, or Linux's) finishes or forgets the last change. ext2 has no journal,
 and may need `e2fsck` (on Linux) after that. ext4 disks are mounted read-only: their
 files can be read and copied off, but Vexa doesn't write ext4 yet.
+
+USB sticks, memory cards and other systems' disks are mostly **FAT** (FAT12, FAT16,
+FAT32) or **exFAT**: Vexa reads and writes both, with long file names (any language's
+letters), so files go back and forth with Windows, macOS and Linux. Names are matched
+without regard to capitals there (`hello.txt` and `HELLO.TXT` are one file), there are
+no symbolic links or owners, and the read-only attribute is a file's write permission.
+FAT32 files stop at 4 GiB (exFAT's don't). The EFI system partition of an installed
+Vexa (or another system) is FAT32 too, and shows up like any other.
+
+Writes go straight to the disk, so a USB stick can be pulled out whenever nothing is
+being written; `eject usb0` (or `eject sda1`) takes its file systems out of `/mnt`
+first, which also lets the installer erase a disk that has something mounted.
 
 A disk to try, on Linux:
 

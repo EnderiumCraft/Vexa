@@ -30,6 +30,7 @@ You need a Linux machine (or WSL) with:
 | git, make, curl | `git`, `make`, `curl` |
 | Python 3 and UEFI firmware (for the tests) | `python3`, `ovmf` |
 | mke2fs, e2fsck (test disks) | `e2fsprogs` |
+| mkfs.vfat, fsck.vfat, mcopy, mkfs.exfat, fsck.exfat (the FAT test disks) | `dosfstools`, `mtools`, `exfatprogs` |
 | musl's compiler and Linux headers (Linux programs) | `musl-tools`, `linux-libc-dev` |
 | Meson, Ninja, pkg-config, bison, gperf (X and GTK) | `meson`, `ninja-build`, `pkg-config`, `bison`, `gperf` |
 | GLib's code generators (GTK) | `libglib2.0-dev-bin`, `gtk-update-icon-cache` |

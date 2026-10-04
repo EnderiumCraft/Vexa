@@ -11,8 +11,9 @@ void nvme_init(void);                           /* dev/nvme.c */
 void ata_init(void);                            /* dev/ata.c */
 bool ext2_probe(struct block_device *device);   /* fs/ext2.c */
 bool iso9660_probe(struct block_device *device); /* fs/iso9660.c */
+bool fat_probe(struct block_device *device);     /* fs/fat.c */
 
-/* Mounts an ext2 file system or a CD at /mnt/<device>, e.g. /mnt/vda1 or
+/* Mounts an ext2, FAT or exFAT file system or a CD at /mnt/<device>, e.g. /mnt/vda1 or
  * /mnt/cd0. The first CD with Vexa on it (the boot CD, normally) is also
  * /cdrom: /linux/usr and the like point there, and Doom's game files. */
 bool storage_root_on_disk;
@@ -31,7 +32,8 @@ static void mount_one(struct block_device *device) {
     if (already_mounted(device)) {
         return; /* (The root file system, say.) */
     }
-    const char *fs = ext2_probe(device) ? "ext2" : iso9660_probe(device) ? "iso9660" : NULL;
+    const char *fs = ext2_probe(device) ? "ext2" : iso9660_probe(device) ? "iso9660"
+                     : fat_probe(device) ? "fat" : NULL;
     if (!fs) {
         return;
     }

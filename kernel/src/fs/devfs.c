@@ -151,6 +151,29 @@ static int block_node_control(struct file *file, uint32_t request, void *arg, si
         }
         return 0;
     }
+    case VX_BLOCK_EJECT: {
+        /* Only what's in /mnt: not the system's own file systems. */
+        int error = 0;
+        vfs_lock();
+        for (struct mount *m = vfs_mounts(); m; m = m->next) {
+            for (struct block_device *d = block_first(); d; d = d->next) {
+                if ((d == device || d->parent == device) && !strcmp(m->source, d->name) &&
+                    strncmp(m->path, "/mnt/", 5) != 0) {
+                    error = -VX_EBUSY;
+                }
+            }
+        }
+        vfs_unlock();
+        for (struct block_device *d = block_first(); d && !error; d = d->next) {
+            if (d == device || d->parent == device) {
+                vfs_detach(d->name);
+            }
+        }
+        if (!error) {
+            kprintf("[storage] %s ejected\n", device->name);
+        }
+        return error;
+    }
     case VX_BLOCK_RESCAN: {
         if (device->parent) {
             return -VX_EINVAL;

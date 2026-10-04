@@ -26,7 +26,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential xorriso qemu-system-x86 ovmf python3 e2fsprogs \
+            build-essential xorriso qemu-system-x86 ovmf python3 e2fsprogs dosfstools exfatprogs mtools \
             musl-tools linux-libc-dev ninja-build pkg-config bison gperf \
             libglib2.0-dev-bin gtk-update-icon-cache python3-packaging \
             cmake flex python3-mako clang libpng-dev zlib1g-dev

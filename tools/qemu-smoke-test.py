@@ -564,6 +564,7 @@ USB_COMMANDS = [
     ("cat /mnt/usb0/hello.txt", "Hello from a USB stick!", 10),
     ("echo written over usb > /mnt/usb0/note.txt", None, 10),
     ("devices -l disk", "usb0 at /mnt/usb0", 10),
+    ("eject usb0", "usb0 can be unplugged now", 10),
     ("@device_del stick", "usb0 is gone", 20),
     ("ls /mnt/usb0", "vexa:/> ", 10),
     ("df", "cd0", 10),
@@ -632,6 +633,27 @@ DISK_COMMANDS = [
     ("cat /mnt/vdb/dir/many/file-with-a-longer-name-399.txt", "\n399\r\n", 10),
     ("busybox sha1sum /mnt/vdb/sparse.bin", "66ae21c2cd4afeb16d02809402927d82edd153b9", 30),
     ("echo no > /mnt/vdb/new.txt", "read-only", 10),
+    # FAT32 as mkfs.vfat and mtools make it (long names, a directory bigger
+    # than a cluster), read and written; exFAT (from mkfs.exfat) written and
+    # read back. fsck checks both afterwards.
+    ("sys mount", "/mnt/vdd", 10),
+    ("cat /mnt/vdc/hello.txt", "Hello from a FAT32 disk!", 10),
+    ("cat '/mnt/vdc/A long file name with spaces.txt'", "A long name, with spaces", 10),
+    ("ls /mnt/vdc/documents", "Ünïcödé name.txt", 10),
+    ("cat /mnt/vdc/many/file-299.txt", "\n299\r\n", 10),
+    ("busybox sha1sum /mnt/vdc/big.bin", "32dcd91b409b06fe7f0f0db6d04a9e6756b5b339", 30),
+    ("mkdir '/mnt/vdc/Made by Vexa'", None, 10),
+    ("echo written on fat > '/mnt/vdc/Made by Vexa/A note from Vexa.txt'", None, 10),
+    ("mv '/mnt/vdc/Made by Vexa/A note from Vexa.txt' /mnt/vdc/moved.txt", None, 10),
+    ("cat /mnt/vdc/MOVED.TXT", "written on fat", 10, 2),
+    ("rm -r '/mnt/vdc/Made by Vexa'", None, 10),
+    ("mkdir '/mnt/vdd/A folder on exFAT'", None, 10),
+    ("cp /mnt/vdc/big.bin '/mnt/vdd/A folder on exFAT/copy.bin'", None, 30),
+    ("busybox sha1sum '/mnt/vdd/A folder on exFAT/copy.bin'", "32dcd91b409b06fe7f0f0db6d04a9e6756b5b339", 30, 2),
+    ("echo written on exfat > /mnt/vdd/note.txt", None, 10),
+    ("mv /mnt/vdd/note.txt '/mnt/vdd/A folder on exFAT/Note.txt'", None, 10),
+    ("cat '/mnt/vdd/a folder on exfat/note.txt'", "written on exfat", 10, 2),
+    ("df", "exfat", 10),
     ("#shell",),
 ]
 
@@ -643,11 +665,19 @@ TEST_DISKS = [
     ("nvme-whole.img", ["-drive", "file={},if=none,id=nvme0,format=raw",
                         "-device", "nvme,serial=vexa0,drive=nvme0"], 0),
     ("ext4.img", ["-drive", "file={},if=virtio,format=raw"], 0),
+    ("fat32.img", ["-drive", "file={},if=virtio,format=raw"], 0),
+    ("exfat.img", ["-drive", "file={},if=virtio,format=raw"], 0),
 ]
 
 
 def check_filesystem(image, offset, tmp):
-    """Runs e2fsck (read-only) on the ext2 file system inside a disk image."""
+    """Checks the file system inside a disk image (read-only): e2fsck, or
+    fsck.vfat and fsck.exfat for the FAT ones."""
+    name = os.path.basename(image)
+    if name.startswith("fat") or name.startswith("exfat") or name == "usb-stick.img":
+        tool = ["fsck.exfat", "-n"] if name.startswith("exfat") else ["fsck.vfat", "-n"]
+        result = subprocess.run(tool + [image], capture_output=True, text=True)
+        return result.returncode == 0, result.stdout + result.stderr
     target = image
     if offset:
         target = os.path.join(tmp, os.path.basename(image) + ".fs")
@@ -1015,13 +1045,17 @@ def main():
 
     stick = os.path.join(tmp, "usb-stick.img")
     if args.usb:
-        # A USB stick for the hot-plug checks: an ext2 file system with a file.
-        files = os.path.join(tmp, "usb-stick")
-        os.mkdir(files)
-        with open(os.path.join(files, "hello.txt"), "w") as f:
+        # A USB stick for the hot-plug checks: FAT16 (as small sticks come),
+        # with a file.
+        hello = os.path.join(tmp, "hello.txt")
+        with open(hello, "w") as f:
             f.write("Hello from a USB stick!\n")
-        subprocess.run(["mke2fs", "-q", "-t", "ext2", "-d", files, stick, "16M"], check=True,
+        with open(stick, "wb") as f:
+            f.truncate(16 << 20)
+        subprocess.run(["mkfs.vfat", "-n", "STICK", stick], check=True,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(["mcopy", "-i", stick, hello, "::/hello.txt"], check=True,
+                       env=dict(os.environ, MTOOLS_SKIP_CHECK="1"))
         disks.append((stick, 0))
 
     def fill(text):
@@ -1164,7 +1198,7 @@ def main():
     for image, offset in disks:
         clean, report = check_filesystem(image, offset, tmp)
         if not clean:
-            failures.append(f"e2fsck found problems on {os.path.basename(image)}:\n{report}")
+            failures.append(f"fsck found problems on {os.path.basename(image)}:\n{report}")
     log = read_log(log_path)
     if "VEXA KERNEL PANIC" in log:
         failures.append("kernel panicked")

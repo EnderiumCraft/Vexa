@@ -209,7 +209,8 @@ endif
 # but ext3 (with a journal) on the NVMe one.
 DISK_CONTENT_FILES := $(shell find tests/disk-content -type f)
 TEST_DISKS := $(BUILD)/disks/virtio-gpt.img $(BUILD)/disks/sata-mbr.img \
-	$(BUILD)/disks/nvme-whole.img $(BUILD)/disks/ext4.img
+	$(BUILD)/disks/nvme-whole.img $(BUILD)/disks/ext4.img $(BUILD)/disks/fat32.img \
+	$(BUILD)/disks/exfat.img
 # A disk for `make run-disk`, created once and kept, so changes survive reboots.
 MY_DISK := $(BUILD)/my-disk.img
 USER_OBJS := $(LIBVEXA_OBJS) \
@@ -965,6 +966,12 @@ $(BUILD)/disks/nvme-whole.img: $(BUILD)/disk-content tools/make-disk.py
 $(BUILD)/disks/ext4.img: tools/make-ext4-disk.sh
 	@mkdir -p $(dir $@)
 	tools/make-ext4-disk.sh $@
+
+$(BUILD)/disks/fat32.img: tools/make-fat-disks.sh
+	@mkdir -p $(dir $@)
+	tools/make-fat-disks.sh $@ $(BUILD)/disks/exfat.img
+
+$(BUILD)/disks/exfat.img: $(BUILD)/disks/fat32.img
 
 test-disks: $(TEST_DISKS)
 
