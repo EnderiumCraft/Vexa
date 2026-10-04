@@ -20,6 +20,7 @@
 #include <string.h>
 #include <vexa/gui.h>
 #include <vexa/syscall.h>
+#include <vexa/users.h>
 
 #define COLUMNS 80 /* To start with; the window can be resized. */
 #define ROWS 24
@@ -775,11 +776,15 @@ static int start_shell(struct tab *t) {
         return terminal;
     }
     const char *argv[] = {program};
+    char home[300], user[64];
+    snprintf(home, sizeof(home), "HOME=%s", vx_home());
+    const char *name = getenv("USER");
+    snprintf(user, sizeof(user), "USER=%s", name ? name : "root");
     const char *envp[] = {"TERM=vt100", "COLORTERM=truecolor",
                           "PATH=/bin:/linux/bin:/linux/usr/bin:/linux/sbin:/linux/usr/sbin",
-                          "LANG=C.UTF-8", "HOME=/home"};
+                          "LANG=C.UTF-8", home, user};
     struct vx_spawn spawn = {
-        .argv = argv, .argc = 1, .envp = envp, .envc = 5,
+        .argv = argv, .argc = 1, .envp = envp, .envc = 6,
         .handles = {terminal, terminal, terminal}, .flags = VX_SPAWN_NEW_GROUP,
     };
     int process = vx_spawn(program, &spawn);

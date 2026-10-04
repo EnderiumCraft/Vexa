@@ -268,12 +268,12 @@ the text console.
 
 Its look is glossy, in the spirit of Aqua and Aero: the title bars and the panel are
 glass (what's behind them shows through, blurred and tinted with the accent color on
-the window you're using), a window's buttons are gel balls (close is red, maximize
-green, minimize yellow; grey on windows in the back, and they show their signs when
-the pointer is over them), and menus, buttons, switches and fields in Vexa's apps are
+the window you're using), a window's buttons are glossy rounded squares in the accent's colors (close a red,
+maximize the accent, minimize the accent's hue turned a little; grey on windows in
+the back), with their signs on the window you're using, and menus, buttons, switches and fields in Vexa's apps are
 gel-like too, down to Files' sidebar and list headings, the calculator's keys and the
 tabs of the terminal and the editor. GTK programs (X) get a theme to match, "Vexa":
-Adwaita with a glossy header bar, red, yellow and green title buttons, gel buttons,
+Adwaita with a glossy header bar, title buttons like the desktop's, gel buttons,
 switches, sliders, blue scroll bars and selections (and its dark version with the dark
 theme). It's light by default, with a blue accent; Settings → Appearance has a dark
 theme and other colours.

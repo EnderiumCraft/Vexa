@@ -44,7 +44,8 @@
 #define MAX_CHILDREN 32
 #define GRIP 6          /* How far past a resizable window's edge you can grab it. */
 #define EDGE 4          /* How far inside it. */
-#define BUTTON_WIDTH 20 /* The title bar's buttons. */
+#define BUTTON_WIDTH 26 /* The title bar's buttons: their slots. */
+#define BUTTON_SIZE 20  /* The buttons themselves, square. */
 #define CORNER 8        /* The title bar's round corners. */
 #define MIN_WIDTH 120
 #define MIN_HEIGHT 60
@@ -668,23 +669,71 @@ static uint32_t title_tint(bool on, int *alpha) {
     return vx_theme.dark ? 0x2a2838 : 0xe4e4ea;
 }
 
+/* Colors by hue (0 to 359), saturation and value (0 to 255). */
+static void to_hsv(uint32_t c, int *h, int *sat, int *v) {
+    int r = (int)(c >> 16 & 255), g = (int)(c >> 8 & 255), b = (int)(c & 255);
+    int max = r > g ? (r > b ? r : b) : (g > b ? g : b);
+    int min = r < g ? (r < b ? r : b) : (g < b ? g : b);
+    int d = max - min;
+    *v = max;
+    *sat = max ? d * 255 / max : 0;
+    if (!d) {
+        *h = 0;
+    } else if (max == r) {
+        *h = (60 * (g - b) / d + 360) % 360;
+    } else if (max == g) {
+        *h = 60 * (b - r) / d + 120;
+    } else {
+        *h = 60 * (r - g) / d + 240;
+    }
+}
+
+static uint32_t from_hsv(int h, int sat, int v) {
+    h = (h % 360 + 360) % 360;
+    int c = v * sat / 255, x = c * (60 - abs(h % 120 - 60)) / 60, m = v - c;
+    int r = 0, g = 0, b = 0;
+    switch (h / 60) {
+    case 0: r = c, g = x; break;
+    case 1: r = x, g = c; break;
+    case 2: g = c, b = x; break;
+    case 3: g = x, b = c; break;
+    case 4: r = x, b = c; break;
+    default: r = c, b = x; break;
+    }
+    return (uint32_t)(r + m) << 16 | (uint32_t)(g + m) << 8 | (uint32_t)(b + m);
+}
+
+/* `color` with its hue turned by `degrees`, or set to `hue`. */
+static uint32_t turn_hue(uint32_t color, int degrees) {
+    int h, sat, v;
+    to_hsv(color, &h, &sat, &v);
+    return from_hsv(h + degrees, sat, v);
+}
+
+static uint32_t with_hue(uint32_t color, int hue) {
+    int h, sat, v;
+    to_hsv(color, &h, &sat, &v);
+    return from_hsv(hue, sat < 150 ? 150 : sat, v < 200 ? 200 : v);
+}
+
 /* A glyph on a title bar button: a cross, a bar, a plus or two boxes. */
 static void draw_glyph(struct vx_surface *view, int button, bool maximized, int cx, int cy,
                        uint32_t color) {
     if (button == 0) {
         for (int t = 0; t < 2; t++) {
-            draw_line(view, cx - 3 + t, cy - 3, cx + 2 + t, cy + 2, color);
-            draw_line(view, cx + 2 + t, cy - 3, cx - 3 + t, cy + 2, color);
+            draw_line(view, cx - 4 + t, cy - 4, cx + 3 + t, cy + 3, color);
+            draw_line(view, cx + 3 + t, cy - 4, cx - 4 + t, cy + 3, color);
         }
     } else if (button == 1 && maximized) {
-        vx_draw_outline(view, cx - 3, cy - 2, 5, 5, color);
-        vx_fill(view, cx - 1, cy - 4, 5, 1, color);
-        vx_fill(view, cx + 3, cy - 4, 1, 5, color);
+        vx_draw_outline(view, cx - 4, cy - 2, 7, 7, color);
+        vx_draw_outline(view, cx - 3, cy - 1, 5, 5, color);
+        vx_fill(view, cx - 2, cy - 5, 7, 2, color);
+        vx_fill(view, cx + 3, cy - 5, 2, 7, color);
     } else if (button == 1) {
-        vx_fill(view, cx - 3, cy - 1, 7, 2, color);
-        vx_fill(view, cx - 1, cy - 3, 2, 7, color);
+        vx_fill(view, cx - 4, cy - 1, 9, 2, color);
+        vx_fill(view, cx - 1, cy - 4, 2, 9, color);
     } else {
-        vx_fill(view, cx - 3, cy - 1, 7, 2, color);
+        vx_fill(view, cx - 4, cy - 1, 9, 2, color);
     }
 }
 
@@ -713,6 +762,7 @@ static void draw_title_bar(struct vx_surface *view, struct window *w, int x, int
     int room = width - 16 - button_count * BUTTON_WIDTH;
     int tw = vx_text_width_font(bold, w->title);
     int tx = tw < room ? x + 8 + (room - tw) / 2 : x + 8;
+    int ty = top + (TITLE_HEIGHT - vx_font_height(bold)) / 2;
     char shown[80];
     if (tw <= room) {
         snprintf(shown, sizeof(shown), "%s", w->title);
@@ -722,24 +772,35 @@ static void draw_title_bar(struct vx_surface *view, struct window *w, int x, int
         snprintf(shown, sizeof(shown), "%.*s%s", (int)n, w->title, ellipsis);
     }
     if (on || !vx_theme.dark) {
-        vx_text(view, bold, tx, top + 4, shown, vx_mix(tint, halo, 200), VX_TRANSPARENT);
+        vx_text(view, bold, tx, ty + 1, shown, vx_mix(tint, halo, 200), VX_TRANSPARENT);
     }
-    vx_text(view, bold, tx, top + 3, shown, text, VX_TRANSPARENT);
-    /* The buttons, glossy balls: close (red) at the right end, then maximize
-     * (green) and minimize (yellow); grey on windows in the back. Their
-     * signs show while the pointer is over them. */
-    static const uint32_t colors[3] = {0xff5f57, 0x2ac845, 0xfebc2e};
+    vx_text(view, bold, tx, ty, shown, text, VX_TRANSPARENT);
+    /* The buttons, glossy rounded squares in the theme's colors: close (a
+     * red as bright and strong as the accent) at the right end, then
+     * maximize (the accent) and minimize (the accent's hue turned a little);
+     * grey on windows in the
+     * back. Their signs show on the window in front, brighter under the
+     * pointer. */
+    uint32_t colors[3] = {with_hue(COLOR_OUTLINE, 3), COLOR_OUTLINE,
+                          turn_hue(COLOR_OUTLINE, 40)};
     bool lit = w == hot_window && hot_button >= 0;
     int bx = x + width - BUTTON_WIDTH, cy = top + TITLE_HEIGHT / 2;
     for (int i = 0; i < 3; i++) {
         if (i == 1 && !w->resizable) {
             continue;
         }
-        uint32_t color = on || lit ? colors[i] : vx_theme.dark ? 0x6a6878 : 0xbcbcc4;
+        uint32_t color = on || lit ? colors[i] : vx_theme.dark ? 0x5e5c6c : 0xc4c4cc;
+        bool under = lit && hot_button == i;
+        if (under) {
+            color = vx_mix(color, 0xffffff, 40);
+        }
         int cx = bx + BUTTON_WIDTH / 2;
-        draw_orb(view, cx, cy, 7, color);
-        if (lit) {
-            draw_glyph(view, i, w->maximized, cx, cy, vx_mix(color, 0x000000, 175));
+        int left = cx - BUTTON_SIZE / 2, up = cy - BUTTON_SIZE / 2;
+        vx_fill_rounded(view, left, up + 1, BUTTON_SIZE, BUTTON_SIZE, 6, 0x000000, 40); /* Shadow. */
+        vx_draw_gel(view, left, up, BUTTON_SIZE, BUTTON_SIZE, 6, color);
+        if (on || lit) {
+            uint32_t sign = vx_mix(color, 0xffffff, lit ? 255 : 205);
+            draw_glyph(view, i, w->maximized, cx, cy, sign);
         }
         bx -= BUTTON_WIDTH;
     }

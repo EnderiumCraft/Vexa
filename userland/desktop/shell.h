@@ -17,7 +17,7 @@
 
 #define MAX_WINDOWS 32
 #define PANEL_HEIGHT 26
-#define TITLE_HEIGHT 22
+#define TITLE_HEIGHT 28
 #define BORDER 1
 #define SHADOW 12 /* How far a window's shadow reaches. */
 

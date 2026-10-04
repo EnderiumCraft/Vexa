@@ -49,7 +49,7 @@ runs X programs such as `xterm` in windows of their own on it. The kernel:
   each account with its own home folder and settings
 - boots straight to its desktop (from the CD: the Installer first), with a glossy look
   in the spirit of Aqua and Aero: glass title bars and panel that blur what's behind
-  them, red, yellow and green gel buttons, gel-like buttons, switches and menus in
+  them, glossy rounded window buttons in the accent's colors, gel-like buttons, switches and menus in
   Vexa's apps, light by default with a blue accent (a dark theme and other accents in
   Settings)
 - has a graphical desktop: a compositor that draws programs' windows (shared buffers)

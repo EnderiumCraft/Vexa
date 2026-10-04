@@ -1,4 +1,5 @@
 #include <vexa/abi.h>
+#include <vexa/cred.h>
 #include <vexa/fs.h>
 #include <vexa/kprintf.h>
 #include <vexa/mm.h>
@@ -95,6 +96,9 @@ static int master_open(struct file *file) {
     vnode_init(&pty->vnode, file->vnode->mount, VX_TYPE_CHAR_DEVICE, &slave_ops);
     pty->vnode.inode = 0x1000 + (uint64_t)number;
     pty->vnode.mode = 0620;
+    /* Whoever opened /dev/ptmx owns the terminal (as grantpt makes it). */
+    pty->vnode.uid = cred_current()->euid;
+    pty->vnode.gid = cred_current()->egid;
     pty->vnode.modified = time_now();
     file->private = pty;
     return 0;
