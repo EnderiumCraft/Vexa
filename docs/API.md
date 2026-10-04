@@ -41,6 +41,8 @@ failure. The `vx_*` functions under `<vexa/...>` are Vexa's own.
 | `<sys/mman.h>`, `<poll.h>` | `mmap` (anonymous, and of files), `munmap`, `mprotect`; `poll` |
 | `<signal.h>`, `<setjmp.h>` | `signal`, `sigaction` (handlers run for `raise`; from outside, signals can be ignored or end the program), `raise`, `kill`; `setjmp`, `longjmp` |
 | `<errno.h>`, `<assert.h>`, `<limits.h>`, `<inttypes.h>`, `<locale.h>` | `errno` (one per thread), `assert`, limits, `PRId64` and friends, the "C" locale |
+| `<iconv.h>`, `<regex.h>`, `<fnmatch.h>`, `<wctype.h>`, `<langinfo.h>` | character set conversions (musl's iconv); POSIX regular expressions; `fnmatch`; wide character classes and case; `nl_langinfo` (the C locale) |
+| `<getopt.h>`, `<sys/utsname.h>`, `<dirent.h>` extras | `getopt_long`; `uname`; `scandir`, `alphasort`; and `fstatat`, `unlinkat`, `openat`, `mkdirat` for directory handles from `opendir` or `open(O_DIRECTORY)`; `strptime` (`<time.h>`) |
 | `<endian.h>`, `<alloca.h>`, `<syslog.h>`, `<sys/file.h>` | byte order (`htobe32` and friends); `alloca`; `syslog` (to standard error: there's no system log); `flock` (accepted, but nothing is locked) |
 
 The compiler's own headers work too: `<stdint.h>`, `<stddef.h>`, `<stdbool.h>`,

@@ -45,7 +45,7 @@ RUNTIME=
 if [ -z "${VEXA_CXX_BOOTSTRAP:-}" ]; then
     RUNTIME="$SDK/lib/libc++.a $SDK/lib/libc++abi.a"
 fi
-COMMON="-nostdlib -L$SDK/lib -Wl,-z,max-page-size=0x1000 -Wl,-z,norelro -Wl,--hash-style=sysv \
+COMMON="-nostdlib -Wl,-nostdlib -L$SDK/lib -Wl,-z,max-page-size=0x1000 -Wl,-z,norelro -Wl,--hash-style=sysv \
     -Wl,--build-id=none -Wl,-z,noexecstack"
 if [ $static = yes ]; then
     # shellcheck disable=SC2086

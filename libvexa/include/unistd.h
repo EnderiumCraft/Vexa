@@ -80,6 +80,7 @@ int execvp(const char *file, char *const argv[]);
 extern char *optarg;
 extern int optind, opterr, optopt;
 int getopt(int argc, char *const argv[], const char *options);
+int unlinkat(int dirfd, const char *path, int flags); /* (See openat in <fcntl.h>.) */
 
 #ifdef __cplusplus
 }

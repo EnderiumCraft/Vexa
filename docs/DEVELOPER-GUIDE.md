@@ -427,6 +427,11 @@ with musl. What's in the ISO is built from source with musl by the Makefile and
   built against libvexa (`tools/build-libcxx-vexa.sh`), then Mesa's OSMesa with
   softpipe (`tools/build-mesa-vexa.sh`, with `third_party/mesa-vexa.patch`), which
   becomes `/lib/libOSMesa.so` (on the boot CD) and part of the SDK
+- NetSurf, the web browser (target `netsurf`): zlib, libpng, libjpeg-turbo, FreeType,
+  expat and curl built with the SDK (`tools/build-netsurf-deps.sh`), then NetSurf's own
+  libraries and its framebuffer front end (`tools/build-netsurf.sh`), with
+  `third_party/netsurf-vexa.patch`: libnsfb's Vexa surface (a desktop window) and
+  keys that type characters passed through as Unicode
 - ALSA's library with aplay and speaker-test (target `alsa`), for sound in Linux
   programs; `tools/linux-files/asound.conf` makes "default" alsa-lib's `plug` on the card
 - the X and GTK stack (`tools/build-x11.sh`, sources in `third_party/x11-sources.txt`),

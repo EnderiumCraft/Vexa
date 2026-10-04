@@ -325,6 +325,11 @@ TYPED_COMMANDS = ([
     # OpenGL in a native program: SDL's window with a context (Mesa's
     # softpipe, loaded from the boot CD), checked with glReadPixels.
     ("@type sdl-gl-test > /dev/console 2> /dev/console", "sdl-gl-test: passed", 300),
+    # The web browser (NetSurf, a native app): a page from the test's server
+    # (its title becomes the window's), then Alt+F4 closes it.
+    ("@type netsurf @URL@/page.html > /dev/console 2> /dev/console &",
+     'is now called "Vexa test page - NetSurf"', 180),
+    ("@sendkey alt-f4", "desktop: closed window", 30),
     # An error (no such WAD) shows in a window (SDL's message box), which
     # Enter closes.
     ("@type chocolate-doom -iwad missing.wad", '"Chocolate Doom 3.1.0" (460x', 60),
@@ -737,11 +742,31 @@ class QuietHandler(http.server.SimpleHTTPRequestHandler):
         pass
 
 
+def tiny_png(width, height, rgb):
+    """A PNG of one color."""
+    def chunk(kind, data):
+        return (struct.pack(">I", len(data)) + kind + data +
+                struct.pack(">I", zlib.crc32(kind + data) & 0xffffffff))
+    rows = b"".join(b"\0" + bytes(rgb) * width for _ in range(height))
+    return (b"\x89PNG\r\n\x1a\n" +
+            chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)) +
+            chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b""))
+
+
 def start_web_server(directory):
     """Serves `directory` on a free port of this machine; returns the URL the
     guest uses for it, and the SHA-1 of data.bin."""
     with open(os.path.join(directory, "hello.txt"), "w") as f:
         f.write("Hello from the test's web server\n")
+    # A page for the web browser: a title, style and a picture.
+    with open(os.path.join(directory, "page.html"), "w") as f:
+        f.write("<!DOCTYPE html><html><head><title>Vexa test page</title>"
+                "<style>body { font-family: sans-serif; background: #eef; } "
+                "h1 { color: #336; }</style></head><body><h1>Hello from the test</h1>"
+                "<p>A paragraph, a <a href='hello.txt'>link</a>, and a picture:</p>"
+                "<img src='dot.png' width='64' height='64'></body></html>\n")
+    with open(os.path.join(directory, "dot.png"), "wb") as f:
+        f.write(tiny_png(16, 16, (60, 140, 230)))
     # A megabyte that isn't all the same byte, so corruption would show.
     data = b"".join(hashlib.sha256(str(i).encode()).digest() for i in range(32768))
     with open(os.path.join(directory, "data.bin"), "wb") as f:

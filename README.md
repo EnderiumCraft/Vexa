@@ -97,6 +97,8 @@ runs X programs such as `xterm` in windows of their own on it. The kernel:
   sound on the HD Audio device), and SDL_mixer; each release carries it
 - plays Doom: Chocolate Doom, built with the SDK like any SDL program, with Freedoom's
   levels, art and music
+- browses the web with NetSurf (HTML, CSS, images, HTTPS, a little JavaScript), a
+  native app built with the SDK
 - has a file system tree with a root in memory (unpacked from an initramfs), `/dev`,
   and disks mounted under `/mnt`
 - installs itself on a disk (the Installer app, or `install`) and starts from it, with
@@ -328,6 +330,15 @@ certificates are Mozilla's (MPL-2.0), from its `certdata.txt`. All of them are
 linked against the [musl](https://musl.libc.org) C library (MIT license), which the ISO
 also includes. Every release on the Releases page carries the matching GPL sources
 (`busybox-1_36_1-source.tar.gz`, `bash-5.2.37.tar.xz`, `coreutils-9.4.tar.xz`).
+
+The web browser is [NetSurf](https://www.netsurf-browser.org) 3.11 (GPL-2.0, with its own
+libraries under the MIT license), modified for Vexa by `third_party/netsurf-vexa.patch`;
+every release carries `netsurf-3.11-source.tar.gz` (its source bundle, the patch and
+the build scripts). It's built with zlib, [libpng](http://www.libpng.org) 1.6.43,
+[libjpeg-turbo](https://libjpeg-turbo.org) 2.1.5 (IJG and BSD licenses),
+[FreeType](https://freetype.org) 2.13.2 (FreeType License), expat 2.6.1 (MIT) and
+curl 8.5.0 on [Mbed TLS](https://www.trustedfirmware.org/projects/mbed-tls/) 3.6
+(Apache-2.0).
 
 The X Window System in the ISO (the X.Org server 21.1 with Xvexa, libX11, libxcb and
 the other X libraries, pixman, xkbcomp and xkeyboard-config, Xft and fontconfig with

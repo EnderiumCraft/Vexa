@@ -409,6 +409,20 @@ terminal (with your own copy of Doom or Doom II, say), and `-file` adds levels m
 them. `chocolate-doom -timedemo demo1` plays the first demo as fast as it can and says
 how many frames a second that was.
 
+### NetSurf
+
+A web browser: NetSurf, a small one with its own engine, here as a Vexa app. It shows
+pages made of HTML and CSS, with their pictures (PNG, JPEG, GIF, SVG, BMP), over HTTP
+and HTTPS (with the standard root certificates), and runs a little JavaScript, not
+enough for most modern sites that are built of it; those that work without it (most
+of Wikipedia, documentation, plain sites) look fine. The page's title is the window's.
+
+The toolbar has Back, Forward, Home, Stop and Reload, the address (click it, type a
+web address and press Enter), and a menu; the wheel or the scroll bars scroll, Page Up
+and Page Down too, and a click on a link follows it. At a terminal, `netsurf
+https://example.org` opens a page. Its settings, cookies and history are kept in
+`/home/.netsurf`.
+
 ### Calculator
 
 Click the buttons or type: digits, `+ - * /`, `%`, Enter or `=`, Backspace, Escape

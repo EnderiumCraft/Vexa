@@ -90,7 +90,11 @@ int open(const char *path, int flags, ...) {
             return -1;
         }
     }
-    return (int)__vx_errno_result(vx_open(path, vx));
+    int fd = (int)__vx_errno_result(vx_open(path, vx));
+    if (fd >= 0 && (flags & O_DIRECTORY)) {
+        __vx_remember_dir(fd, path); /* (For openat and the rest.) */
+    }
+    return fd;
 }
 
 int creat(const char *path, mode_t mode) {
@@ -185,6 +189,7 @@ ssize_t pwrite(int fd, const void *buffer, size_t size, off_t offset) {
 
 int close(int fd) {
     __vx_forget_fd(fd);
+    __vx_forget_dir(fd);
     return (int)__vx_errno_result(vx_close(fd));
 }
 
@@ -399,6 +404,7 @@ DIR *opendir(const char *path) {
         return NULL;
     }
     dir->handle = handle;
+    __vx_remember_dir(handle, path);
     return dir;
 }
 
@@ -439,6 +445,7 @@ int dirfd(DIR *dir) {
 }
 
 int closedir(DIR *dir) {
+    __vx_forget_dir(dir->handle);
     vx_close(dir->handle);
     free(dir);
     return 0;

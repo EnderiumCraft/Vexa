@@ -37,7 +37,9 @@ if [ $link = no ]; then
 fi
 
 LIBGCC=$("$HOST_CC" -print-libgcc-file-name)
-COMMON="-nostdlib -L$SDK/lib -Wl,-z,max-page-size=0x1000 -Wl,-z,norelro -Wl,--hash-style=sysv \
+# (-Wl,-nostdlib: only the SDK's libraries and those named, never this
+# machine's.)
+COMMON="-nostdlib -Wl,-nostdlib -L$SDK/lib -Wl,-z,max-page-size=0x1000 -Wl,-z,norelro -Wl,--hash-style=sysv \
     -Wl,--build-id=none -Wl,-z,noexecstack"
 if [ $static = yes ]; then
     # shellcheck disable=SC2086

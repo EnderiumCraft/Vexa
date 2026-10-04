@@ -46,6 +46,8 @@ struct tm *localtime_r(const time_t *t, struct tm *out);
 time_t mktime(struct tm *tm);
 time_t timegm(struct tm *tm);
 size_t strftime(char *out, size_t size, const char *format, const struct tm *tm);
+/* Reads a time in `format` (as strftime writes it) into *tm (musl's). */
+char *strptime(const char *s, const char *format, struct tm *tm);
 char *asctime(const struct tm *tm);
 char *ctime(const time_t *t);
 void tzset(void);

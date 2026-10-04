@@ -336,6 +336,20 @@ def doom():
     return im
 
 
+def netsurf():
+    """A globe: the web browser."""
+    im = gradient_tile((70, 190, 255), (20, 90, 200))
+    d = ImageDraw.Draw(im)
+    white = (255, 255, 255, 255)
+    d.ellipse([10 * S, 10 * S, 38 * S, 38 * S], outline=white, width=3 * S)
+    d.ellipse([18 * S, 10 * S, 30 * S, 38 * S], outline=white, width=2 * S)
+    d.line([(24 * S, 10 * S), (24 * S, 38 * S)], fill=white, width=2 * S)
+    d.line([(10 * S, 24 * S), (38 * S, 24 * S)], fill=white, width=2 * S)
+    d.arc([12 * S, 4 * S, 36 * S, 20 * S], 30, 150, fill=white, width=2 * S)
+    d.arc([12 * S, 28 * S, 36 * S, 44 * S], 210, 330, fill=white, width=2 * S)
+    return im
+
+
 def help_book():
     im = gradient_tile((80, 170, 255), (30, 100, 210))
     d = ImageDraw.Draw(im)
@@ -378,7 +392,7 @@ ICONS = {
     "Settings": settings, "About": about, "XTerm": xterm,
     "Monitor": activity, "Calculator": calculator, "Calendar": calendar,
     "Notes": notes, "Paint": paint, "Help": help_book, "DeviceManager": device_manager,
-    "Installer": installer, "Doom": doom,
+    "Installer": installer, "Doom": doom, "NetSurf": netsurf,
 }
 
 if __name__ == "__main__":

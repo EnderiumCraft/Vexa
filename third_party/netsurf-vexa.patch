@@ -1,0 +1,415 @@
+NetSurf 3.11 for Vexa (tools/build-netsurf.sh): libnsfb's Vexa surface (a desktop
+window), keys that type characters passed through as Unicode, and what the
+build needs on Vexa.
+
+--- a/libnsfb/include/libnsfb.h
++++ b/libnsfb/include/libnsfb.h
+@@ -35,6 +35,7 @@
+ /** The type of framebuffer surface. */
+ enum nsfb_type_e {
+     NSFB_SURFACE_NONE = 0, /**< No surface */
++    NSFB_SURFACE_VEXA, /**< A window on the Vexa desktop (first: the default) */
+     NSFB_SURFACE_SDL, /**< SDL surface */
+     NSFB_SURFACE_X, /**< X windows surface */
+     NSFB_SURFACE_WL, /**< Wayland surface */
+@@ -166,6 +167,11 @@
+  */
+ bool nsfb_dump(nsfb_t *nsfb, int fd);
+ 
++/* Vexa's surface: the window's title, and the pointer's shape
++ * (<vexa/gui.h>'s VX_CURSOR_*). They do nothing on other surfaces. */
++void nsfb_vexa_set_title(nsfb_t *nsfb, const char *title);
++void nsfb_vexa_set_pointer(nsfb_t *nsfb, int shape);
++
+ 
+ #endif
+ 
+--- a/libnsfb/include/libnsfb_event.h
++++ b/libnsfb/include/libnsfb_event.h
+@@ -177,6 +177,10 @@
+     NSFB_KEY_MOUSE_4 = 404,
+     NSFB_KEY_MOUSE_5 = 405,
+ 
++    /* Vexa: a key that typed a character, as that character (Unicode)
++     * with this bit set. */
++    NSFB_KEY_VEXA_CHAR = 0x40000000,
++
+ };
+ 
+ enum nsfb_control_e {
+--- a/libnsfb/src/surface/Makefile
++++ b/libnsfb/src/surface/Makefile
+@@ -3,6 +3,9 @@
+ # Common surface code and heap based surface handler
+ SURFACE_HANDLER_yes := surface.c ram.c
+ 
++# Vexa: a window on the desktop
++SURFACE_HANDLER_$(NSFB_VEXA_AVAILABLE) += vexa.c
++
+ # optional surface handlers
+ SURFACE_HANDLER_$(NSFB_SDL_AVAILABLE) += sdl.c
+ SURFACE_HANDLER_$(NSFB_XCB_AVAILABLE) += x.c
+--- a/libnsfb/src/surface/vexa.c
++++ b/libnsfb/src/surface/vexa.c
+@@ -0,0 +1,308 @@
++/*
++ * Copyright 2026 The Vexa authors
++ *
++ * This file is part of libnsfb, http://www.netsurf-browser.org/
++ * Licenced under the MIT License,
++ *                http://www.opensource.org/licenses/mit-license.php
++ *
++ * A window on the Vexa desktop (<vexa/gui.h>) as libnsfb's surface: the
++ * window's own pixels (XRGB8888) are the frame buffer, and updating it
++ * presents the rectangle. Keys that type a character arrive as that
++ * character (with NSFB_KEY_VEXA_CHAR set, so the keyboard layout is the
++ * desktop's), others as libnsfb's key codes; the desktop draws the pointer.
++ */
++
++#include <stdbool.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <vexa/gui.h>
++
++#include "libnsfb.h"
++#include "libnsfb_event.h"
++#include "libnsfb_plot.h"
++#include "nsfb.h"
++#include "surface.h"
++#include "plot.h"
++
++#define QUEUE_SIZE 16
++
++struct vexa_priv {
++    struct vx_window *window;
++    int buttons;
++    nsfb_event_t queue[QUEUE_SIZE];
++    int head, count;
++    char title[160]; /* The window's, last set. */
++};
++
++static void push(struct vexa_priv *priv, const nsfb_event_t *event)
++{
++    if (priv->count < QUEUE_SIZE) {
++        priv->queue[(priv->head + priv->count) % QUEUE_SIZE] = *event;
++        priv->count++;
++    }
++}
++
++static void use_window(nsfb_t *nsfb, struct vexa_priv *priv)
++{
++    struct vx_surface *s = &priv->window->surface;
++    nsfb->width = s->width;
++    nsfb->height = s->height;
++    nsfb->ptr = (uint8_t *)s->pixels;
++    nsfb->linelen = s->stride * 4;
++}
++
++static int vexa_set_geometry(nsfb_t *nsfb, int width, int height,
++        enum nsfb_format_e format)
++{
++    struct vexa_priv *priv = nsfb->surface_priv;
++
++    (void)format; /* (Always XRGB8888: the window's.) */
++    nsfb->width = width;
++    nsfb->height = height;
++    nsfb->format = NSFB_FMT_XRGB8888;
++    select_plotters(nsfb);
++    if (priv != NULL) {
++        if (vx_window_resize(priv->window, width, height) < 0)
++            return -1;
++        use_window(nsfb, priv);
++    }
++    return 0;
++}
++
++static int vexa_initialise(nsfb_t *nsfb)
++{
++    struct vexa_priv *priv;
++
++    if (nsfb->surface_priv != NULL)
++        return -1;
++    priv = calloc(1, sizeof(*priv));
++    if (priv == NULL)
++        return -1;
++    priv->window = vx_window_create_flags("NetSurf", nsfb->width, nsfb->height,
++                                          VX_WINDOW_RESIZABLE);
++    if (priv->window == NULL) {
++        free(priv);
++        return -1;
++    }
++    nsfb->surface_priv = priv;
++    nsfb->format = NSFB_FMT_XRGB8888;
++    nsfb->bpp = 32;
++    select_plotters(nsfb);
++    use_window(nsfb, priv);
++    return 0;
++}
++
++static int vexa_finalise(nsfb_t *nsfb)
++{
++    struct vexa_priv *priv = nsfb->surface_priv;
++
++    if (priv != NULL) {
++        vx_window_destroy(priv->window);
++        free(priv);
++        nsfb->surface_priv = NULL;
++    }
++    return 0;
++}
++
++/* Linux key codes (what Vexa's keys are) for the keys that don't type. */
++static enum nsfb_key_code_e map_key(int key)
++{
++    switch (key) {
++    case 1: return NSFB_KEY_ESCAPE;
++    case 14: return NSFB_KEY_BACKSPACE;
++    case 15: return NSFB_KEY_TAB;
++    case 28: case 96: return NSFB_KEY_RETURN;
++    case 29: return NSFB_KEY_LCTRL;
++    case 97: return NSFB_KEY_RCTRL;
++    case 42: return NSFB_KEY_LSHIFT;
++    case 54: return NSFB_KEY_RSHIFT;
++    case 56: return NSFB_KEY_LALT;
++    case 100: return NSFB_KEY_RALT;
++    case 102: return NSFB_KEY_HOME;
++    case 103: return NSFB_KEY_UP;
++    case 104: return NSFB_KEY_PAGEUP;
++    case 105: return NSFB_KEY_LEFT;
++    case 106: return NSFB_KEY_RIGHT;
++    case 107: return NSFB_KEY_END;
++    case 108: return NSFB_KEY_DOWN;
++    case 109: return NSFB_KEY_PAGEDOWN;
++    case 110: return NSFB_KEY_INSERT;
++    case 111: return NSFB_KEY_DELETE;
++    case 87: return NSFB_KEY_F11;
++    case 88: return NSFB_KEY_F12;
++    default:
++        if (key >= 59 && key <= 68)
++            return NSFB_KEY_F1 + (key - 59);
++        return NSFB_KEY_UNKNOWN;
++    }
++}
++
++static void key_event(struct vexa_priv *priv, const struct vx_gui_event *e)
++{
++    nsfb_event_t event;
++    int code = map_key(e->key);
++
++    if (code == NSFB_KEY_UNKNOWN || code == NSFB_KEY_TAB || code == NSFB_KEY_RETURN ||
++        code == NSFB_KEY_BACKSPACE || code == NSFB_KEY_ESCAPE || code == NSFB_KEY_DELETE) {
++        if (e->character >= 1 && e->character <= 26 && code == NSFB_KEY_UNKNOWN) {
++            /* Ctrl+letter: the letter (the frontend sees Ctrl held). */
++            code = NSFB_KEY_a + (e->character - 1);
++        } else if (e->character >= 32 && e->character != 127) {
++            code = NSFB_KEY_VEXA_CHAR | e->character;
++        } else if (code == NSFB_KEY_UNKNOWN) {
++            return;
++        }
++    }
++    event.type = e->value ? NSFB_EVENT_KEY_DOWN : NSFB_EVENT_KEY_UP;
++    event.value.keycode = code;
++    push(priv, &event);
++}
++
++static void pointer_event(struct vexa_priv *priv, const struct vx_gui_event *e)
++{
++    static const enum nsfb_key_code_e buttons[3] = {
++        NSFB_KEY_MOUSE_1, NSFB_KEY_MOUSE_3, NSFB_KEY_MOUSE_2, /* (Vexa: left, right, middle.) */
++    };
++    nsfb_event_t event;
++    int i;
++
++    event.type = NSFB_EVENT_MOVE_ABSOLUTE;
++    event.value.vector.x = e->x;
++    event.value.vector.y = e->y;
++    event.value.vector.z = 0;
++    push(priv, &event);
++    for (i = 0; i < 3; i++) {
++        int bit = 1 << i;
++        if ((e->buttons ^ priv->buttons) & bit) {
++            event.type = (e->buttons & bit) ? NSFB_EVENT_KEY_DOWN : NSFB_EVENT_KEY_UP;
++            event.value.keycode = buttons[i];
++            push(priv, &event);
++        }
++    }
++    priv->buttons = e->buttons;
++    if (e->wheel != 0) { /* A click of the wheel: down and up. */
++        event.value.keycode = e->wheel > 0 ? NSFB_KEY_MOUSE_4 : NSFB_KEY_MOUSE_5;
++        event.type = NSFB_EVENT_KEY_DOWN;
++        push(priv, &event);
++        event.type = NSFB_EVENT_KEY_UP;
++        push(priv, &event);
++    }
++}
++
++static bool vexa_input(nsfb_t *nsfb, nsfb_event_t *event, int timeout)
++{
++    struct vexa_priv *priv = nsfb->surface_priv;
++    struct vx_gui_event e;
++    int got;
++
++    while (priv->count == 0) {
++        got = vx_gui_wait(&e, timeout < 0 ? -1 : timeout);
++        if (got < 0) { /* The desktop is gone. */
++            event->type = NSFB_EVENT_CONTROL;
++            event->value.controlcode = NSFB_CONTROL_QUIT;
++            return true;
++        }
++        if (got == 0) {
++            if (timeout == 0)
++                return false;
++            event->type = NSFB_EVENT_CONTROL;
++            event->value.controlcode = NSFB_CONTROL_TIMEOUT;
++            return true;
++        }
++        if (e.window != priv->window->id)
++            continue;
++        switch (e.type) {
++        case VX_GUI_KEY:
++            key_event(priv, &e);
++            break;
++        case VX_GUI_POINTER:
++            pointer_event(priv, &e);
++            break;
++        case VX_GUI_CLOSE:
++            event->type = NSFB_EVENT_CONTROL;
++            event->value.controlcode = NSFB_CONTROL_QUIT;
++            return true;
++        case VX_GUI_RESIZE:
++            event->type = NSFB_EVENT_RESIZE;
++            event->value.resize.w = e.width;
++            event->value.resize.h = e.height;
++            return true;
++        default:
++            break;
++        }
++        timeout = 0; /* (Something came: don't wait again for the rest.) */
++        if (priv->count == 0)
++            return false;
++    }
++    *event = priv->queue[priv->head];
++    priv->head = (priv->head + 1) % QUEUE_SIZE;
++    priv->count--;
++    return true;
++}
++
++static int vexa_claim(nsfb_t *nsfb, nsfb_bbox_t *box)
++{
++    (void)nsfb;
++    (void)box;
++    return 0;
++}
++
++static int vexa_cursor(nsfb_t *nsfb, struct nsfb_cursor_s *cursor)
++{
++    (void)nsfb;
++    (void)cursor; /* (The desktop draws the pointer.) */
++    return true;
++}
++
++static int vexa_update(nsfb_t *nsfb, nsfb_bbox_t *box)
++{
++    struct vexa_priv *priv = nsfb->surface_priv;
++
++    if (box->x1 > box->x0 && box->y1 > box->y0)
++        vx_window_present(priv->window, box->x0, box->y0, box->x1 - box->x0,
++                          box->y1 - box->y0);
++    return 0;
++}
++
++/* For the Vexa front end: the window's title, and the pointer's shape
++ * (VX_CURSOR_*). Nothing on other surfaces. */
++void nsfb_vexa_set_title(nsfb_t *nsfb, const char *title)
++{
++    struct vexa_priv *priv;
++    char text[160];
++
++    if (nsfb == NULL || nsfb->surface_rtns->input != vexa_input)
++        return;
++    priv = nsfb->surface_priv;
++    if (title != NULL && title[0] != '\0')
++        snprintf(text, sizeof(text), "%s - NetSurf", title);
++    else
++        snprintf(text, sizeof(text), "NetSurf");
++    if (strcmp(text, priv->title) != 0) { /* (NetSurf says it again as pages load.) */
++        strcpy(priv->title, text);
++        vx_window_set_title(priv->window, text);
++    }
++}
++
++void nsfb_vexa_set_pointer(nsfb_t *nsfb, int shape)
++{
++    struct vexa_priv *priv;
++
++    if (nsfb == NULL || nsfb->surface_rtns->input != vexa_input)
++        return;
++    priv = nsfb->surface_priv;
++    vx_window_set_cursor(priv->window, shape);
++}
++
++const nsfb_surface_rtns_t vexa_rtns = {
++    .initialise = vexa_initialise,
++    .finalise = vexa_finalise,
++    .input = vexa_input,
++    .claim = vexa_claim,
++    .update = vexa_update,
++    .cursor = vexa_cursor,
++    .geometry = vexa_set_geometry,
++};
++
++NSFB_SURFACE_DEF(vexa, NSFB_SURFACE_VEXA, &vexa_rtns)
+--- a/netsurf/frontends/framebuffer/fbtk/event.c
++++ b/netsurf/frontends/framebuffer/fbtk/event.c
+@@ -302,6 +302,10 @@
+ {
+ 	int ucs4 = -1;
+ 
++	/* Vexa: a key that typed a character (in the desktop's layout). */
++	if (code & NSFB_KEY_VEXA_CHAR)
++		return code & ~NSFB_KEY_VEXA_CHAR;
++
+ 	if (mods & FBTK_MOD_LSHIFT || mods & FBTK_MOD_RSHIFT) {
+ 		if ((code >= 0) && (code < (int) NOF_ELEMENTS(sh_keymap)))
+ 			ucs4 = sh_keymap[code];
+--- a/netsurf/frontends/framebuffer/gui.c
++++ b/netsurf/frontends/framebuffer/gui.c
+@@ -1960,6 +1960,14 @@
+ static void
+ gui_window_set_pointer(struct gui_window *g, gui_pointer_shape shape)
+ {
++	/* Vexa: the desktop's pointer, in the shape that goes with it. */
++	nsfb_vexa_set_pointer(fbtk_get_nsfb(fbtk),
++			      shape == GUI_POINTER_POINT ? 2 :     /* hand */
++			      shape == GUI_POINTER_CARET ? 1 :     /* text */
++			      shape == GUI_POINTER_PROGRESS ? 3 :  /* wait */
++			      shape == GUI_POINTER_WAIT ? 3 :
++			      shape == GUI_POINTER_MOVE ? 5 : 0);  /* move, arrow */
++
+ 	switch (shape) {
+ 	case GUI_POINTER_POINT:
+ 		framebuffer_set_cursor(&hand_image);
+@@ -1987,6 +1995,14 @@
+ 	}
+ }
+ 
++/* Vexa: the page's title on the window. */
++static void
++gui_window_set_title(struct gui_window *g, const char *title)
++{
++	(void)g;
++	nsfb_vexa_set_title(fbtk_get_nsfb(fbtk), title);
++}
++
+ static nserror
+ gui_window_set_url(struct gui_window *g, nsurl *url)
+ {
+@@ -2157,6 +2173,7 @@
+ 	.event = gui_window_event,
+ 
+ 	.set_url = gui_window_set_url,
++	.set_title = gui_window_set_title,
+ 	.set_status = gui_window_set_status,
+ 	.set_pointer = gui_window_set_pointer,
+ 	.place_caret = gui_window_place_caret,

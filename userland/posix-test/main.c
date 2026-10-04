@@ -10,11 +10,15 @@
 #include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <fnmatch.h>
+#include <getopt.h>
+#include <iconv.h>
 #include <limits.h>
 #include <math.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <pthread.h>
+#include <regex.h>
 #include <semaphore.h>
 #include <setjmp.h>
 #include <spawn.h>
@@ -26,8 +30,10 @@
 #include <sys/select.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/utsname.h>
 #include <sys/wait.h>
 #include <time.h>
+#include <wctype.h>
 #include <unistd.h>
 
 static int failures;
@@ -569,6 +575,75 @@ static void test_tls(void) {
     }
 }
 
+/* Text: character sets, regular expressions, patterns, wide characters,
+ * long options, times read back; the system's name; directories. */
+static void test_text(void) {
+    iconv_t cd = iconv_open("UTF-8", "ISO-8859-1");
+    char latin1[] = "caf\xe9", utf8[16] = "", *in = latin1, *out = utf8;
+    size_t in_left = 4, out_left = sizeof(utf8) - 1;
+    CHECK(cd != (iconv_t)-1 && iconv(cd, &in, &in_left, &out, &out_left) == 0);
+    CHECK(strcmp(utf8, "caf\xc3\xa9") == 0);
+    if (cd != (iconv_t)-1) {
+        iconv_close(cd);
+    }
+
+    regex_t re;
+    regmatch_t m[2];
+    CHECK(regcomp(&re, "([0-9]+)px", REG_EXTENDED) == 0);
+    CHECK(regexec(&re, "width: 640px;", 2, m, 0) == 0 && m[1].rm_so == 7 && m[1].rm_eo == 10);
+    CHECK(regexec(&re, "width: auto", 0, NULL, 0) == REG_NOMATCH);
+    regfree(&re);
+    CHECK(fnmatch("*.vxapp", "Files.vxapp", 0) == 0 && fnmatch("*.png", "a/b.png", FNM_PATHNAME));
+    CHECK(iswalpha(0xe9) && towupper(0xe9) == 0xc9 && !iswdigit('x'));
+
+    char *args[] = {"prog", "--width=640", "--verbose", "-h", "480", "--name", "x", NULL};
+    static int verbose;
+    static const struct option longs[] = {
+        {"width", required_argument, NULL, 'w'}, {"verbose", no_argument, &verbose, 1},
+        {"name", required_argument, NULL, 'n'}, {NULL, 0, NULL, 0},
+    };
+    int width = 0, height = 0, c;
+    const char *name = NULL;
+    optind = 1;
+    while ((c = getopt_long(7, args, "h:", longs, NULL)) != -1) {
+        if (c == 'w') {
+            width = atoi(optarg);
+        } else if (c == 'h') {
+            height = atoi(optarg);
+        } else if (c == 'n') {
+            name = optarg;
+        }
+    }
+    CHECK(width == 640 && height == 480 && verbose == 1 && name && strcmp(name, "x") == 0);
+    optind = 1;
+
+    struct tm tm = {0};
+    CHECK(strptime("2026-10-04 12:34:56", "%Y-%m-%d %H:%M:%S", &tm) != NULL);
+    CHECK(tm.tm_year == 126 && tm.tm_mon == 9 && tm.tm_mday == 4 && tm.tm_min == 34);
+
+    struct utsname u;
+    CHECK(uname(&u) == 0 && strcmp(u.sysname, "Vexa") == 0 && strcmp(u.machine, "x86_64") == 0);
+
+    struct dirent **list;
+    int n = scandir("/etc", &list, NULL, alphasort);
+    bool motd = false, sorted = true;
+    for (int i = 0; i < n; i++) {
+        motd |= strcmp(list[i]->d_name, "motd") == 0;
+        sorted &= i == 0 || strcmp(list[i - 1]->d_name, list[i]->d_name) <= 0;
+        free(list[i]);
+    }
+    CHECK(n > 0 && motd && sorted);
+    if (n >= 0) {
+        free(list);
+    }
+    DIR *etc = opendir("/etc");
+    struct stat st;
+    CHECK(etc && fstatat(dirfd(etc), "motd", &st, 0) == 0 && S_ISREG(st.st_mode));
+    if (etc) {
+        closedir(etc);
+    }
+}
+
 int main(int argc, char **argv) {
     /* -v: says which part it's on (to find one that hangs). */
     bool verbose = argc > 1 && strcmp(argv[1], "-v") == 0;
@@ -581,6 +656,7 @@ int main(int argc, char **argv) {
         {"setjmp", test_setjmp},   {"threads", test_threads}, {"memory", test_memory},
         {"processes", test_processes}, {"spawn", test_spawn},
         {"dlopen", test_dlopen},   {"tls", test_tls},         {"sockets", test_sockets},
+        {"text", test_text},
     };
     for (size_t i = 0; i < sizeof parts / sizeof *parts; i++) {
         if (verbose) {

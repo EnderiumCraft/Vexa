@@ -110,7 +110,7 @@ jobs:
           touch build/curl-root/usr/bin/curl build/alsa-root/.done build/python-root/.done
 
       - name: Build ISO (with BusyBox, bash, coreutils, Python and X, built from source), and the SDK
-        run: make && make busybox-source && make doom-source && make sdk
+        run: make && make busybox-source && make doom-source && make netsurf-source && make sdk
 
       - name: Read version
         id: version
@@ -130,6 +130,8 @@ jobs:
           cp build/busybox-*-source.tar.gz third_party/bash-*.tar.xz third_party/coreutils-*.tar.xz .
           # Chocolate Doom (GPL-2.0): its source and Vexa's patch.
           cp build/chocolate-doom-*-source.tar.gz .
+          # NetSurf (GPL-2.0): its source bundle and Vexa's patch.
+          cp build/netsurf-*-source.tar.gz .
           # alsa-utils (GPL-2.0) and alsa-lib (LGPL-2.1): their sources too.
           cp third_party/alsa-lib-*.tar.bz2 third_party/alsa-utils-*.tar.bz2 .
           # GTK 3 and the LGPL (and MPL) libraries under it: their sources too.
@@ -165,7 +167,7 @@ jobs:
           gh release create nightly --target "$GITHUB_SHA" \
             --title "Nightly (${VERSION}, ${short_sha}, untested)" \
             --notes "$notes" --prerelease --latest=false \
-            "vexa-${VERSION}.iso" "vexa-${VERSION}.iso.sha256" busybox-*-source.tar.gz chocolate-doom-*-source.tar.gz bash-*.tar.xz coreutils-*.tar.xz alsa-*.tar.bz2 gtk-and-lgpl-sources-*.tar vexa-sdk-*.tar.gz
+            "vexa-${VERSION}.iso" "vexa-${VERSION}.iso.sha256" busybox-*-source.tar.gz chocolate-doom-*-source.tar.gz netsurf-*-source.tar.gz bash-*.tar.xz coreutils-*.tar.xz alsa-*.tar.bz2 gtk-and-lgpl-sources-*.tar vexa-sdk-*.tar.gz
 
       # GitHub's Linux runners have KVM; the tests use it when they can
       # open /dev/kvm.
@@ -192,6 +194,7 @@ jobs:
             vexa-${{ steps.version.outputs.version }}.iso.sha256
             busybox-*-source.tar.gz
             chocolate-doom-*-source.tar.gz
+            netsurf-*-source.tar.gz
             bash-*.tar.xz
             coreutils-*.tar.xz
             alsa-*.tar.bz2

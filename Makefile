@@ -216,7 +216,7 @@ USER_OBJS := $(LIBVEXA_OBJS) \
 	$(patsubst %,$(BUILD)/%.o,$(wildcard $(addsuffix /*.c,$(addprefix userland/,$(PROGRAMS)))))
 
 .PHONY: all openssl curl mesa alsa linux-tarballs kernel programs iso run run-disk run-nographic test test-install test-disks clean distclean \
-	busybox busybox-source doom doom-source bash coreutils python x11 test-native test-quick native-iso \
+	busybox busybox-source doom doom-source netsurf netsurf-source bash coreutils python x11 test-native test-quick native-iso \
 	test-bios test-uefi test-safe test-native-boot test-virgl run-virgl sdk sdk-test
 
 all: iso
@@ -347,7 +347,7 @@ $(SDK_DIR)/.done: $(SDK_FILES) $(LIBVEXA_SO) $(LIBVEXA_A) $(CRT0) $(DSO_O) libve
 	cp $(CRT0) $(SDK_DIR)/lib/crt0.o
 	cp $(DSO_O) $(SDK_DIR)/lib/dso.o
 	# -lm, -lpthread...: all in libvexa, so these are empty.
-	for lib in c m pthread rt dl; do ar rc $(SDK_DIR)/lib/lib$$lib.a; done
+	for lib in c m pthread rt dl iconv; do ar rc $(SDK_DIR)/lib/lib$$lib.a; done
 	tar -xzf $(MUSL_TARBALL) -O musl-$(MUSL_VERSION)/COPYRIGHT > $(SDK_DIR)/licenses/musl-libm.txt
 	echo "$(VEXA_VERSION)" > $(SDK_DIR)/VERSION
 	touch $@
@@ -486,6 +486,70 @@ $(SDL_GL_TEST): tests/gl/sdl-gl-test.c $(SDK_DIR)/.complete
 	$(SDK_DIR)/bin/vexa-cc -O2 -Wall -Wextra $$($(SDK_DIR)/bin/sdl2-config --cflags) $< -o $@ \
 		$$($(SDK_DIR)/bin/sdl2-config --libs) -lOSMesa
 
+# NetSurf (GPL-2.0), the web browser: built with the SDK as a native app,
+# drawing into a desktop window through libnsfb's Vexa surface. Its own
+# libraries come in its source bundle (here from Ubuntu's archive); zlib,
+# libpng, libjpeg-turbo, FreeType, expat and curl (on the SDK's Mbed TLS) are
+# built first, as static libraries.
+NETSURF_VERSION := 3.11
+NETSURF_URL := https://archive.ubuntu.com/ubuntu/pool/universe/n/netsurf/netsurf_$(NETSURF_VERSION).orig.tar.gz
+NETSURF_SHA256 := 4dea880ff3c2f698bfd62c982b259340f9abcd7f67e6c8eb2b32c61f71644b7b
+NETSURF_TARBALL := third_party/netsurf_$(NETSURF_VERSION).orig.tar.gz
+JPEG_URL := https://archive.ubuntu.com/ubuntu/pool/main/libj/libjpeg-turbo/libjpeg-turbo_2.1.5.orig.tar.gz
+JPEG_SHA256 := 254f3642b04e309fee775123133c6464181addc150499561020312ec61c1bf7c
+JPEG_TARBALL := third_party/libjpeg-turbo_2.1.5.orig.tar.gz
+PNG_URL := https://archive.ubuntu.com/ubuntu/pool/main/libp/libpng1.6/libpng1.6_1.6.43.orig.tar.gz
+PNG_SHA256 := fecc95b46cf05e8e3fc8a414750e0ba5aad00d89e9fdf175e94ff041caf1a03a
+PNG_TARBALL := third_party/libpng1.6_1.6.43.orig.tar.gz
+FREETYPE_URL := https://archive.ubuntu.com/ubuntu/pool/main/f/freetype/freetype_2.13.2+dfsg.orig.tar.xz
+FREETYPE_SHA256 := 48c78a4194adfcd15a4d089f3206dab8454c311f5577f3ef7eaef95f777f86e6
+FREETYPE_TARBALL := third_party/freetype_2.13.2+dfsg.orig.tar.xz
+EXPAT_URL := https://github.com/libexpat/libexpat/releases/download/R_2_6_1/expat-2.6.1.tar.xz
+EXPAT_SHA256 := 0c00d2760ad12efef6e26efc8b363c8eb28eb8c8de719e46d5bb67b40ba904a3
+EXPAT_TARBALL := third_party/expat-2.6.1.tar.xz
+NETSURF_DEPS := $(BUILD)/netsurf-deps/lib/libcurl.a
+NETSURF_DIR := $(BUILD)/netsurf
+NETSURF := $(NETSURF_DIR)/netsurf
+NETSURF_PROGRAM ?= $(NETSURF)
+NETSURF_RES ?= $(NETSURF_DIR)/res
+
+$(NETSURF_TARBALL):
+	$(call fetch,$(NETSURF_URL),$(NETSURF_SHA256))
+$(JPEG_TARBALL):
+	$(call fetch,$(JPEG_URL),$(JPEG_SHA256))
+$(PNG_TARBALL):
+	$(call fetch,$(PNG_URL),$(PNG_SHA256))
+$(FREETYPE_TARBALL):
+	$(call fetch,$(FREETYPE_URL),$(FREETYPE_SHA256))
+$(EXPAT_TARBALL):
+	$(call fetch,$(EXPAT_URL),$(EXPAT_SHA256))
+
+$(NETSURF_DEPS): tools/build-netsurf-deps.sh $(SDK_DIR)/.complete $(ZLIB_TARBALL) $(PNG_TARBALL) \
+		$(JPEG_TARBALL) $(FREETYPE_TARBALL) $(CURL_TARBALL) $(EXPAT_TARBALL)
+	rm -rf $(BUILD)/netsurf-deps $(BUILD)/netsurf-deps-work
+	tools/build-netsurf-deps.sh $(SDK_DIR) $(BUILD)/netsurf-deps-work $(BUILD)/netsurf-deps \
+		$(ZLIB_TARBALL) $(PNG_TARBALL) $(JPEG_TARBALL) $(FREETYPE_TARBALL) $(CURL_TARBALL) \
+		$(EXPAT_TARBALL)
+
+$(NETSURF): $(NETSURF_TARBALL) tools/build-netsurf.sh third_party/netsurf-vexa.patch $(NETSURF_DEPS)
+	tools/build-netsurf.sh $(NETSURF_TARBALL) $(SDK_DIR) $(BUILD)/netsurf-deps $(BUILD)/netsurf-build \
+		$(NETSURF_DIR)
+
+netsurf: $(NETSURF)
+
+# NetSurf's source (GPL-2.0) and Vexa's patch, which the releases publish.
+NETSURF_SOURCE_TARBALL := $(BUILD)/netsurf-$(NETSURF_VERSION)-source.tar.gz
+$(NETSURF_SOURCE_TARBALL): $(NETSURF_TARBALL) third_party/netsurf-vexa.patch tools/build-netsurf.sh \
+		tools/build-netsurf-deps.sh
+	rm -rf $(BUILD)/netsurf-source
+	mkdir -p $(BUILD)/netsurf-source/netsurf-$(NETSURF_VERSION)
+	cp $(NETSURF_TARBALL) third_party/netsurf-vexa.patch tools/build-netsurf.sh \
+		tools/build-netsurf-deps.sh $(BUILD)/netsurf-source/netsurf-$(NETSURF_VERSION)/
+	tar -C $(BUILD)/netsurf-source --owner=0 --group=0 --numeric-owner --sort=name --mtime=@0 \
+		-czf $@ netsurf-$(NETSURF_VERSION)
+
+netsurf-source: $(NETSURF_SOURCE_TARBALL)
+
 # Doom: Chocolate Doom (GPL-2.0), built with the SDK like any SDL program,
 # with Freedoom's levels and art (BSD), which stay on the boot CD (/cdrom/doom)
 # until they're played. `make doom-source` packs its source and Vexa's patch,
@@ -546,14 +610,16 @@ LINUX_ON_CD := bin lib sbin usr
 # apps in /apps, as a tar archive (ustar, with fixed owners and times so
 # builds are reproducible).
 $(INITRAMFS): $(PROGRAM_BINS) $(LIBVEXA_SO) $(VEXA_LD) $(DLTEST_SO) $(ROOTFS_FILES) $(APP_FILES) $(LINUX_TREE) \
-		docs/USER-GUIDE.md $(DOOM_PROGRAM) $(CXX_TEST_PROGRAM) $(SDL_GL_TEST_PROGRAM)
+		docs/USER-GUIDE.md $(DOOM_PROGRAM) $(CXX_TEST_PROGRAM) $(SDL_GL_TEST_PROGRAM) \
+		$(NETSURF_PROGRAM)
 	rm -rf $(BUILD)/rootfs
 	mkdir -p $(BUILD)/rootfs/bin $(BUILD)/rootfs/lib
 	cp -R rootfs/. $(BUILD)/rootfs/
 	# The Help app's book: the user guide.
 	mkdir -p $(BUILD)/rootfs/share/help
 	cp docs/USER-GUIDE.md $(BUILD)/rootfs/share/help/
-	cp $(PROGRAM_BINS) $(DOOM_PROGRAM) $(CXX_TEST_PROGRAM) $(SDL_GL_TEST_PROGRAM) $(BUILD)/rootfs/bin/
+	cp $(PROGRAM_BINS) $(DOOM_PROGRAM) $(CXX_TEST_PROGRAM) $(SDL_GL_TEST_PROGRAM) $(NETSURF_PROGRAM) \
+		$(BUILD)/rootfs/bin/
 	cp $(LIBVEXA_SO) $(VEXA_LD) $(DLTEST_SO) $(BUILD)/rootfs/lib/
 	# The standard root certificates, for native programs (fetch's HTTPS).
 	mkdir -p $(BUILD)/rootfs/etc/ssl/certs
@@ -570,6 +636,8 @@ $(INITRAMFS): $(PROGRAM_BINS) $(LIBVEXA_SO) $(VEXA_LD) $(DLTEST_SO) $(ROOTFS_FIL
 	done
 	# Doom's game files are on the boot CD (make_iso puts them there).
 	ln -s /cdrom/doom/freedoom1.wad $(BUILD)/rootfs/apps/Doom.vxapp/Contents/Resources/freedoom1.wad
+	# NetSurf's resources (its pages, style sheets, messages, pictures).
+	cp -R $(NETSURF_RES)/. $(BUILD)/rootfs/apps/NetSurf.vxapp/Contents/Resources/
 	# OpenGL (Mesa) is on the boot CD too.
 	ln -s /cdrom/lib/libOSMesa.so $(BUILD)/rootfs/lib/libOSMesa.so
 	# /linux: the files that change (etc, var, root) are here, in memory;
@@ -989,11 +1057,12 @@ test-safe:
 		--usb ehci
 
 # Vexa must work without the Linux subsystem: build and boot a kernel without it.
-native-iso: $(DOOM) $(CXX_TEST) $(CXX_TEST_STATIC) $(MESA_VEXA) $(SDL_GL_TEST) \
+native-iso: $(DOOM) $(CXX_TEST) $(CXX_TEST_STATIC) $(MESA_VEXA) $(SDL_GL_TEST) $(NETSURF) \
 		$(BUILD)/freedoom/freedoom1.wad
 	$(MAKE) BUILD=$(BUILD)/native LINUX_COMPAT=0 DOOM_PROGRAM=$(abspath $(DOOM)) \
 		CXX_TEST_PROGRAM="$(abspath $(CXX_TEST) $(CXX_TEST_STATIC))" \
 		MESA_VEXA_LIB=$(abspath $(MESA_VEXA)) SDL_GL_TEST_PROGRAM=$(abspath $(SDL_GL_TEST)) \
+		NETSURF_PROGRAM=$(abspath $(NETSURF)) NETSURF_RES=$(abspath $(NETSURF_DIR)/res) \
 		FREEDOOM_DIR=$(abspath $(BUILD)/freedoom) iso
 # Installing on a disk (the Installer app), then starting from it.
 test-install: $(ISO)

@@ -38,6 +38,9 @@ bool __vx_nonblocking(int fd);
 void __vx_set_nonblocking(int fd, bool on);
 bool __vx_is_socket(int fd);
 void __vx_forget_fd(int fd);
+/* Directory handles' paths, for the *at calls (posix2.c). */
+void __vx_remember_dir(int fd, const char *path);
+void __vx_forget_dir(int fd);
 
 void __libvexa_threads_init(void);
 /* Thread-local storage (tls.c): a thread record of `size` bytes (starting
