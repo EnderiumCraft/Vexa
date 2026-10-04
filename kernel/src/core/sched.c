@@ -737,6 +737,38 @@ void sched_for_each_thread(void (*fn)(struct thread *thread, void *arg), void *a
     spin_unlock_irqrestore(&sched_lock, flags);
 }
 
+/* Alt+SysRq: every thread, what it's doing, and (if it isn't running) the
+ * return addresses on its kernel stack, for addr2line on vexa-kernel. */
+static void dump_one(struct thread *thread, void *arg) {
+    (void)arg;
+    kprintf("[sched] %u %s: %s cpu %u nice %d%s\n", thread->id, thread->name,
+            thread_state_name(thread->state), thread->cpu, thread->nice,
+            thread->waiting_on ? " (on a wait queue)" : "");
+    if (thread->state == THREAD_RUNNING || !thread->stack_top || !thread->rsp) {
+        return;
+    }
+    uint64_t low = thread->stack_top - KERNEL_STACK_SIZE, high = thread->stack_top;
+    const uint64_t *saved = (const uint64_t *)thread->rsp; /* r15 r14 r13 r12 rbx rbp ret */
+    if (thread->rsp < low || thread->rsp + 7 * 8 > high) {
+        return;
+    }
+    kprintf("    %lx", saved[6]);
+    uint64_t rbp = saved[5];
+    for (int depth = 0; depth < 16 && rbp >= low && rbp + 16 <= high; depth++) {
+        const uint64_t *frame = (const uint64_t *)rbp;
+        kprintf(" %lx", frame[1]);
+        if (frame[0] <= rbp) {
+            break;
+        }
+        rbp = frame[0];
+    }
+    kprintf("\n");
+}
+
+void sched_dump(void) {
+    sched_for_each_thread(dump_one, NULL);
+}
+
 const char *thread_state_name(enum thread_state state) {
     switch (state) {
     case THREAD_READY: return "ready";

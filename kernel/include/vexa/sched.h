@@ -139,5 +139,7 @@ void sched_preempt_if_needed(void);
 /* Calls `fn` for every thread, with the scheduler lock held. */
 void sched_for_each_thread(void (*fn)(struct thread *thread, void *arg), void *arg);
 const char *thread_state_name(enum thread_state state);
+/* Prints every thread and its kernel stack's return addresses (Alt+SysRq). */
+void sched_dump(void);
 
 #endif

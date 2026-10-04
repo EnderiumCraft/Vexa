@@ -62,6 +62,8 @@ static void push_key(int key) {
     }
 }
 
+static bool alt_down;
+
 static bool modifier(uint16_t keycode, bool down) {
     switch (keycode) {
     case VX_KEY_LEFTSHIFT: shift_left = down; return true;
@@ -75,6 +77,8 @@ static bool modifier(uint16_t keycode, bool down) {
         return true;
     case VX_KEY_LEFTALT:
     case VX_KEY_RIGHTALT:
+        alt_down = down;
+        return true;
     case VX_KEY_LEFTMETA:
     case 126: /* Right Meta */
         return true;
@@ -132,7 +136,11 @@ void keyboard_key(struct input_device *device, uint16_t keycode, int value) {
     if (value && !is_modifier && !input_grabbed(device) && !input_grabbed(input_all_keyboards())) {
         console_text(keycode);
     }
+    bool dump = value == 1 && keycode == 99 && alt_down; /* Alt+SysRq */
     spin_unlock_irqrestore(&lock, flags);
+    if (dump) {
+        sched_dump();
+    }
 }
 
 /* Repeats for the keyboards that don't (see keyboard_key). */
