@@ -632,6 +632,14 @@ boot CD), which SDL programs use for their OpenGL windows. `sdl-gl-test` opens o
 checks what it draws and spins a triangle for a second (`sdl-gl-test --spin` keeps
 going until you close it).
 
+In QEMU with its **virtio GPU with 3D** (virgl), native programs' OpenGL runs on your
+computer's graphics card instead: Vexa finds the device (`/dev/dri/renderD128`) and Mesa
+uses it, with OpenGL 4.3 or so, depending on your computer. Start QEMU with
+`-device virtio-gpu-gl-pci -display gtk,gl=on` (or `make run-virgl` from a checkout),
+keeping the usual screen; `sdl-gl-test` then says `virgl` and the host's renderer.
+`VEXA_GL=softpipe` (`export VEXA_GL=softpipe`) makes a program draw on the processor
+anyway. The desktop itself still draws on the processor.
+
 ## Sound
 
 With an HD Audio sound card (the kind in most PCs, and QEMU's `intel-hda`; `make run`

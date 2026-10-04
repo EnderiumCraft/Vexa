@@ -70,6 +70,7 @@ What goes into the ISO:
 make run            # QEMU with a window; the serial log (the kernel's messages) in your terminal
 make run-disk       # the same, with build/my-disk.img (ext2) at /mnt/vda1, kept between runs
 make run-nographic  # no window: the serial console only (Ctrl-A then X quits)
+make run-virgl      # with QEMU's virtio GPU with 3D: native OpenGL on this machine's GPU
 ```
 
 `QEMU=...` and `QEMU_NET=...` change the QEMU binary and its network options. The ISO
@@ -87,6 +88,12 @@ installs it on a disk:
 | `test-safe` | the safe mode boot (no ACPI, the legacy PIC and PIT), with an Intel e1000 card |
 | `test-native-boot` | a kernel built with `LINUX_COMPAT=0`, on QEMU's `pc` machine (i440FX: the CD on IDE, as in VirtualBox), with OHCI USB |
 | `test-install` | `tools/install-test.sh`: the Installer app puts Vexa on an empty disk (`--install`); `e2fsck` checks it; then the disk starts without the CD, with BIOS and with UEFI (`--installed`), and a file written at the first start is read at the second |
+
+`make test-virgl` (not part of `make test`) adds QEMU's virtio GPU with 3D
+(`--virgl`: `virtio-gpu-gl-pci`, with QEMU's GTK display and OpenGL, on Xvfb when there's
+no X display) and checks `sdl-gl-test` on it, then with softpipe. It needs QEMU with
+virglrenderer and the machine's EGL and OpenGL libraries (`libegl1`,
+`libgl1-mesa-dri`).
 
 Each boot is driven by `tools/qemu-smoke-test.py`: it types commands on QEMU's virtual
 keyboard, moves and clicks the virtual mouse, and waits for the expected text in the

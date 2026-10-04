@@ -596,8 +596,9 @@ VIRGL_COMMANDS = [
     ("desktop", 'desktop: window 1 "Terminal"', 30),
     ("@type sdl-gl-test > /dev/console 2> /dev/console", "sdl-gl-test: virgl", 120),
     ("@mouse_move 0 0", "sdl-gl-test: passed", 120),
-    ("@type VEXA_GL=softpipe sdl-gl-test > /dev/console 2> /dev/console",
-     "sdl-gl-test: softpipe", 120),
+    # VEXA_GL=softpipe: Mesa on the processor even so.
+    ("@type export VEXA_GL=softpipe", None, 5),
+    ("@type sdl-gl-test > /dev/console 2> /dev/console", "sdl-gl-test: softpipe", 120),
     ("@mouse_move 0 0", "sdl-gl-test: passed", 120),
     ("@sendkey ctrl-alt-q", "desktop: asking before leaving", 20),
     ("@sendkey ret", "desktop: back to the console", 20),

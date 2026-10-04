@@ -157,7 +157,8 @@ system shapes, but not pictures of its own.
 ## OpenGL
 
 Mesa 24 (OpenGL 4.5 and the compatibility profile, drawn on the processor by
-softpipe) is `/lib/libOSMesa.so` on Vexa, with its headers here (`GL/gl.h`,
+softpipe, or on the host's GPU through QEMU's virtio GPU with 3D, virgl, when Vexa
+has one) is `/lib/libOSMesa.so` on Vexa, with its headers here (`GL/gl.h`,
 `GL/glext.h`, `GL/osmesa.h`) and `lib/libOSMesa.so` to link against. With SDL, ask for
 an OpenGL window and context as anywhere else; SDL's Vexa driver loads Mesa, and
 `SDL_GL_SwapWindow` puts each frame in the window:

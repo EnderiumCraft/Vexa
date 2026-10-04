@@ -92,7 +92,8 @@ runs X programs such as `xterm` in windows of their own on it. The kernel:
   libm) for programs ported to it
 - has an SDK for building native programs and apps on Linux: `vexa-cc` and `vexa-c++`
   (with libc++), an app template (`vexa-new-app`), a CMake toolchain file, SDL 2 with
-  Vexa drivers (each SDL window a desktop window, OpenGL through Mesa's softpipe,
+  Vexa drivers (each SDL window a desktop window, OpenGL through Mesa's softpipe or,
+  in QEMU, on the host's GPU through the virtio GPU with 3D (virgl),
   sound on the HD Audio device), and SDL_mixer; each release carries it
 - plays Doom: Chocolate Doom, built with the SDK like any SDL program, with Freedoom's
   levels, art and music
@@ -105,6 +106,8 @@ runs X programs such as `xterm` in windows of their own on it. The kernel:
   USB sticks and disks (mounted at `/mnt/usb0`), plugged in and out while it runs
 - drives wired network cards: virtio-net, Intel e1000 and e1000e, Realtek RTL8139 and
   RTL8111/8168
+- drives QEMU's virtio GPU with 3D (virgl), for OpenGL on the host's graphics card,
+  with Linux's virtgpu DRM interface (`/dev/dri/renderD128`)
 - keeps a tree of every device and its driver, which Device Manager (an app) and
   `devices` (a command) show
 - drives disks through virtio-blk (virtual machines), AHCI (SATA disks and CD/DVD
