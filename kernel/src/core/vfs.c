@@ -75,8 +75,13 @@ void vnode_put(struct vnode *vnode) {
         }
     }
     /* Perhaps the last: under the mount's lock, so a lookup that finds the
-     * vnode in its file system's cache can't take a reference meanwhile. */
-    struct mount *mount = vnode->mount;
+     * vnode in its file system's cache can't take a reference meanwhile.
+     * Not where sleeping isn't allowed (interrupts off: a spinlock is held,
+     * as when the scheduler frees a process and its terminal's vnode), and
+     * the vnodes let go there are devices' and terminals', which need none. */
+    uint64_t rflags;
+    __asm__ volatile("pushfq; popq %0" : "=r"(rflags));
+    struct mount *mount = (rflags & (1ULL << 9)) ? vnode->mount : NULL;
     bool taken = fs_enter(mount);
     if (__atomic_sub_fetch(&vnode->refs, 1, __ATOMIC_ACQ_REL) == 0 && vnode->ops->release) {
         vnode->ops->release(vnode);
