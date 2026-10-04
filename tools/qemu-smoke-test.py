@@ -268,7 +268,7 @@ TYPED_COMMANDS = ([
     ("@mouse_button 2", "files: menu for /", 10),
     ("@mouse_button 0", None, 2),
     ("@sendkey esc", None, 2),
-    ("@mouse_move 292 16", None, 5),
+    ("@mouse_move 295 13", None, 5),
     ("@mouse_button 2", "desktop: menu at 1000,650", 10),
     ("@mouse_button 0", None, 2),
     ("@mouse_move 20 112", None, 5),
@@ -314,7 +314,9 @@ TYPED_COMMANDS = ([
     ("@sendkey print", "desktop: screenshot 1280x800 saved to /home/vexa/Pictures/Screenshot", 60),
     ("@sendkey meta_l-l", "desktop: locked", 10),
     ("@sendkey ret", "desktop: unlocked", 10),
-    # With a password on the account, the lock screen wants it.
+    # With a password on the account, the lock screen wants it. (Alt+Tab
+    # first: the terminal, window 1, takes the typing again.)
+    ("@sendkey alt-tab", "desktop: switched to window 1", 10),
     ("@type echo secret | accounts password --password-stdin > /dev/console",
      "accounts: changed vexa's password", 20),
     ("@sendkey meta_l-l", "desktop: locked", 10, 2),
