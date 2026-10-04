@@ -364,8 +364,8 @@ in `.vxapp`, kept in `/apps`. Files shows each one as a single app with its icon
 | Calendar | `Calendar.vxapp` | a month at a time, with your events |
 | Notes | `Notes.vxapp` | notes, saved as you type |
 | Paint | `Paint.vxapp` | drawing and painting; opens and saves PNG |
-| Music | `Music.vxapp` | plays MP3, Ogg Vorbis, FLAC and WAV: songs in a list, a scrubber |
-| Videos | `Videos.vxapp` | plays MPEG-1 videos (`.mpg`, with their sound) |
+| Music | `Music.vxapp` | plays MP3, Ogg Vorbis, FLAC and WAV: songs, artists and albums, search, a live spectrum |
+| Videos | `Videos.vxapp` | plays MPEG-1 videos (`.mpg`, with their sound): a library with pictures, floating controls |
 | Help | `Help.vxapp` | this guide, with its contents and search |
 | XTerm | `XTerm.vxapp` | an xterm (a Linux X program; only when the Linux files are there) |
 
@@ -523,24 +523,40 @@ them). Ctrl+Z and Ctrl+Y undo and redo; New, Open and Save (Ctrl+N, O, S) use PN
 
 ### Music
 
-Plays **MP3**, **Ogg Vorbis**, **FLAC** and **WAV** files, like the iTunes of old: Back,
-Play/Pause and Next on the toolbar, a glossy display with the song (its title, artist
-and album from the file's tags), the time and a scrubber (click it to jump), and the
-songs in a list below (double-click one to play it). It lists what's in `~/Music` and
-`/share/music` (where there's a little piece to try), and **Add...** (or dropping files
-or folders on it) adds more. Shuffle and Repeat do what they say. Space plays and
-pauses, Left and Right go 5 seconds back and on, Delete takes a song out of the list.
-Opening a sound file in Files opens it in Music. `music --play song.mp3` plays one at
-the shell, without a window.
+Plays **MP3**, **Ogg Vorbis**, **FLAC** and **WAV** files. On the left, Vexa's dark
+sidebar has the library (**Songs**, **Artists**, **Albums**, with how many of each), the
+folders it reads (`Music` in your home folder, and `/share/music`, where there's a
+little piece to try), **Add Music...**, and at the bottom what's playing. Up top, the
+song playing: its cover (made up from its album's name: Vexa doesn't read pictures from
+the files yet), its title, artist and album from the file's tags, its format, and a live
+spectrum of the sound. Below are the songs (double-click one to play it; the one
+playing has little moving bars), or the artists and albums as cards (a click shows
+their songs and plays the first; **All Songs** goes back). The search field (Ctrl+F)
+looks through titles, artists and albums.
+
+Along the bottom: shuffle, back, play/pause, next and repeat, the scrubber (click or
+drag it; it shows the time under the pointer) and Music's own volume (the speaker mutes;
+it's kept for next time). Space plays and pauses, Left and Right go 5 seconds back and
+on, Ctrl+Left and Ctrl+Right go to the song before or after, + and - change the volume,
+Delete takes a song out of the list, Escape goes back to all the songs. Dropping files
+or folders on it adds them. Opening a sound file in Files opens it in Music.
+`music --play song.mp3` plays one at the shell, without a window.
 
 ### Videos
 
-Plays **MPEG-1** videos (`.mpg`, `.mpeg`, with MP2 sound), like QuickTime: the picture
-fills the window, its shape kept, and a dark glass bar with Play/Pause, the time and a
-scrubber shows while the pointer moves (a click on the picture plays or pauses). Space,
-Left and Right work as in Music. There's a sample in `/share/videos`. Other formats can
-be turned into MPEG-1 on another computer, with `ffmpeg -i in.mp4 -c:v mpeg1video
--q:v 4 -c:a mp2 out.mpg`. `videos --play film.mpg` plays one without a window.
+Plays **MPEG-1** videos (`.mpg`, `.mpeg`, with MP2 sound). It opens on the library: the
+videos in `Videos` in your home folder and in `/share/videos` (there's a sample), as
+cards with a picture from each, how long it is and its size; a click plays one, and
+**Open...** plays one from anywhere. Playing, the picture fills the window, its shape
+kept and scaled smoothly (F, the corners button or a double click fills the whole window
+instead). The controls float over it while the pointer moves: **Library** to go back,
+the video's name, and a glass bar with play/pause, ten seconds back and on, the scrubber
+(click or drag; it shows the time under the pointer), the time, and Videos' own volume.
+Paused, a big play button sits in the middle. Space plays and pauses, Left and Right go
+5 seconds back and on, Up and Down change the volume, Home goes to the start, Escape
+back to the library. Other formats can be turned into MPEG-1 on another computer, with
+`ffmpeg -i in.mp4 -c:v mpeg1video -q:v 4 -c:a mp2 out.mpg`. `videos --play film.mpg`
+plays one without a window.
 
 ### Help
 
