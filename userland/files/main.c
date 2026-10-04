@@ -27,6 +27,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <vexa/app.h>
 #include <vexa/files.h>
 #include <vexa/gui.h>
@@ -52,9 +53,10 @@
 
 /* ---- What's shown ---- */
 
-enum kind { K_FOLDER, K_APP, K_IMAGE, K_TEXT, K_PROGRAM, K_DEVICE, K_LINK, K_DOCUMENT };
+enum kind { K_FOLDER, K_APP, K_IMAGE, K_TEXT, K_PROGRAM, K_DEVICE, K_LINK, K_DOCUMENT, K_AUDIO,
+            K_VIDEO, KIND_COUNT };
 static const char *const kind_names[] = {"Folder", "App", "Image", "Text", "Program",
-                                         "Device", "Link", "Document"};
+                                         "Device", "Link", "Document", "Audio", "Video"};
 
 struct item {
     char name[256];
@@ -105,7 +107,7 @@ static char back_stack[MAX_HISTORY][512], forward_stack[MAX_HISTORY][512];
 static int back_count, forward_count;
 
 /* Files' own pictures, from its bundle. */
-static struct vx_image *kind_icons[8], *place_icons[16], *disk_icon;
+static struct vx_image *kind_icons[KIND_COUNT], *place_icons[16], *disk_icon;
 
 /* ---- Small helpers ---- */
 
@@ -160,9 +162,9 @@ static struct vx_image *resource(const char *name) {
 }
 
 static void load_resources(void) {
-    static const char *const kinds[] = {"folder", "folder", "image", "text",
-                                        "program", "device", "document", "document"};
-    for (int i = 0; i < 8; i++) {
+    static const char *const kinds[] = {"folder", "folder", "image", "text", "program",
+                                        "device", "document", "document", "audio", "video"};
+    for (int i = 0; i < KIND_COUNT; i++) {
         kind_icons[i] = resource(kinds[i]);
     }
     disk_icon = resource("disk");
@@ -189,6 +191,15 @@ static enum kind kind_of_name(const char *name, uint32_t type) {
             if (!strcmp(dot, texts[i])) {
                 return K_TEXT;
             }
+        }
+        static const char *const sounds[] = {".mp3", ".ogg", ".oga", ".flac", ".wav"};
+        for (size_t i = 0; i < sizeof(sounds) / sizeof(sounds[0]); i++) {
+            if (!strcasecmp(dot, sounds[i])) {
+                return K_AUDIO;
+            }
+        }
+        if (!strcasecmp(dot, ".mpg") || !strcasecmp(dot, ".mpeg")) {
+            return K_VIDEO;
         }
     }
     return K_DOCUMENT;

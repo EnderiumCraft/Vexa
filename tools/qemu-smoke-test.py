@@ -430,10 +430,10 @@ LINUX_COMMANDS = [
     ("@mouse_button 1", "desktop: left button at 31,13", 10),
     ("@mouse_button 0", None, 5),
     ("@mouse_move 0 199", None, 5),
-    ("@mouse_move 0 223", None, 5),
-    ("@mouse_button 1", "desktop: left button at 31,435", 10),
+    ("@mouse_move 0 271", None, 5),
+    ("@mouse_button 1", "desktop: left button at 31,483", 10),
     ("@mouse_button 0", "desktop: window 3", 300),
-    ("@mouse_move 181 -127", None, 10),
+    ("@mouse_move 181 -175", None, 10),
     ("@mouse_button 1", "desktop: left button at 212,308", 10),
     ("@mouse_button 0", 'desktop: window 3 is now called "Change Display"', 60),
     # GTK draws its own title bar (the desktop draws none for it); its
@@ -670,6 +670,16 @@ DISK_COMMANDS = [
     ("mv /mnt/vdd/note.txt '/mnt/vdd/A folder on exFAT/Note.txt'", None, 10),
     ("cat '/mnt/vdd/a folder on exfat/note.txt'", "written on exfat", 10, 2),
     ("df", "exfat", 10),
+    # Music and Videos (without their windows): an MP3, an Ogg Vorbis and a
+    # FLAC tone, and an MPEG-1 video with a tone; QEMU records each.
+    ("music --play /mnt/vda1/media/tone-523.mp3", "music: done", 60),
+    ("@sound 523", None, 10),
+    ("music --play /mnt/vda1/media/tone-659.ogg", "music: done", 60, 2),
+    ("@sound 659", None, 10),
+    ("music --play /mnt/vda1/media/tone-784.flac", "music: done", 60, 3),
+    ("@sound 784", None, 10),
+    ("videos --play /mnt/vda1/media/test.mpg", "frames, done", 120),
+    ("@sound 440", None, 10),
     ("#shell",),
 ]
 
@@ -924,7 +934,7 @@ INSTALL_COMMANDS = [
     # Installing again from the shell: what's mounted from the disk (the new
     # system, its FAT32 boot partition) is ejected first.
     ("install --yes --no-linux vda", "[storage] vda ejected", 20),
-    ("@sendkey shift", "done: Vexa is on vda", 300),
+    ("@sendkey shift", "done: Vexa is on vda", 300, 2),  # (The first: the Installer's.)
 ]
 
 # Starting from that disk (--installed DISK, no CD): the root file system is

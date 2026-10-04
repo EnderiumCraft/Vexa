@@ -57,7 +57,7 @@ runs X programs such as `xterm` in windows of their own on it. The kernel:
   settings, files, sums), screenshots (PrintScreen), a screensaver and a lock screen,
   and its own apps: a terminal with tabs, Files, a text editor with tabs, undo and
   syntax colouring, an image viewer (PNG, BMP, PPM), Settings, Activity Monitor, a
-  calculator, a calendar, Notes, Paint and Help, sharing Open and Save dialogs and
+  calculator, a calendar, Notes, Paint, Music (MP3, Ogg, FLAC, WAV), Videos (MPEG-1) and Help, sharing Open and Save dialogs and
   one clipboard (with X programs too); the default wallpaper is `/share/pictures/glass.png`
 - draws text smooth with TrueType fonts (DejaVu, through stb_truetype) in UTF-8, so
   Vexa's apps show and type any language's letters, with whole keyboard layouts
@@ -325,7 +325,13 @@ The console font is [Spleen](https://github.com/fcambus/spleen) 8x16 by Frederic
 with the [DejaVu](https://dejavu-fonts.github.io) fonts (Bitstream Vera license and
 public domain changes, `rootfs/share/fonts/LICENSE`), rasterized by
 [stb_truetype](https://github.com/nothings/stb) (public domain or MIT,
-`third_party/stb/stb_truetype.h`). The kernel interprets ACPI's AML with
+`third_party/stb/stb_truetype.h`). Music decodes with
+[minimp3](https://github.com/lieff/minimp3) (CC0),
+[stb_vorbis](https://github.com/nothings/stb) (public domain or MIT) and
+[dr_flac](https://github.com/mackron/dr_libs) (public domain or MIT-0), and Videos with
+[pl_mpeg](https://github.com/phoboslab/pl_mpeg) (MIT), all in `third_party/media`; the
+sample music and video in `/share` were made for Vexa (`tools/make-media.py`) and are
+CC0. The kernel interprets ACPI's AML with
 [uACPI](https://github.com/uACPI/uACPI) 6.1.1 (MIT license, `third_party/uacpi`).
 
 The ISO includes [BusyBox](https://busybox.net) 1.36.1 (GPL-2.0), built unmodified from

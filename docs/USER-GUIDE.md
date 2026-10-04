@@ -318,6 +318,8 @@ in `.vxapp`, kept in `/apps`. Files shows each one as a single app with its icon
 | Calendar | `Calendar.vxapp` | a month at a time, with your events |
 | Notes | `Notes.vxapp` | notes, saved as you type |
 | Paint | `Paint.vxapp` | drawing and painting; opens and saves PNG |
+| Music | `Music.vxapp` | plays MP3, Ogg Vorbis, FLAC and WAV: songs in a list, a scrubber |
+| Videos | `Videos.vxapp` | plays MPEG-1 videos (`.mpg`, with their sound) |
 | Help | `Help.vxapp` | this guide, with its contents and search |
 | XTerm | `XTerm.vxapp` | an xterm (a Linux X program; only when the Linux files are there) |
 
@@ -472,6 +474,27 @@ Eraser and Pick (a colour from the picture), four sizes and sixteen colours; a r
 click draws with the second colour (the square behind the first; a click on them swaps
 them). Ctrl+Z and Ctrl+Y undo and redo; New, Open and Save (Ctrl+N, O, S) use PNG files
 (BMP and PPM open too). `paint [file]` opens one.
+
+### Music
+
+Plays **MP3**, **Ogg Vorbis**, **FLAC** and **WAV** files, like the iTunes of old: Back,
+Play/Pause and Next on the toolbar, a glossy display with the song (its title, artist
+and album from the file's tags), the time and a scrubber (click it to jump), and the
+songs in a list below (double-click one to play it). It lists what's in `~/Music` and
+`/share/music` (where there's a little piece to try), and **Add...** (or dropping files
+or folders on it) adds more. Shuffle and Repeat do what they say. Space plays and
+pauses, Left and Right go 5 seconds back and on, Delete takes a song out of the list.
+Opening a sound file in Files opens it in Music. `music --play song.mp3` plays one at
+the shell, without a window.
+
+### Videos
+
+Plays **MPEG-1** videos (`.mpg`, `.mpeg`, with MP2 sound), like QuickTime: the picture
+fills the window, its shape kept, and a dark glass bar with Play/Pause, the time and a
+scrubber shows while the pointer moves (a click on the picture plays or pauses). Space,
+Left and Right work as in Music. There's a sample in `/share/videos`. Other formats can
+be turned into MPEG-1 on another computer, with `ffmpeg -i in.mp4 -c:v mpeg1video
+-q:v 4 -c:a mp2 out.mpg`. `videos --play film.mpg` plays one without a window.
 
 ### Help
 

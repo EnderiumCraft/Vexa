@@ -165,6 +165,24 @@ def image_file():
     return im
 
 
+def audio_file():
+    """A page with a note on it."""
+    im, d = page()
+    c = (110, 80, 220, 255)
+    d.ellipse([15 * S, 30 * S, 23 * S, 37 * S], fill=c)
+    d.rectangle([21 * S, 16 * S, 23 * S, 34 * S], fill=c)
+    d.polygon([(21 * S, 16 * S), (31 * S, 19 * S), (31 * S, 23 * S), (23 * S, 20 * S)], fill=c)
+    return im
+
+
+def video_file():
+    """A page with a film frame and a play triangle on it."""
+    im, d = page()
+    d.rectangle([12 * S, 17 * S, 34 * S, 35 * S], fill=(40, 40, 52, 255))
+    d.polygon([(20 * S, 21 * S), (28 * S, 26 * S), (20 * S, 31 * S)], fill=(90, 160, 255, 255))
+    return im
+
+
 def program():
     im = gradient_tile((70, 60, 110), (30, 24, 52), 5, 8, 43, 40, 5)
     d = ImageDraw.Draw(im)
@@ -292,6 +310,33 @@ def paint():
     return im
 
 
+def music():
+    """A double note, white, on a glossy blue-violet tile."""
+    im = gradient_tile((120, 160, 255), (110, 60, 210))
+    d = ImageDraw.Draw(im)
+    d.rounded_rectangle([5 * S, 4 * S, 43 * S, 22 * S], 8 * S, fill=(255, 255, 255, 55))
+    white = (255, 255, 255, 255)
+    d.ellipse([11 * S, 29 * S, 21 * S, 37 * S], fill=white)
+    d.ellipse([27 * S, 26 * S, 37 * S, 34 * S], fill=white)
+    d.rectangle([18 * S, 13 * S, 21 * S, 33 * S], fill=white)
+    d.rectangle([34 * S, 10 * S, 37 * S, 30 * S], fill=white)
+    d.polygon([(18 * S, 13 * S), (37 * S, 9 * S), (37 * S, 15 * S), (18 * S, 19 * S)], fill=white)
+    return im
+
+
+def videos():
+    """A strip of film with a play triangle, on a dark glossy tile."""
+    im = gradient_tile((80, 84, 100), (24, 26, 36))
+    d = ImageDraw.Draw(im)
+    d.rounded_rectangle([5 * S, 4 * S, 43 * S, 22 * S], 8 * S, fill=(255, 255, 255, 40))
+    d.rectangle([8 * S, 12 * S, 40 * S, 36 * S], fill=(16, 16, 22, 255))
+    for i in range(6):
+        d.rectangle([(10 + i * 5) * S, 13 * S, (13 + i * 5) * S, 15 * S], fill=(220, 220, 230, 255))
+        d.rectangle([(10 + i * 5) * S, 33 * S, (13 + i * 5) * S, 35 * S], fill=(220, 220, 230, 255))
+    d.polygon([(20 * S, 18 * S), (31 * S, 24 * S), (20 * S, 30 * S)], fill=(90, 160, 255, 255))
+    return im
+
+
 def device_manager():
     """A chip on a board."""
     im = gradient_tile((120, 200, 170), (40, 130, 110))
@@ -383,6 +428,7 @@ def sdl_app():
 # Files' own pictures (Files.vxapp/Contents/Resources): kinds of files, places.
 FILE_ICONS = {
     "folder": files, "document": document, "text": text_file, "image": image_file,
+    "audio": audio_file, "video": video_file,
     "program": program, "device": device, "computer": computer, "disk": disk,
     "trash": trash, "apps": apps_folder, "pictures": pictures_folder,
 }
@@ -392,7 +438,7 @@ ICONS = {
     "Settings": settings, "About": about, "XTerm": xterm,
     "Monitor": activity, "Calculator": calculator, "Calendar": calendar,
     "Notes": notes, "Paint": paint, "Help": help_book, "DeviceManager": device_manager,
-    "Installer": installer, "Doom": doom, "NetSurf": netsurf,
+    "Installer": installer, "Doom": doom, "NetSurf": netsurf, "Music": music, "Videos": videos,
 }
 
 if __name__ == "__main__":
