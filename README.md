@@ -1,6 +1,6 @@
 # Vexa
 
-Vexa is a hobby operating system for x86_64, written from scratch in C.
+Vexa is a hobby operating system for x86_64, written from scratch in C. Why? Because funny.
 The long-term goal is to run **Mozilla Firefox**.
 
 Vexa has its own kernel design, its own system call interface and its own C library.
