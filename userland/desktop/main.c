@@ -113,6 +113,9 @@ int pointer_x, pointer_y, buttons;
 static struct rect damage; /* What must be drawn again (width 0: nothing). */
 static bool quit;
 static bool logging_out; /* quit, and vinit starts the desktop again for someone else. */
+/* Started from the CD with the Installer: only the wallpaper and the Installer,
+ * in the middle (no panel, no icons), until it closes. */
+static bool installer_only;
 /* Who's logged in, and their folders (see shell.h). */
 struct vx_user session_user;
 bool session_has_password;
@@ -1324,7 +1327,9 @@ static void compose(struct rect area) {
         lock_draw(&view, ox, oy);
     } else {
         vx_blit(&view, 0, 0, &wallpaper, area.x, area.y, area.width, area.height);
-        icons_draw(&view, ox, oy);
+        if (!installer_only) {
+            icons_draw(&view, ox, oy);
+        }
         for (int i = 0; i < window_count; i++) {
             struct window *w = stack[i];
             if (w->animation != ANIM_NONE) {
@@ -1366,7 +1371,7 @@ static void compose(struct rect area) {
             outline_rounded(&view, s, 10, COLOR_OUTLINE);
         }
         draw_notes(&view, ox, oy);
-        if (area.y < PANEL_HEIGHT) {
+        if (area.y < PANEL_HEIGHT && !installer_only) {
             draw_panel(&view, ox, oy);
         }
         if (menu_open) {
@@ -1768,6 +1773,11 @@ static void destroy_window(struct window *w) {
     vx_unmap(w->content.pixels, w->mapped_size);
     vx_close(w->buffer_handle);
     printf("desktop: closed window %d \"%s\"\n", w->id, w->title);
+    if (installer_only && !strcmp(w->title, "Installer")) {
+        installer_only = false; /* The desktop, now: the panel and the icons. */
+        damage_all();
+        printf("desktop: the whole desktop now\n");
+    }
     free(w);
     update_cursor();
 }
@@ -1822,6 +1832,12 @@ static void create_window(int client, struct desktop_message *m) {
         }
         if (w->y + height > screen.height) {
             w->y = PANEL_HEIGHT + TITLE_HEIGHT + BORDER;
+        }
+        if (installer_only && !w->popup) { /* In the middle of the screen. */
+            w->x = screen.width > width ? (screen.width - width) / 2 : BORDER;
+            w->y = screen.height > height + TITLE_HEIGHT
+                       ? (screen.height - height - TITLE_HEIGHT) / 2 + TITLE_HEIGHT
+                       : TITLE_HEIGHT + BORDER;
         }
         stack[window_count++] = w;
         raise_window(w);
@@ -2997,6 +3013,9 @@ static void button_event(int bit, bool down) {
             return; /* Its own button: closed, not opened again. */
         }
     }
+    if ((left_down || right_down) && installer_only && !window_at(pointer_x, pointer_y)) {
+        return; /* (Nothing but the wallpaper there.) */
+    }
     if (right_down && pointer_y >= PANEL_HEIGHT && !window_at(pointer_x, pointer_y)) {
         set_menu(false);
         open_popup(icons_at(pointer_x, pointer_y));
@@ -3484,7 +3503,13 @@ void session_start(const struct vx_user *user) {
      * isn't wanted unless Settings asks for one; then maybe a program.) */
     bool boot = boot_argc > 1 && strcmp(boot_argv[1], "--boot") == 0;
     if (boot_argc > (boot ? 2 : 1)) {
-        launch(boot_argv[boot ? 2 : 1]);
+        const char *first = boot_argv[boot ? 2 : 1];
+        size_t n = strlen(first);
+        if (boot && n >= 9 && !strcmp(first + n - 9, "installer")) {
+            installer_only = true;
+            damage_all();
+        }
+        launch(first);
     } else if (vx_settings_bool(&config, "startup_terminal", !boot)) {
         launch("/bin/term");
     }

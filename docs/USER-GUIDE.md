@@ -57,8 +57,9 @@ controllers and some IDE ones are then polled), can also be written into `limine
 
 While it starts, the kernel prints what it finds (memory, CPUs, disks, the network).
 Then `vinit`, the first program, starts the desktop. Started from the CD, the desktop
-opens the **Installer** first: install Vexa on a disk from there, or close it to try
-Vexa from the CD (it's in the Vexa menu as **Install Vexa** later). Started from a
+opens the **Installer** first, alone in the middle of the wallpaper (no panel, no
+icons): install Vexa on a disk from there, or close it to try Vexa from the CD, and the
+whole desktop appears (the Installer is in the Vexa menu as **Install Vexa** later). Started from a
 disk, it's just the desktop.
 
 Leaving the desktop (Ctrl+Alt+Q, or **Back to the console...** in the Vexa menu) goes to the shell;
