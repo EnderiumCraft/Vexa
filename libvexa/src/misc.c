@@ -1,4 +1,5 @@
-/* Signals (as far as Vexa has them), locales (one: "C"), assert, sched. */
+/* Signals (as far as Vexa has them), locales (one: "C"), assert, sched,
+ * syslog (to standard error) and flock (not kept). */
 #include <errno.h>
 #include <locale.h>
 #include <sched.h>
@@ -6,6 +7,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/file.h>
+#include <syslog.h>
+#include <unistd.h>
 #include <vexa/syscall.h>
 
 static sighandler_t handlers[NSIG];
@@ -130,5 +134,64 @@ int sched_get_priority_min(int policy) {
 
 int sched_get_priority_max(int policy) {
     (void)policy;
+    return 0;
+}
+
+/* ---- syslog: to standard error ---- */
+
+static const char *log_ident;
+static int log_options, log_mask = 0xff;
+
+void openlog(const char *ident, int options, int facility) {
+    (void)facility;
+    log_ident = ident;
+    log_options = options;
+}
+
+void vsyslog(int priority, const char *format, va_list args) {
+    if (!(log_mask & LOG_MASK(priority & 7))) {
+        return;
+    }
+    char message[1024];
+    vsnprintf(message, sizeof(message), format, args);
+    size_t length = strlen(message);
+    const char *ident = log_ident ? log_ident : "syslog";
+    if (log_options & LOG_PID) {
+        fprintf(stderr, "%s[%d]: %s%s", ident, (int)getpid(), message,
+                length && message[length - 1] == '\n' ? "" : "\n");
+    } else {
+        fprintf(stderr, "%s: %s%s", ident, message,
+                length && message[length - 1] == '\n' ? "" : "\n");
+    }
+}
+
+void syslog(int priority, const char *format, ...) {
+    va_list args;
+    va_start(args, format);
+    vsyslog(priority, format, args);
+    va_end(args);
+}
+
+void closelog(void) {
+    log_ident = NULL;
+}
+
+int setlogmask(int mask) {
+    int old = log_mask;
+    if (mask) {
+        log_mask = mask;
+    }
+    return old;
+}
+
+/* ---- flock: Vexa keeps no file locks ---- */
+
+int flock(int fd, int operation) {
+    (void)operation;
+    struct vx_stat st;
+    if (vx_handle_stat(fd, &st)) {
+        errno = EBADF;
+        return -1;
+    }
     return 0;
 }

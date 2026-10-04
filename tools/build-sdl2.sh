@@ -46,7 +46,7 @@ cd "$SRC"
 SOURCES=$(ls src/*.c src/atomic/*.c src/audio/*.c src/audio/dummy/*.c src/audio/vexa/*.c \
     src/cpuinfo/*.c src/dynapi/*.c src/events/*.c src/file/*.c src/filesystem/unix/*.c \
     src/haptic/*.c src/haptic/dummy/*.c src/hidapi/*.c src/joystick/*.c src/joystick/dummy/*.c \
-    src/libm/*.c src/loadso/dummy/*.c src/locale/*.c src/locale/dummy/*.c src/misc/*.c \
+    src/libm/*.c src/loadso/dlopen/*.c src/locale/*.c src/locale/dummy/*.c src/misc/*.c \
     src/misc/dummy/*.c src/power/*.c src/render/*.c src/render/software/*.c src/sensor/*.c \
     src/sensor/dummy/*.c src/stdlib/*.c src/thread/*.c src/thread/pthread/*.c src/timer/*.c \
     src/timer/unix/*.c src/video/*.c src/video/yuv2rgb/*.c src/video/dummy/*.c \
@@ -55,7 +55,7 @@ mkdir -p obj
 # (-include: what SDL's CMake build gives every file.)
 printf '%s\n' $SOURCES | xargs -P "$JOBS" -I{} sh -c '
     out=obj/$(echo "{}" | tr / _).o
-    "$0" -O2 -g -Wall -Wno-unused-parameter -Wno-sign-compare -Werror=implicit-function-declaration -Werror=int-conversion -Iinclude -Isrc \
+    "$0" -O2 -g -Wall -Wno-unused-parameter -Wno-sign-compare -Werror=implicit-function-declaration -Werror=int-conversion -Werror=incompatible-pointer-types -Iinclude -Isrc \
         -D_REENTRANT -DSDL_BUILDING_LIBRARY=1 -DDYNAPI_NEEDS_DLOPEN=1 \
         -fvisibility=hidden -c "{}" -o "$out"' "$CC"
 rm -f libSDL2.a

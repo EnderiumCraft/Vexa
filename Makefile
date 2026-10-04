@@ -406,12 +406,28 @@ $(LIBCXX_VEXA): $(LLVM_TARBALL) tools/build-libcxx-vexa.sh $(SDK_DIR)/.done
 	rm -rf $(LIBCXX_VEXA_DIR)
 	tools/build-libcxx-vexa.sh $(LLVM_TARBALL) $(SDK_DIR) $(BUILD)/libcxx-vexa-work $(LIBCXX_VEXA_DIR)
 
-$(SDK_DIR)/.complete: $(SDK_DIR)/.done $(SDL2) $(SDL2_MIXER) $(SDL2_NET) $(MBEDTLS_LIBS) $(LIBCXX_VEXA)
+$(SDK_DIR)/.cxx: $(SDK_DIR)/.done $(LIBCXX_VEXA)
 	mkdir -p $(SDK_DIR)/include/c++
 	cp -R $(LIBCXX_VEXA_DIR)/usr/include/c++/v1 $(SDK_DIR)/include/c++/
 	cp $(LIBCXX_VEXA_DIR)/lib/libc++.a $(LIBCXX_VEXA_DIR)/lib/libc++abi.a $(SDK_DIR)/lib/
 	tar -xJf $(LLVM_TARBALL) -O llvm-project-$(LLVM_VERSION).src/libcxx/LICENSE.TXT \
 		> $(SDK_DIR)/licenses/libcxx.txt
+	touch $@
+
+# OpenGL for native programs: Mesa's OSMesa with softpipe, built with the
+# SDK (C and C++) as /lib/libOSMesa.so (on the boot CD, /cdrom/lib, linked
+# from /lib), with its headers (GL/, KHR/) in the SDK. SDL's Vexa driver
+# loads it for SDL_GL_*.
+MESA_VEXA_DIR := $(BUILD)/mesa-vexa
+MESA_VEXA := $(MESA_VEXA_DIR)/lib/libOSMesa.so
+MESA_VEXA_LIB ?= $(MESA_VEXA)
+$(MESA_VEXA): $(MESA_TARBALL) tools/build-mesa-vexa.sh third_party/mesa-vexa.patch $(SDK_DIR)/.cxx
+	tools/build-mesa-vexa.sh $(MESA_TARBALL) $(SDK_DIR) $(BUILD)/mesa-vexa-work $(MESA_VEXA_DIR)
+
+$(SDK_DIR)/.complete: $(SDK_DIR)/.cxx $(SDL2) $(SDL2_MIXER) $(SDL2_NET) $(MBEDTLS_LIBS) $(MESA_VEXA)
+	cp -R $(MESA_VEXA_DIR)/include/. $(SDK_DIR)/include/
+	cp $(MESA_VEXA) $(SDK_DIR)/lib/
+	cp $(MESA_VEXA_DIR)/license.rst $(SDK_DIR)/licenses/mesa.txt
 	cp -R $(SDL2_PREFIX)/. $(SDK_DIR)/
 	cp -R $(SDL2_MIXER_PREFIX)/. $(SDK_DIR)/
 	cp -R $(SDL2_NET_PREFIX)/. $(SDK_DIR)/
@@ -420,7 +436,7 @@ $(SDK_DIR)/.complete: $(SDK_DIR)/.done $(SDL2) $(SDL2_MIXER) $(SDL2_NET) $(MBEDT
 
 $(SDK_TARBALL): $(SDK_DIR)/.complete
 	tar -C $(dir $(SDK_DIR)) --owner=0 --group=0 --numeric-owner --sort=name \
-		--exclude=.done --exclude=.complete --transform 's,^vexa-sdk,vexa-sdk-$(VEXA_VERSION),' \
+		--exclude=.done --exclude=.cxx --exclude=.complete --transform 's,^vexa-sdk,vexa-sdk-$(VEXA_VERSION),' \
 		-czf $@ vexa-sdk
 
 sdk: $(SDK_TARBALL)
@@ -451,10 +467,23 @@ sdk-test: $(SDK_HELLO)
 
 # cxx-test: a C++ program built with the SDK's vexa-c++ (libc++ on libvexa).
 CXX_TEST := $(BUILD)/cxx-test/cxx-test
-CXX_TEST_PROGRAM ?= $(CXX_TEST)
+CXX_TEST_STATIC := $(BUILD)/cxx-test/cxx-test-static
+CXX_TEST_PROGRAM ?= $(CXX_TEST) $(CXX_TEST_STATIC)
 $(CXX_TEST): tests/cxx/cxx-test.cpp $(SDK_DIR)/.complete
 	@mkdir -p $(dir $@)
 	$(SDK_DIR)/bin/vexa-c++ -O2 -std=c++17 -Wall $< -o $@
+$(CXX_TEST_STATIC): tests/cxx/cxx-test.cpp $(SDK_DIR)/.complete
+	@mkdir -p $(dir $@)
+	$(SDK_DIR)/bin/vexa-c++ -static -O2 -std=c++17 -Wall $< -o $@
+
+# sdl-gl-test: OpenGL in a native program, through SDL and Mesa (built with
+# the SDK, linked to libOSMesa.so for its gl* calls).
+SDL_GL_TEST := $(BUILD)/sdl-gl-test/sdl-gl-test
+SDL_GL_TEST_PROGRAM ?= $(SDL_GL_TEST)
+$(SDL_GL_TEST): tests/gl/sdl-gl-test.c $(SDK_DIR)/.complete
+	@mkdir -p $(dir $@)
+	$(SDK_DIR)/bin/vexa-cc -O2 -Wall -Wextra $$($(SDK_DIR)/bin/sdl2-config --cflags) $< -o $@ \
+		$$($(SDK_DIR)/bin/sdl2-config --libs) -lOSMesa
 
 # Doom: Chocolate Doom (GPL-2.0), built with the SDK like any SDL program,
 # with Freedoom's levels and art (BSD), which stay on the boot CD (/cdrom/doom)
@@ -516,14 +545,14 @@ LINUX_ON_CD := bin lib sbin usr
 # apps in /apps, as a tar archive (ustar, with fixed owners and times so
 # builds are reproducible).
 $(INITRAMFS): $(PROGRAM_BINS) $(LIBVEXA_SO) $(VEXA_LD) $(DLTEST_SO) $(ROOTFS_FILES) $(APP_FILES) $(LINUX_TREE) \
-		docs/USER-GUIDE.md $(DOOM_PROGRAM) $(CXX_TEST_PROGRAM)
+		docs/USER-GUIDE.md $(DOOM_PROGRAM) $(CXX_TEST_PROGRAM) $(SDL_GL_TEST_PROGRAM)
 	rm -rf $(BUILD)/rootfs
 	mkdir -p $(BUILD)/rootfs/bin $(BUILD)/rootfs/lib
 	cp -R rootfs/. $(BUILD)/rootfs/
 	# The Help app's book: the user guide.
 	mkdir -p $(BUILD)/rootfs/share/help
 	cp docs/USER-GUIDE.md $(BUILD)/rootfs/share/help/
-	cp $(PROGRAM_BINS) $(DOOM_PROGRAM) $(CXX_TEST_PROGRAM) $(BUILD)/rootfs/bin/
+	cp $(PROGRAM_BINS) $(DOOM_PROGRAM) $(CXX_TEST_PROGRAM) $(SDL_GL_TEST_PROGRAM) $(BUILD)/rootfs/bin/
 	cp $(LIBVEXA_SO) $(VEXA_LD) $(DLTEST_SO) $(BUILD)/rootfs/lib/
 	# The standard root certificates, for native programs (fetch's HTTPS).
 	mkdir -p $(BUILD)/rootfs/etc/ssl/certs
@@ -540,6 +569,8 @@ $(INITRAMFS): $(PROGRAM_BINS) $(LIBVEXA_SO) $(VEXA_LD) $(DLTEST_SO) $(ROOTFS_FIL
 	done
 	# Doom's game files are on the boot CD (make_iso puts them there).
 	ln -s /cdrom/doom/freedoom1.wad $(BUILD)/rootfs/apps/Doom.vxapp/Contents/Resources/freedoom1.wad
+	# OpenGL (Mesa) is on the boot CD too.
+	ln -s /cdrom/lib/libOSMesa.so $(BUILD)/rootfs/lib/libOSMesa.so
 	# /linux: the files that change (etc, var, root) are here, in memory;
 	# the programs and libraries stay on the boot CD (see make_iso).
 	if [ -n "$(LINUX_TREE)" ]; then \
@@ -894,6 +925,8 @@ define make_iso
 	cp limine/BOOTX64.EFI limine/BOOTIA32.EFI $(BUILD)/iso_root/EFI/BOOT/
 	if [ -n "$(LINUX_TREE)" ]; then mkdir -p $(BUILD)/iso_root/linux && \
 		for dir in $(LINUX_ON_CD); do cp -a $(LINUX_ROOT)/$$dir $(BUILD)/iso_root/linux/; done; fi
+	mkdir -p $(BUILD)/iso_root/lib
+	cp $(MESA_VEXA_LIB) $(BUILD)/iso_root/lib/
 	mkdir -p $(BUILD)/iso_root/doom
 	cp $(FREEDOOM_DIR)/freedoom1.wad $(FREEDOOM_DIR)/COPYING.txt $(FREEDOOM_DIR)/CREDITS.txt \
 		$(BUILD)/iso_root/doom/
@@ -906,10 +939,11 @@ define make_iso
 endef
 
 $(ISO): $(KERNEL) $(INITRAMFS) $(BUILD)/limine.conf limine/limine $(LINUX_TREE) \
-		$(FREEDOOM_DIR)/freedoom1.wad
+		$(FREEDOOM_DIR)/freedoom1.wad $(MESA_VEXA_LIB)
 	$(call make_iso,$(BUILD)/limine.conf,$@)
 
-$(SAFE_ISO): $(KERNEL) $(INITRAMFS) $(BUILD)/limine.conf limine/limine $(FREEDOOM_DIR)/freedoom1.wad
+$(SAFE_ISO): $(KERNEL) $(INITRAMFS) $(BUILD)/limine.conf limine/limine $(FREEDOOM_DIR)/freedoom1.wad \
+		$(MESA_VEXA_LIB)
 	{ echo 'default_entry: 2'; cat $(BUILD)/limine.conf; } > $(BUILD)/limine-safe-mode.conf
 	$(call make_iso,$(BUILD)/limine-safe-mode.conf,$@)
 
@@ -943,9 +977,11 @@ test-safe:
 		--usb ehci
 
 # Vexa must work without the Linux subsystem: build and boot a kernel without it.
-native-iso: $(DOOM) $(CXX_TEST) $(BUILD)/freedoom/freedoom1.wad
+native-iso: $(DOOM) $(CXX_TEST) $(CXX_TEST_STATIC) $(MESA_VEXA) $(SDL_GL_TEST) \
+		$(BUILD)/freedoom/freedoom1.wad
 	$(MAKE) BUILD=$(BUILD)/native LINUX_COMPAT=0 DOOM_PROGRAM=$(abspath $(DOOM)) \
-		CXX_TEST_PROGRAM=$(abspath $(CXX_TEST)) \
+		CXX_TEST_PROGRAM="$(abspath $(CXX_TEST) $(CXX_TEST_STATIC))" \
+		MESA_VEXA_LIB=$(abspath $(MESA_VEXA)) SDL_GL_TEST_PROGRAM=$(abspath $(SDL_GL_TEST)) \
 		FREEDOOM_DIR=$(abspath $(BUILD)/freedoom) iso
 # Installing on a disk (the Installer app), then starting from it.
 test-install: $(ISO)

@@ -14,13 +14,13 @@ vexa-sdk/
     bin/vexa-c++         the C++ compiler (Clang), with libc++
     bin/vexa-new-app     starts an app from the template
     bin/sdl2-config      SDL's flags
-    include/             libvexa's headers (and SDL2/, c++/v1/)
-    lib/                 libvexa.so, libvexa.a, crt0.o, libc++.a, libc++abi.a, libSDL2.a,
-                         libSDL2_mixer.a, libSDL2_net.a, pkgconfig/, cmake/
+    include/             libvexa's headers (and SDL2/, c++/v1/, GL/)
+    lib/                 libvexa.so, libvexa.a, crt0.o, libc++.a, libc++abi.a, libOSMesa.so,
+                         libSDL2.a, libSDL2_mixer.a, libSDL2_net.a, pkgconfig/, cmake/
     cmake/vexa.cmake     a CMake toolchain file
     template/            the app template
     examples/sdl-demo/   an SDL program as an app
-    licenses/            musl's (libm), libc++'s, SDL's, SDL_mixer's and SDL_net's
+    licenses/            musl's (libm), libc++'s, Mesa's, SDL's, SDL_mixer's and SDL_net's
 ```
 
 ## A first app
@@ -89,8 +89,8 @@ vexa-c++ -O2 -std=c++17 game.cpp -o game
 
 - The standard library is there: containers, strings, algorithms, smart pointers,
   `<functional>`, `<optional>`, `<variant>`, `<thread>`, `<mutex>`,
-  `<condition_variable>`, `<atomic>`, `<chrono>`, virtual functions and RTTI, and
-  static objects (constructed before `main`, destroyed after it).
+  `<condition_variable>`, `<atomic>`, `<chrono>`, virtual functions and RTTI, static
+  objects (constructed before `main`, destroyed after it) and `thread_local` ones.
 - There are no exceptions: it builds with `-fno-exceptions`, and what would throw
   (`new` out of memory, `at()` out of range) aborts the program instead.
 - There are no locales or iostreams (`<iostream>`, `<fstream>`, `<sstream>`): use
@@ -150,9 +150,30 @@ vexa-cc $(sdl2-config --cflags) game.c $(sdl2-config --libs) -lm -o game
 somewhere and `make SDK=/path/to/vexa-sdk`).
 
 Drawing is in software: SDL's renderer (the "software" one) or the window's surface
-(`SDL_GetWindowSurface`). There's no OpenGL or Vulkan, no joysticks, no relative mouse
-mode, and full screen is a window as big as the screen. The pointer can take SDL's
+(`SDL_GetWindowSurface`), or with OpenGL (below). There's no Vulkan, no joysticks, no
+relative mouse mode, and full screen is a window as big as the screen. The pointer can take SDL's
 system shapes, but not pictures of its own.
+
+## OpenGL
+
+Mesa 24 (OpenGL 4.5 and the compatibility profile, drawn on the processor by
+softpipe) is `/lib/libOSMesa.so` on Vexa, with its headers here (`GL/gl.h`,
+`GL/glext.h`, `GL/osmesa.h`) and `lib/libOSMesa.so` to link against. With SDL, ask for
+an OpenGL window and context as anywhere else; SDL's Vexa driver loads Mesa, and
+`SDL_GL_SwapWindow` puts each frame in the window:
+
+```c
+SDL_Window *window = SDL_CreateWindow("GL", x, y, 640, 480, SDL_WINDOW_OPENGL);
+SDL_GLContext context = SDL_GL_CreateContext(window);
+/* ... glClear, glDrawArrays ... */
+SDL_GL_SwapWindow(window);
+```
+
+Link with `-lOSMesa` to call `gl*` directly (or get them from
+`SDL_GL_GetProcAddress`). Without SDL, OSMesa draws into memory you give it
+(`OSMesaCreateContextExt`, `OSMesaMakeCurrent`), which a program can then show in a
+`<vexa/gui.h>` window. softpipe isn't fast (no JIT: it interprets shaders), so keep
+windows small; `tests/gl/sdl-gl-test.c` is an example.
 
 ## SDL_mixer
 
@@ -183,5 +204,7 @@ Vexa's `fetch` (`userland/fetch`) is an example: an HTTPS client in 300 lines.
 libvexa is part of Vexa (see the repository). Programs built with the SDK carry libm
 from musl (MIT, `licenses/musl-libm.txt`) in libvexa, and SDL (zlib,
 `licenses/SDL2.txt`), SDL_mixer (zlib, `licenses/SDL2_mixer.txt`) and SDL_net (zlib,
-`licenses/SDL2_net.txt`) when they use them, and Mbed TLS (Apache-2.0,
-`licenses/mbedtls.txt`); Vexa's SDL drivers are under SDL's license.
+`licenses/SDL2_net.txt`) when they use them, Mbed TLS (Apache-2.0,
+`licenses/mbedtls.txt`), LLVM's libc++ (Apache-2.0 with LLVM exceptions,
+`licenses/libcxx.txt`) in C++ programs, and Mesa (MIT, `licenses/mesa.txt`) is loaded
+by those that use OpenGL; Vexa's SDL drivers are under SDL's license.

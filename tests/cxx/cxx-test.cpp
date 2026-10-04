@@ -1,7 +1,8 @@
 // cxx-test: C++ on Vexa (vexa-c++, libc++ built against libvexa): the
 // standard containers and algorithms, strings, smart pointers, virtual
 // functions and RTTI, lambdas and std::function, threads with a mutex and a
-// condition variable, <chrono>, static objects' constructors and destructors.
+// condition variable, thread_local, <chrono>, static objects' constructors
+// and destructors. (Built twice: with libvexa.so, and -static.)
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -35,6 +36,10 @@ struct Global {
     ~Global() { std::printf("cxx-test: static destructor ran\n"); }
 };
 static Global global;
+
+// Each thread's own, starting at 100 (a constructor runs for the string).
+static thread_local int per_thread = 100;
+static thread_local std::string per_thread_name = "main";
 
 struct Shape {
     virtual ~Shape() = default;
@@ -112,6 +117,15 @@ int main() {
         t.join();
     }
     check(counter == 40000 && atomic == 40000, "threads and a mutex");
+    per_thread = 1;
+    per_thread_name = "changed";
+    bool fresh = false;
+    std::thread other([&] {
+        fresh = per_thread == 100 && per_thread_name == "main";
+        per_thread = 2;
+    });
+    other.join();
+    check(fresh && per_thread == 1 && per_thread_name == "changed", "thread_local");
     std::condition_variable ready;
     bool done = false;
     std::thread waker([&] {

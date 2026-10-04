@@ -627,6 +627,11 @@ draw into memory use OSMesa, without X. `gl-test` draws a triangle with a shader
 checks the result (`xrun gl-test x` does it in an X window). It isn't fast, but it's
 enough for programs that need OpenGL to run.
 
+Native programs have OpenGL too: Mesa's **softpipe** (`/lib/libOSMesa.so`, from the
+boot CD), which SDL programs use for their OpenGL windows. `sdl-gl-test` opens one,
+checks what it draws and spins a triangle for a second (`sdl-gl-test --spin` keeps
+going until you close it).
+
 ## Sound
 
 With an HD Audio sound card (the kind in most PCs, and QEMU's `intel-hda`; `make run`

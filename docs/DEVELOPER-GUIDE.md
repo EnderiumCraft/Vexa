@@ -34,6 +34,8 @@ You need a Linux machine (or WSL) with:
 | Meson, Ninja, pkg-config, bison, gperf (X and GTK) | `meson`, `ninja-build`, `pkg-config`, `bison`, `gperf` |
 | GLib's code generators (GTK) | `libglib2.0-dev-bin`, `gtk-update-icon-cache` |
 | CMake (LLVM for Mesa, and the SDK's check) | `cmake` |
+| Clang (the SDK's C++: libc++ and native Mesa) | `clang` |
+| Python's Mako, flex (Mesa) | `python3-mako`, `flex` |
 
 X.Org's packages want a newer Meson than some distributions have; CI uses
 `pipx install meson==1.12.1` and `pipx inject meson packaging`.
@@ -414,6 +416,10 @@ with musl. What's in the ISO is built from source with musl by the Makefile and
   libc++abi, libunwind) for musl, which C++ programs with exceptions and the standard
   library need (`tools/musl-libcxx-wrapper.sh` is the compiler for them), LLVM, and
   Mesa with llvmpipe. CI keeps the result between runs, like the X build
+- C++ and OpenGL for native programs, with the SDK: LLVM's libc++ and libc++abi
+  built against libvexa (`tools/build-libcxx-vexa.sh`), then Mesa's OSMesa with
+  softpipe (`tools/build-mesa-vexa.sh`, with `third_party/mesa-vexa.patch`), which
+  becomes `/lib/libOSMesa.so` (on the boot CD) and part of the SDK
 - ALSA's library with aplay and speaker-test (target `alsa`), for sound in Linux
   programs; `tools/linux-files/asound.conf` makes "default" alsa-lib's `plug` on the card
 - the X and GTK stack (`tools/build-x11.sh`, sources in `third_party/x11-sources.txt`),

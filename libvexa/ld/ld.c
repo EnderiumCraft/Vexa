@@ -11,7 +11,8 @@
  *
  * It uses nothing but system calls: it runs before libvexa is there. It
  * supports what x86_64 position-independent code produces (RELATIVE, 64,
- * GLOB_DAT, JUMP_SLOT relocations); no thread-local storage or lazy binding.
+ * GLOB_DAT, JUMP_SLOT relocations, and DTPMOD64, DTPOFF64 and TPOFF64 for
+ * thread-local storage: see ../src/tls.h); no lazy binding.
  *
  * It stays, for dlopen: libvexa's dlopen, dlsym, dlclose and dlerror call
  * __vx_dlopen and the rest here (the loader is the last of the objects
@@ -20,12 +21,14 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <vexa/abi.h>
+#include "../src/tls.h"
 
 /* ---- ELF ---- */
 
 #define PT_LOAD 1
 #define PT_DYNAMIC 2
 #define PT_PHDR 6
+#define PT_TLS 7
 #define PF_X 1
 #define PF_W 2
 #define DT_NULL 0
@@ -43,6 +46,9 @@
 #define R_X86_64_GLOB_DAT 6
 #define R_X86_64_JUMP_SLOT 7
 #define R_X86_64_RELATIVE 8
+#define R_X86_64_DTPMOD64 16
+#define R_X86_64_DTPOFF64 17
+#define R_X86_64_TPOFF64 18
 #define AT_NULL 0
 #define AT_PHDR 3
 #define AT_PHNUM 5
@@ -294,18 +300,21 @@ static int load_library(struct object *o, int index, const char *name) {
 static struct object objects[MAX_OBJECTS];
 static int object_count;
 
-/* The address of the first definition of `name`: the program, then libraries. */
-static uint64_t lookup(const char *name, int weak, const char *user) {
+/* The first definition of `name` (the program's, then the libraries'), and
+ * which object has it; 0 if there's none (an error unless `weak`). */
+static const Sym *find(const char *name, int weak, const char *user, const struct object **owner) {
     for (int i = 0; i < object_count; i++) {
         const struct object *o = &objects[i];
         for (uint32_t s = 1; s < o->symbol_count; s++) {
             const Sym *sym = &o->symbols[s];
             if (sym->shndx != 0 && (sym->info >> 4) != 0 /* not local */ &&
                 same(o->strings + sym->name, name)) {
-                return o->base + sym->value;
+                *owner = o;
+                return sym;
             }
         }
     }
+    *owner = 0;
     if (!weak) {
         if (soft_errors) {
             set_error("undefined symbol", name);
@@ -319,21 +328,79 @@ static uint64_t lookup(const char *name, int weak, const char *user) {
     return 0;
 }
 
+/* The address of the first definition of `name`. */
+static uint64_t lookup(const char *name, int weak, const char *user) {
+    const struct object *owner;
+    const Sym *sym = find(name, weak, user, &owner);
+    return sym ? owner->base + sym->value : 0;
+}
+
+/* ---- Thread-local storage ---- */
+
+static struct vx_tls_table tls;
+
+/* Notes an object's PT_TLS, as module `index` + 1: with a static offset
+ * while the program is starting (`at_start`), dynamic for dlopen's. */
+static void note_tls(const struct object *o, int index, int at_start) {
+    struct vx_tls_module *m = &tls.modules[index + 1];
+    *m = (struct vx_tls_module){0};
+    for (int i = 0; i < o->phnum; i++) {
+        const Phdr *ph = &o->phdrs[i];
+        if (ph->type != PT_TLS || ph->memsz == 0) {
+            continue;
+        }
+        m->image = ph->filesz ? (const void *)(o->base + ph->vaddr) : 0;
+        m->filesz = ph->filesz;
+        m->memsz = ph->memsz;
+        m->align = ph->align ? ph->align : 1;
+        if (at_start) {
+            uint64_t end = tls.static_size + m->memsz;
+            m->offset = (end + m->align - 1) & ~(m->align - 1);
+            tls.static_size = m->offset;
+            tls.static_align = m->align > tls.static_align ? m->align : tls.static_align;
+        }
+    }
+}
+
+/* For libvexa: every module's TLS (see ../src/tls.h). */
+__attribute__((visibility("default"))) const struct vx_tls_table *__vx_tls_table(void) {
+    return &tls;
+}
+
 static void relocate(const struct object *o, Rela *rela, uint64_t size) {
     for (uint64_t i = 0; rela && i < size / sizeof(Rela); i++) {
         uint32_t type = (uint32_t)rela[i].info;
         uint32_t index = (uint32_t)(rela[i].info >> 32);
         uint64_t *where = (uint64_t *)(o->base + rela[i].offset);
         uint64_t symbol = 0;
+        const Sym *found = 0;
+        const struct object *owner = o; /* (TLS without a symbol: the object's own.) */
         if (index) {
             const Sym *sym = &o->symbols[index];
-            symbol = lookup(o->strings + sym->name, (sym->info >> 4) == 2 /* weak */, o->name);
+            found = find(o->strings + sym->name, (sym->info >> 4) == 2 /* weak */, o->name, &owner);
+            symbol = found ? owner->base + found->value : 0;
         }
+        /* TLS symbols' values are offsets in their module's block. */
+        uint64_t tls_value = (found ? found->value : 0) + rela[i].addend;
+        const struct vx_tls_module *module = owner ? &tls.modules[owner - objects + 1] : 0;
         switch (type) {
         case R_X86_64_RELATIVE: *where = o->base + rela[i].addend; break;
         case R_X86_64_64: *where = symbol + rela[i].addend; break;
         case R_X86_64_GLOB_DAT:
         case R_X86_64_JUMP_SLOT: *where = symbol; break;
+        case R_X86_64_DTPMOD64: *where = owner ? (uint64_t)(owner - objects + 1) : 0; break;
+        case R_X86_64_DTPOFF64: *where = tls_value; break;
+        case R_X86_64_TPOFF64:
+            if (module && module->memsz && module->offset) {
+                *where = tls_value - module->offset;
+                break;
+            }
+            if (soft_errors) {
+                set_error("uses static thread-local storage (can't be dlopened)", o->name);
+                soft_errors = 2;
+                return;
+            }
+            fail("thread-local storage it can't reach in", o->name);
         default:
             if (soft_errors) {
                 set_error("unsupported relocation in", o->name);
@@ -419,6 +486,13 @@ uint64_t loader_main(uint64_t *stack) {
     loader->is_loader = 1;
     read_dynamic(loader);
 
+    /* Thread-local storage: the program's and its libraries', static. */
+    for (int i = 0; i < object_count; i++) {
+        if (!objects[i].is_loader) {
+            note_tls(&objects[i], i, 1);
+        }
+    }
+
     /* Libraries first, so their data is ready; then the program. */
     for (int i = object_count - 1; i >= 0; i--) {
         struct object *o = &objects[i];
@@ -501,6 +575,9 @@ EXPORT void *__vx_dlopen(const char *file, int flags) {
             }
             object_count++;
         }
+    }
+    for (int i = first; i < object_count; i++) {
+        note_tls(&objects[i], i, 0);
     }
     for (int i = object_count - 1; i >= first && soft_errors == 1; i--) {
         struct object *o = &objects[i];

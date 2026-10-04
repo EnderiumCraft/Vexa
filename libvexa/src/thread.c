@@ -17,6 +17,7 @@ struct vx_thread {
 
 __attribute__((noreturn)) static void thread_entry(struct vx_thread *thread) {
     thread->result = thread->fn(thread->arg);
+    __libvexa_run_thread_dtors();
     vx_thread_exit(0);
 }
 

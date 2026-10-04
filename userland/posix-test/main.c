@@ -483,6 +483,81 @@ static void test_sockets(void) {
     CHECK_TEXT(inet_ntop(AF_INET, &a, address, sizeof address), "192.168.0.1");
 }
 
+/* Thread-local storage: the program's own (initialized and zeroed), and a
+ * dlopened library's (through __tls_get_addr); threads meet at a barrier. */
+static __thread int tls_value = 5;
+static __thread char tls_zeroed[64];
+static pthread_barrier_t barrier;
+static int serial_count;
+
+static void *tls_work(void *arg) {
+    int *(*library_tls)(void) = (int *(*)(void))arg;
+    bool ok = tls_value == 5 && tls_zeroed[63] == 0;
+    tls_value = 6;
+    tls_zeroed[63] = 1;
+    int *mine = library_tls ? library_tls() : NULL;
+    ok = ok && (!mine || *mine == 7);
+    if (mine) {
+        *mine = 8;
+    }
+    if (pthread_barrier_wait(&barrier) == PTHREAD_BARRIER_SERIAL_THREAD) {
+        __atomic_add_fetch(&serial_count, 1, __ATOMIC_RELAXED);
+    }
+    ok = ok && tls_value == 6 && (!mine || (*mine == 8 && library_tls() == mine));
+    return (void *)(long)ok;
+}
+
+static void test_tls(void) {
+    void *library = dlopen("libvexa-test.so", RTLD_NOW);
+    int *(*library_tls)(void) = library ? (int *(*)(void))dlsym(library, "vexa_test_tls") : NULL;
+    CHECK(library_tls != NULL);
+    CHECK(tls_value == 5 && tls_zeroed[0] == 0);
+    tls_value = 1;
+    int *main_copy = library_tls ? library_tls() : NULL;
+    CHECK(!main_copy || *main_copy == 7);
+    if (main_copy) {
+        *main_copy = 1;
+    }
+    CHECK(pthread_barrier_init(&barrier, NULL, 4) == 0);
+    pthread_t threads[3];
+    for (int i = 0; i < 3; i++) {
+        CHECK(pthread_create(&threads[i], NULL, tls_work, (void *)library_tls) == 0);
+    }
+    if (pthread_barrier_wait(&barrier) == PTHREAD_BARRIER_SERIAL_THREAD) {
+        __atomic_add_fetch(&serial_count, 1, __ATOMIC_RELAXED);
+    }
+    for (int i = 0; i < 3; i++) {
+        void *result;
+        CHECK(pthread_join(threads[i], &result) == 0 && result == (void *)1L);
+    }
+    CHECK(serial_count == 1);
+    CHECK(tls_value == 1 && (!main_copy || (*main_copy == 1 && library_tls() == main_copy)));
+    pthread_barrier_destroy(&barrier);
+
+    /* Files that are buffers. */
+    char *text = NULL;
+    size_t size = 0;
+    FILE *memory = open_memstream(&text, &size);
+    CHECK(memory != NULL);
+    if (memory) {
+        fprintf(memory, "%d %s", 42, "memstream");
+        fflush(memory);
+        CHECK(size == 12 && strcmp(text, "42 memstream") == 0);
+        fputs(", more", memory);
+        fclose(memory);
+        CHECK(size == 18 && strcmp(text, "42 memstream, more") == 0);
+        free(text);
+    }
+    char fixed[16] = "abc def";
+    FILE *in = fmemopen(fixed, strlen(fixed), "r");
+    char word[8] = "";
+    CHECK(in && fscanf(in, "%7s", word) == 1 && strcmp(word, "abc") == 0);
+    CHECK(in && fgetc(in) == ' ' && fgetc(in) == 'd');
+    if (in) {
+        fclose(in);
+    }
+}
+
 int main(int argc, char **argv) {
     /* -v: says which part it's on (to find one that hangs). */
     bool verbose = argc > 1 && strcmp(argv[1], "-v") == 0;
@@ -494,7 +569,7 @@ int main(int argc, char **argv) {
         {"strings", test_strings}, {"files", test_files},     {"time", test_time},
         {"setjmp", test_setjmp},   {"threads", test_threads}, {"memory", test_memory},
         {"processes", test_processes}, {"spawn", test_spawn},
-        {"dlopen", test_dlopen},   {"sockets", test_sockets},
+        {"dlopen", test_dlopen},   {"tls", test_tls},         {"sockets", test_sockets},
     };
     for (size_t i = 0; i < sizeof parts / sizeof *parts; i++) {
         if (verbose) {

@@ -90,10 +90,10 @@ runs X programs such as `xterm` in windows of their own on it. The kernel:
 - has its own system call interface and C library, `libvexa`, with much of POSIX
   (files, directories, pthreads, time, `mmap`, `poll`, the whole of `stdio` and musl's
   libm) for programs ported to it
-- has an SDK for building native programs and apps on Linux: `vexa-cc` and `vexa-c++` (with libc++), an app template
-  (`vexa-new-app`), a CMake toolchain file, and SDL 2 with Vexa drivers (each SDL
-  window a desktop window, sound on the HD Audio device), and SDL_mixer; each release
-  carries it
+- has an SDK for building native programs and apps on Linux: `vexa-cc` and `vexa-c++`
+  (with libc++), an app template (`vexa-new-app`), a CMake toolchain file, SDL 2 with
+  Vexa drivers (each SDL window a desktop window, OpenGL through Mesa's softpipe,
+  sound on the HD Audio device), and SDL_mixer; each release carries it
 - plays Doom: Chocolate Doom, built with the SDK like any SDL program, with Freedoom's
   levels, art and music
 - has a file system tree with a root in memory (unpacked from an initramfs), `/dev`,
@@ -331,7 +331,8 @@ the other X libraries, pixman, xkbcomp and xkeyboard-config, Xft and fontconfig 
 expat, xterm 330 and ncurses 6.6) is under the MIT license and similar permissive
 licenses. So are cairo (MPL-1.1 or LGPL-2.1, used under the MPL), HarfBuzz, fribidi
 (LGPL-2.1), pixman, libpng, libepoxy, libffi and PCRE2 (BSD), and
-[Mesa](https://mesa3d.org) 24.0.5 (MIT), [alsa-lib](https://www.alsa-project.org) 1.2.11
+[Mesa](https://mesa3d.org) 24.0.5 (MIT; also built for native programs, as
+`/lib/libOSMesa.so`), [alsa-lib](https://www.alsa-project.org) 1.2.11
 (LGPL-2.1) and alsa-utils 1.2.9 (`aplay` and `speaker-test`, GPL-2.0; their sources are in
 every release), with [LLVM](https://llvm.org) 18.1.8 and its
 libc++, libc++abi and libunwind (Apache-2.0 with LLVM exceptions); GTK 3, GLib, Pango,

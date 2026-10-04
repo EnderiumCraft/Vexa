@@ -6,6 +6,7 @@
 #include <string.h>
 #include <vexa/syscall.h>
 #include <vexa/thread.h>
+#include "internal.h"
 
 /* atexit, and C++'s __cxa_atexit (destructors of static objects, each with
  * its argument and the shared object it's from): up to 1024, run last first
@@ -72,7 +73,44 @@ void __cxa_finalize(void *dso) {
     }
 }
 
+/* C++ thread_local objects' destructors: each thread's list, run last
+ * first when it exits (and the main thread's by exit). */
+struct __vx_thread_dtor {
+    void (*fn)(void *);
+    void *object;
+    struct __vx_thread_dtor *next;
+};
+
+int __cxa_thread_atexit_impl(void (*fn)(void *), void *object, void *dso) {
+    (void)dso;
+    struct __vx_thread_dtor *d = malloc(sizeof(*d));
+    if (!d) {
+        return -1;
+    }
+    struct __vx_tcb *tcb = __vx_tcb();
+    d->fn = fn;
+    d->object = object;
+    d->next = tcb->dtors;
+    tcb->dtors = d;
+    return 0;
+}
+
+int __cxa_thread_atexit(void (*fn)(void *), void *object, void *dso) {
+    return __cxa_thread_atexit_impl(fn, object, dso);
+}
+
+void __libvexa_run_thread_dtors(void) {
+    struct __vx_tcb *tcb = __vx_tcb();
+    while (tcb->dtors) { /* (A destructor may add more.) */
+        struct __vx_thread_dtor *d = tcb->dtors;
+        tcb->dtors = d->next;
+        d->fn(d->object);
+        free(d);
+    }
+}
+
 void exit(int code) {
+    __libvexa_run_thread_dtors();
     __cxa_finalize(NULL);
     fflush(NULL);
     vx_exit(code);

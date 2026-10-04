@@ -45,6 +45,8 @@ int feof(FILE *file);
 int ferror(FILE *file);
 int fileno(FILE *file);
 
+int getc(FILE *file); /* (Also macros, below.) */
+int putc(int c, FILE *file);
 #define getc fgetc
 #define putc fputc
 int getchar(void);
@@ -92,11 +94,27 @@ int remove(const char *path);
 int rename(const char *from, const char *to);
 void perror(const char *what);
 ssize_t getline(char **line, size_t *size, FILE *file);
+
+/* Files that aren't files: a buffer that grows (open_memstream), a fixed one
+ * (fmemopen), or any I/O functions (fopencookie, as in glibc). */
+typedef struct {
+    ssize_t (*read)(void *cookie, char *buffer, size_t size);
+    ssize_t (*write)(void *cookie, const char *buffer, size_t size);
+    int (*seek)(void *cookie, off_t *offset, int whence);
+    int (*close)(void *cookie);
+} cookie_io_functions_t;
+FILE *fopencookie(void *cookie, const char *mode, cookie_io_functions_t io);
+FILE *open_memstream(char **bufp, size_t *sizep);
+FILE *fmemopen(void *buffer, size_t size, const char *mode);
 ssize_t getdelim(char **line, size_t *size, int delimiter, FILE *file);
 FILE *popen(const char *command, const char *mode);
 int pclose(FILE *file);
 void flockfile(FILE *file);
 void funlockfile(FILE *file);
+int getc_unlocked(FILE *file);
+int putc_unlocked(int c, FILE *file);
+int getchar_unlocked(void);
+int putchar_unlocked(int c);
 #define getc_unlocked fgetc
 #define putc_unlocked fputc
 #define getchar_unlocked getchar

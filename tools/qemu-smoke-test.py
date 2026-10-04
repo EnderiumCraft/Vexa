@@ -137,6 +137,7 @@ TYPED_COMMANDS = ([
     # C++ (libc++ on libvexa, built with the SDK's vexa-c++); its static
     # object's destructor runs after main.
     ("cxx-test", "cxx-test: passed\r\ncxx-test: static destructor ran", 60),
+    ("cxx-test-static", "cxx-test: passed\r\ncxx-test: static destructor ran", 60),
     ("sys mem", "heap ", 10),
     ("sys threads", "idle", 10),
     ("sys memtest", "memtest: passed", 180),
@@ -321,6 +322,9 @@ TYPED_COMMANDS = ([
     ("@sendkey ctrl-alt-t", "term: tab 1 of 1", 20, 4),
     ("@type chocolate-doom -timedemo demo1 -nodraw -nosound -nogui > /dev/console 2> /dev/console",
      "gametics in", 600),
+    # OpenGL in a native program: SDL's window with a context (Mesa's
+    # softpipe, loaded from the boot CD), checked with glReadPixels.
+    ("@type sdl-gl-test > /dev/console 2> /dev/console", "sdl-gl-test: passed", 300),
     # An error (no such WAD) shows in a window (SDL's message box), which
     # Enter closes.
     ("@type chocolate-doom -iwad missing.wad", '"Chocolate Doom 3.1.0" (460x', 60),

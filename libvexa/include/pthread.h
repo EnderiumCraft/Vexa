@@ -47,6 +47,18 @@ typedef struct {
     int unused;
 } pthread_rwlockattr_t;
 
+typedef struct {
+    pthread_mutex_t lock;
+    pthread_cond_t done;
+    unsigned count, waiting, round;
+} pthread_barrier_t;
+
+typedef struct {
+    int unused;
+} pthread_barrierattr_t;
+
+#define PTHREAD_BARRIER_SERIAL_THREAD (-1)
+
 typedef volatile int pthread_once_t;
 typedef unsigned pthread_key_t;
 typedef volatile unsigned pthread_spinlock_t;
@@ -124,10 +136,19 @@ int pthread_spin_lock(pthread_spinlock_t *lock);
 int pthread_spin_trylock(pthread_spinlock_t *lock);
 int pthread_spin_unlock(pthread_spinlock_t *lock);
 
+int pthread_barrier_init(pthread_barrier_t *barrier, const pthread_barrierattr_t *attr,
+                         unsigned count);
+int pthread_barrier_destroy(pthread_barrier_t *barrier);
+int pthread_barrier_wait(pthread_barrier_t *barrier);
+int pthread_barrierattr_init(pthread_barrierattr_t *attr);
+int pthread_barrierattr_destroy(pthread_barrierattr_t *attr);
+
 int pthread_once(pthread_once_t *once, void (*fn)(void));
 int pthread_key_create(pthread_key_t *key, void (*destructor)(void *));
 int pthread_key_delete(pthread_key_t key);
 void *pthread_getspecific(pthread_key_t key);
+/* The CPU-time clock of a thread (only the calling thread's is kept). */
+int pthread_getcpuclockid(pthread_t thread, clockid_t *clock);
 int pthread_setspecific(pthread_key_t key, const void *value);
 
 #ifdef __cplusplus

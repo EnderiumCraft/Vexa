@@ -8,6 +8,7 @@ PHDRS
     text   PT_LOAD FILEHDR PHDRS;
     rodata PT_LOAD;
     data   PT_LOAD;
+    tls    PT_TLS;
     note   PT_NOTE;
 }
 
@@ -22,6 +23,10 @@ SECTIONS
     .rodata : { *(.rodata .rodata.*) } :rodata
 
     . = ALIGN(CONSTANT(MAXPAGESIZE));
+    /* Thread-local storage's initial contents (tls.c copies them for each
+     * thread). */
+    .tdata : { *(.tdata .tdata.*) } :data :tls
+    .tbss : { *(.tbss .tbss.*) } :data :tls
     .init_array : {
         PROVIDE_HIDDEN(__init_array_start = .);
         KEEP(*(SORT_BY_INIT_PRIORITY(.init_array.*) SORT_BY_INIT_PRIORITY(.ctors.*)))

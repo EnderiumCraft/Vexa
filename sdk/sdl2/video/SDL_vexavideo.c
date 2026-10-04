@@ -6,6 +6,10 @@
  * scancode table), text, the pointer, closing, focus, resizing and dropped
  * files. The clipboard is Vexa's.
  *
+ * OpenGL: Mesa's OSMesa (softpipe), loaded from /lib/libOSMesa.so when a
+ * program first asks for it. A context draws into its own memory; swapping
+ * copies the frame into the window's surface and presents it.
+ *
  * Part of Vexa's SDK, under SDL's zlib license.
  */
 #include "../../SDL_internal.h"
@@ -27,6 +31,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include "SDL_loadso.h"
 #include <vexa/abi.h>
 #include <vexa/desktop.h>
 #include <vexa/gui.h>
@@ -429,6 +434,230 @@ static SDL_bool VEXA_HasClipboardText(_THIS)
     return has;
 }
 
+/* ---- OpenGL: OSMesa ----
+ * (OSMesa's names and values from GL/osmesa.h: its ABI, so SDL doesn't need
+ * Mesa's headers to build.) */
+
+#define OSMESA_BGRA 0x1
+#define OSMESA_Y_UP 0x11
+#define OSMESA_FORMAT 0x22
+#define OSMESA_DEPTH_BITS 0x30
+#define OSMESA_STENCIL_BITS 0x31
+#define OSMESA_ACCUM_BITS 0x32
+#define OSMESA_PROFILE 0x33
+#define OSMESA_CORE_PROFILE 0x34
+#define OSMESA_COMPAT_PROFILE 0x35
+#define OSMESA_CONTEXT_MAJOR_VERSION 0x36
+#define OSMESA_CONTEXT_MINOR_VERSION 0x37
+#define GL_UNSIGNED_BYTE_ 0x1401
+
+typedef void *OSMesaContext;
+static struct
+{
+    void *library;
+    OSMesaContext (*CreateContextAttribs)(const int *attributes, OSMesaContext share);
+    unsigned char (*MakeCurrent)(OSMesaContext ctx, void *buffer, unsigned type, int width,
+                                 int height);
+    void (*DestroyContext)(OSMesaContext ctx);
+    void (*PixelStore)(int name, int value);
+    void *(*GetProcAddress)(const char *name);
+    void (*Finish)(void);
+} osmesa;
+
+typedef struct
+{
+    OSMesaContext context;
+    Uint32 *pixels; /* The frame it draws, top row first. */
+    int width, height;
+} VEXA_GLContext;
+
+static VEXA_GLContext *current_gl;
+
+static int VEXA_GL_LoadLibrary(_THIS, const char *path)
+{
+    if (osmesa.library) {
+        return 0;
+    }
+    osmesa.library = SDL_LoadObject(path ? path : "libOSMesa.so");
+    if (!osmesa.library) {
+        return -1;
+    }
+    osmesa.CreateContextAttribs = SDL_LoadFunction(osmesa.library, "OSMesaCreateContextAttribs");
+    osmesa.MakeCurrent = SDL_LoadFunction(osmesa.library, "OSMesaMakeCurrent");
+    osmesa.DestroyContext = SDL_LoadFunction(osmesa.library, "OSMesaDestroyContext");
+    osmesa.PixelStore = SDL_LoadFunction(osmesa.library, "OSMesaPixelStore");
+    osmesa.GetProcAddress = SDL_LoadFunction(osmesa.library, "OSMesaGetProcAddress");
+    osmesa.Finish = SDL_LoadFunction(osmesa.library, "glFinish");
+    if (!osmesa.CreateContextAttribs || !osmesa.MakeCurrent || !osmesa.DestroyContext ||
+        !osmesa.PixelStore || !osmesa.GetProcAddress || !osmesa.Finish) {
+        SDL_UnloadObject(osmesa.library);
+        SDL_zero(osmesa);
+        return SDL_SetError("Vexa: %s isn't OSMesa", path ? path : "libOSMesa.so");
+    }
+    SDL_strlcpy(_this->gl_config.driver_path, path ? path : "libOSMesa.so",
+                sizeof(_this->gl_config.driver_path));
+    return 0;
+}
+
+static void *VEXA_GL_GetProcAddress(_THIS, const char *name)
+{
+    (void)_this;
+    return osmesa.GetProcAddress ? osmesa.GetProcAddress(name) : NULL;
+}
+
+static void VEXA_GL_UnloadLibrary(_THIS)
+{
+    (void)_this;
+    /* (Mesa stays loaded: libraries do, on Vexa.) */
+}
+
+/* Binds `gl` to a frame the window's size (a new one if that changed). */
+static int bind_frame(VEXA_GLContext *gl, SDL_Window *window)
+{
+    if (!gl->pixels || gl->width != window->w || gl->height != window->h) {
+        Uint32 *pixels = (Uint32 *)SDL_calloc((size_t)window->w * window->h, 4);
+        if (!pixels) {
+            return SDL_OutOfMemory();
+        }
+        SDL_free(gl->pixels);
+        gl->pixels = pixels;
+        gl->width = window->w;
+        gl->height = window->h;
+    }
+    if (!osmesa.MakeCurrent(gl->context, gl->pixels, GL_UNSIGNED_BYTE_, gl->width, gl->height)) {
+        return SDL_SetError("Vexa: OSMesa couldn't use the context");
+    }
+    osmesa.PixelStore(OSMESA_Y_UP, 0); /* Top row first, as the window's. */
+    return 0;
+}
+
+static SDL_GLContext VEXA_GL_CreateContext(_THIS, SDL_Window *window)
+{
+    int attributes[32], n = 0;
+    VEXA_GLContext *gl;
+    OSMesaContext share = NULL;
+    if (_this->gl_config.share_with_current_context && current_gl) {
+        share = current_gl->context;
+    }
+    attributes[n++] = OSMESA_FORMAT;
+    attributes[n++] = OSMESA_BGRA; /* (In memory, as XRGB8888.) */
+    attributes[n++] = OSMESA_DEPTH_BITS;
+    attributes[n++] = _this->gl_config.depth_size;
+    attributes[n++] = OSMESA_STENCIL_BITS;
+    attributes[n++] = _this->gl_config.stencil_size;
+    attributes[n++] = OSMESA_ACCUM_BITS;
+    attributes[n++] = _this->gl_config.accum_red_size ? 16 : 0;
+    attributes[n++] = OSMESA_PROFILE;
+    attributes[n++] = (_this->gl_config.profile_mask & SDL_GL_CONTEXT_PROFILE_CORE)
+                          ? OSMESA_CORE_PROFILE
+                          : OSMESA_COMPAT_PROFILE;
+    if (_this->gl_config.major_version > 0) {
+        attributes[n++] = OSMESA_CONTEXT_MAJOR_VERSION;
+        attributes[n++] = _this->gl_config.major_version;
+        attributes[n++] = OSMESA_CONTEXT_MINOR_VERSION;
+        attributes[n++] = _this->gl_config.minor_version;
+    }
+    attributes[n++] = 0;
+    if (!vexa_window(window)) {
+        return NULL;
+    }
+    gl = (VEXA_GLContext *)SDL_calloc(1, sizeof(*gl));
+    if (!gl) {
+        SDL_OutOfMemory();
+        return NULL;
+    }
+    gl->context = osmesa.CreateContextAttribs(attributes, share);
+    if (!gl->context) {
+        SDL_free(gl);
+        SDL_SetError("Vexa: OSMesa has no OpenGL %d.%d context like that",
+                     _this->gl_config.major_version, _this->gl_config.minor_version);
+        return NULL;
+    }
+    if (bind_frame(gl, window) < 0) {
+        osmesa.DestroyContext(gl->context);
+        SDL_free(gl);
+        return NULL;
+    }
+    current_gl = gl;
+    return gl;
+}
+
+static int VEXA_GL_MakeCurrent(_THIS, SDL_Window *window, SDL_GLContext context)
+{
+    VEXA_GLContext *gl = (VEXA_GLContext *)context;
+    (void)_this;
+    if (!gl || !window) {
+        osmesa.MakeCurrent(NULL, NULL, 0, 0, 0);
+        current_gl = NULL;
+        return 0;
+    }
+    if (bind_frame(gl, window) < 0) {
+        return -1;
+    }
+    current_gl = gl;
+    return 0;
+}
+
+static int VEXA_GL_SetSwapInterval(_THIS, int interval)
+{
+    (void)_this;
+    (void)interval; /* (Frames go out when they're done: there's no vertical blank to wait for.) */
+    return 0;
+}
+
+static int VEXA_GL_GetSwapInterval(_THIS)
+{
+    (void)_this;
+    return 0;
+}
+
+/* The frame into the window: its surface (resized to the window first, if
+ * the window was), then presented; a resized window gets a new frame. */
+static int VEXA_GL_SwapWindow(_THIS, SDL_Window *window)
+{
+    VEXA_WindowData *data = (VEXA_WindowData *)window->driverdata;
+    VEXA_GLContext *gl = current_gl;
+    struct vx_surface *s;
+    int y, width, height;
+    (void)_this;
+    if (!gl || !vexa_window(window)) {
+        return SDL_SetError("Vexa: no OpenGL context to swap");
+    }
+    osmesa.Finish();
+    s = &data->window->surface;
+    if (s->width != window->w || s->height != window->h) {
+        if (vx_window_resize(data->window, window->w, window->h) < 0) {
+            return SDL_SetError("Vexa: couldn't resize the window to %dx%d", window->w, window->h);
+        }
+    }
+    width = SDL_min(gl->width, s->width);
+    height = SDL_min(gl->height, s->height);
+    for (y = 0; y < height; y++) {
+        SDL_memcpy(s->pixels + (size_t)y * s->stride, gl->pixels + (size_t)y * gl->width,
+                   (size_t)width * 4);
+    }
+    vx_window_present(data->window, 0, 0, s->width, s->height);
+    if (gl->width != window->w || gl->height != window->h) {
+        return bind_frame(gl, window);
+    }
+    return 0;
+}
+
+static void VEXA_GL_DeleteContext(_THIS, SDL_GLContext context)
+{
+    VEXA_GLContext *gl = (VEXA_GLContext *)context;
+    (void)_this;
+    if (gl) {
+        if (gl == current_gl) {
+            osmesa.MakeCurrent(NULL, NULL, 0, 0, 0);
+            current_gl = NULL;
+        }
+        osmesa.DestroyContext(gl->context);
+        SDL_free(gl->pixels);
+        SDL_free(gl);
+    }
+}
+
 /* ---- The driver ---- */
 
 static int VEXA_VideoInit(_THIS)
@@ -481,6 +710,15 @@ static SDL_VideoDevice *VEXA_CreateDevice(void)
     device->GetClipboardText = VEXA_GetClipboardText;
     device->HasClipboardText = VEXA_HasClipboardText;
     device->ShowMessageBox = VEXA_DeviceShowMessageBox;
+    device->GL_LoadLibrary = VEXA_GL_LoadLibrary;
+    device->GL_GetProcAddress = VEXA_GL_GetProcAddress;
+    device->GL_UnloadLibrary = VEXA_GL_UnloadLibrary;
+    device->GL_CreateContext = VEXA_GL_CreateContext;
+    device->GL_MakeCurrent = VEXA_GL_MakeCurrent;
+    device->GL_SetSwapInterval = VEXA_GL_SetSwapInterval;
+    device->GL_GetSwapInterval = VEXA_GL_GetSwapInterval;
+    device->GL_SwapWindow = VEXA_GL_SwapWindow;
+    device->GL_DeleteContext = VEXA_GL_DeleteContext;
     device->free = VEXA_DeleteDevice;
     return device;
 }

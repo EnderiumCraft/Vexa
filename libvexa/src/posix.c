@@ -99,6 +99,22 @@ int creat(const char *path, mode_t mode) {
 
 int fcntl(int fd, int command, ...) {
     switch (command) {
+    case F_DUPFD:
+    case F_DUPFD_CLOEXEC: { /* The lowest free handle from `lowest` up. */
+        va_list args;
+        va_start(args, command);
+        int lowest = va_arg(args, int);
+        va_end(args);
+        struct vx_stat st;
+        if (lowest < 0 || vx_handle_stat(fd, &st)) {
+            errno = lowest < 0 ? EINVAL : EBADF;
+            return -1;
+        }
+        while (vx_handle_stat(lowest, &st) == 0) {
+            lowest++;
+        }
+        return (int)__vx_errno_result(vx_dup(fd, lowest));
+    }
     case F_GETFD:
     case F_SETFD:
         return 0;

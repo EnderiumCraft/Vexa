@@ -28,6 +28,9 @@ struct vx_file {
     unsigned char ungot;
     bool own_buffer;            /* (Not given with setvbuf.) */
     int process;                /* popen's process handle, or 0. */
+    bool cookie_file;           /* fopencookie (open_memstream, fmemopen): */
+    void *cookie;               /* its functions do the I/O, not a handle. */
+    cookie_io_functions_t io;
     struct vx_mutex lock;
     struct vx_file *next;
 };
@@ -53,10 +56,39 @@ void __libvexa_stdio_init(void) {
     open_files = &std_files[0];
 }
 
+/* The I/O under the buffers: the handle's, or a cookie file's functions
+ * (vx-style results: a count, or a negative VX_E code). */
+static long raw_write(FILE *file, const void *data, size_t n) {
+    if (file->cookie_file) {
+        ssize_t r = file->io.write ? file->io.write(file->cookie, data, n) : -1;
+        return r < 0 ? -VX_EIO : r;
+    }
+    return vx_write(file->handle, data, n);
+}
+
+static long raw_read(FILE *file, void *data, size_t n) {
+    if (file->cookie_file) {
+        ssize_t r = file->io.read ? file->io.read(file->cookie, data, n) : 0;
+        return r < 0 ? -VX_EIO : r;
+    }
+    return vx_read(file->handle, data, n);
+}
+
+static long raw_seek(FILE *file, long offset, int whence) {
+    if (file->cookie_file) {
+        off_t position = offset;
+        if (!file->io.seek || file->io.seek(file->cookie, &position, whence) < 0) {
+            return -VX_ESPIPE;
+        }
+        return (long)position;
+    }
+    return vx_seek(file->handle, offset, whence);
+}
+
 static int flush_one(FILE *file) {
     size_t done = 0;
     while (done < file->write_used) {
-        long n = vx_write(file->handle, file->buffer + done, file->write_used - done);
+        long n = raw_write(file, file->buffer + done, file->write_used - done);
         if (n <= 0) {
             file->error = true;
             file->write_used = 0;
@@ -165,7 +197,13 @@ int fclose(FILE *file) {
         }
     }
     vx_mutex_unlock(&list_lock);
-    vx_close(file->handle);
+    if (file->cookie_file) {
+        if (file->io.close && file->io.close(file->cookie) < 0) {
+            result = EOF;
+        }
+    } else {
+        vx_close(file->handle);
+    }
     if (file->process) { /* popen: wait for the program. */
         long code = vx_wait(file->process, 0);
         vx_close(file->process);
@@ -179,6 +217,10 @@ int fclose(FILE *file) {
 }
 
 int fileno(FILE *file) {
+    if (file->cookie_file) {
+        errno = EBADF;
+        return -1;
+    }
     return file->handle;
 }
 
@@ -194,7 +236,7 @@ int ferror(FILE *file) {
 static void drop_input(FILE *file) {
     size_t ahead = file->read_len - file->read_pos + (file->has_ungot ? 1 : 0);
     if (ahead) {
-        vx_seek(file->handle, -(long)ahead, VX_SEEK_CURRENT);
+        raw_seek(file, -(long)ahead, VX_SEEK_CURRENT);
     }
     file->read_pos = file->read_len = 0;
     file->has_ungot = false;
@@ -210,7 +252,7 @@ static int fputc_unlocked(int c, FILE *file) {
     }
     if (file->buffering == UNBUFFERED) {
         char ch = (char)c;
-        return vx_write(file->handle, &ch, 1) == 1 ? (unsigned char)c : EOF;
+        return raw_write(file, &ch, 1) == 1 ? (unsigned char)c : EOF;
     }
     if (file->write_used == file->size && flush_one(file)) {
         return EOF;
@@ -238,7 +280,7 @@ static size_t fwrite_unlocked(const void *buffer, size_t size, size_t count, FIL
     if (file->buffering == UNBUFFERED || (file->write_used == 0 && total >= file->size)) {
         size_t done = 0;
         while (done < total) {
-            long n = vx_write(file->handle, p + done, total - done);
+            long n = raw_write(file, p + done, total - done);
             if (n <= 0) {
                 file->error = true;
                 break;
@@ -297,7 +339,7 @@ static int fgetc_unlocked(FILE *file) {
         if (file == stdin) {
             fflush(stdout); /* Show any prompt before waiting for input. */
         }
-        long n = vx_read(file->handle, file->buffer, file->size);
+        long n = raw_read(file, file->buffer, file->size);
         if (n <= 0) {
             if (n < 0) {
                 file->error = true;
@@ -693,7 +735,7 @@ int fseeko(FILE *file, off_t offset, int whence) {
     }
     file->read_pos = file->read_len = 0;
     file->has_ungot = false;
-    long result = vx_seek(file->handle, (long)offset, whence);
+    long result = raw_seek(file, (long)offset, whence);
     if (result >= 0) {
         file->eof = false;
     }
@@ -707,7 +749,7 @@ int fseek(FILE *file, long offset, int whence) {
 
 off_t ftello(FILE *file) {
     vx_mutex_lock(&file->lock);
-    long position = vx_seek(file->handle, 0, VX_SEEK_CURRENT);
+    long position = raw_seek(file, 0, VX_SEEK_CURRENT);
     if (position >= 0) {
         position += (long)file->write_used;
         position -= (long)(file->read_len - file->read_pos + (file->has_ungot ? 1 : 0));
@@ -948,4 +990,238 @@ void flockfile(FILE *file) {
 
 void funlockfile(FILE *file) {
     (void)file;
+}
+
+/* ---- Files that aren't files: fopencookie, open_memstream, fmemopen ---- */
+
+FILE *fopencookie(void *cookie, const char *mode, cookie_io_functions_t io) {
+    bool readable = false, writable = false;
+    if (!mode_flags(mode, &readable, &writable)) {
+        errno = EINVAL;
+        return NULL;
+    }
+    FILE *file = new_file(-1, readable, writable);
+    if (!file) {
+        errno = ENOMEM;
+        return NULL;
+    }
+    file->cookie_file = true;
+    file->cookie = cookie;
+    file->io = io;
+    return file;
+}
+
+/* open_memstream: what's written goes into a growing buffer, which *bufp
+ * and *sizep show after each fflush (and fclose), with a 0 after it. */
+struct memstream {
+    char **bufp;
+    size_t *sizep;
+    char *data;
+    size_t capacity, length, position;
+};
+
+static int memstream_reserve(struct memstream *m, size_t needed) {
+    if (needed + 1 <= m->capacity) {
+        return 0;
+    }
+    size_t capacity = m->capacity ? m->capacity : 256;
+    while (capacity < needed + 1) {
+        capacity *= 2;
+    }
+    char *data = realloc(m->data, capacity);
+    if (!data) {
+        return -1;
+    }
+    memset(data + m->capacity, 0, capacity - m->capacity);
+    m->data = data;
+    m->capacity = capacity;
+    *m->bufp = data;
+    return 0;
+}
+
+static ssize_t memstream_write(void *cookie, const char *data, size_t n) {
+    struct memstream *m = cookie;
+    if (memstream_reserve(m, m->position + n)) {
+        return -1;
+    }
+    memcpy(m->data + m->position, data, n);
+    m->position += n;
+    if (m->position > m->length) {
+        m->length = m->position;
+    }
+    m->data[m->length] = 0;
+    *m->sizep = m->position;
+    return (ssize_t)n;
+}
+
+static int memstream_seek(void *cookie, off_t *offset, int whence) {
+    struct memstream *m = cookie;
+    off_t base = whence == SEEK_SET ? 0 : whence == SEEK_CUR ? (off_t)m->position : (off_t)m->length;
+    off_t position = base + *offset;
+    if (position < 0 || memstream_reserve(m, (size_t)position)) {
+        return -1;
+    }
+    m->position = (size_t)position;
+    *m->sizep = m->position;
+    *offset = position;
+    return 0;
+}
+
+static int memstream_close(void *cookie) {
+    free(cookie); /* (The buffer is the caller's now.) */
+    return 0;
+}
+
+FILE *open_memstream(char **bufp, size_t *sizep) {
+    struct memstream *m = calloc(1, sizeof(*m));
+    if (!m) {
+        errno = ENOMEM;
+        return NULL;
+    }
+    m->bufp = bufp;
+    m->sizep = sizep;
+    *sizep = 0;
+    *bufp = NULL;
+    if (memstream_reserve(m, 0)) {
+        free(m);
+        errno = ENOMEM;
+        return NULL;
+    }
+    FILE *file = fopencookie(m, "w", (cookie_io_functions_t){
+                                         .write = memstream_write,
+                                         .seek = memstream_seek,
+                                         .close = memstream_close,
+                                     });
+    if (!file) {
+        free(m->data);
+        free(m);
+    }
+    return file;
+}
+
+/* fmemopen: a fixed buffer as a file (the caller's, or one of its own). */
+struct memfile {
+    char *data;
+    size_t size, length, position;
+    bool own;
+};
+
+static ssize_t memfile_read(void *cookie, char *data, size_t n) {
+    struct memfile *m = cookie;
+    size_t left = m->position < m->length ? m->length - m->position : 0;
+    n = n < left ? n : left;
+    memcpy(data, m->data + m->position, n);
+    m->position += n;
+    return (ssize_t)n;
+}
+
+static ssize_t memfile_write(void *cookie, const char *data, size_t n) {
+    struct memfile *m = cookie;
+    size_t room = m->position < m->size ? m->size - m->position : 0;
+    n = n < room ? n : room;
+    memcpy(m->data + m->position, data, n);
+    m->position += n;
+    if (m->position > m->length) {
+        m->length = m->position;
+        if (m->length < m->size) {
+            m->data[m->length] = 0;
+        }
+    }
+    return (ssize_t)n;
+}
+
+static int memfile_seek(void *cookie, off_t *offset, int whence) {
+    struct memfile *m = cookie;
+    off_t base = whence == SEEK_SET ? 0 : whence == SEEK_CUR ? (off_t)m->position : (off_t)m->length;
+    off_t position = base + *offset;
+    if (position < 0 || (size_t)position > m->size) {
+        return -1;
+    }
+    m->position = (size_t)position;
+    *offset = position;
+    return 0;
+}
+
+static int memfile_close(void *cookie) {
+    struct memfile *m = cookie;
+    if (m->own) {
+        free(m->data);
+    }
+    free(m);
+    return 0;
+}
+
+FILE *fmemopen(void *buffer, size_t size, const char *mode) {
+    struct memfile *m = calloc(1, sizeof(*m));
+    if (!m || size == 0) {
+        free(m);
+        errno = m ? EINVAL : ENOMEM;
+        return NULL;
+    }
+    m->size = size;
+    m->data = buffer;
+    if (!buffer) {
+        m->data = calloc(1, size);
+        m->own = true;
+        if (!m->data) {
+            free(m);
+            errno = ENOMEM;
+            return NULL;
+        }
+    }
+    switch (mode[0]) {
+    case 'r':
+        m->length = size;
+        break;
+    case 'w':
+        m->data[0] = 0;
+        break;
+    case 'a':
+        m->length = strnlen(m->data, size);
+        m->position = m->length;
+        break;
+    }
+    FILE *file = fopencookie(m, mode, (cookie_io_functions_t){
+                                          .read = memfile_read,
+                                          .write = memfile_write,
+                                          .seek = memfile_seek,
+                                          .close = memfile_close,
+                                      });
+    if (!file) {
+        memfile_close(m);
+    }
+    return file;
+}
+
+/* getc and friends as functions (stdio.h has them as macros too; C++'s
+ * <cstdio> uses these). */
+#undef getc
+#undef putc
+#undef getc_unlocked
+#undef putc_unlocked
+#undef getchar_unlocked
+#undef putchar_unlocked
+
+int getc(FILE *file) {
+    return fgetc(file);
+}
+
+int putc(int c, FILE *file) {
+    return fputc(c, file);
+}
+
+int getc_unlocked(FILE *file) {
+    return fgetc(file);
+}
+
+int putc_unlocked(int c, FILE *file) {
+    return fputc(c, file);
+}
+
+int getchar_unlocked(void) {
+    return getchar();
+}
+
+int putchar_unlocked(int c) {
+    return putchar(c);
 }

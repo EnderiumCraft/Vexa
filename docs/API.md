@@ -30,24 +30,27 @@ failure. The `vx_*` functions under `<vexa/...>` are Vexa's own.
 
 | Header | What's there |
 | --- | --- |
-| `<stdio.h>` | `FILE` and the standard streams; `fopen`, `freopen`, `fdopen`, `fclose`, `fflush`, `setvbuf`; `fread`, `fwrite`, `fgetc`, `fgets`, `getline`, `getdelim`, `ungetc`, `fputc`, `fputs`, `puts`; `fseek`, `ftell`, `rewind`, `fgetpos`, `fsetpos`; `printf` and friends (with `%f %e %g %a`, exactly rounded), `asprintf`, `dprintf`; `scanf`, `fscanf`, `sscanf`; `tmpfile`, `popen`, `pclose`, `perror`, `remove`, `rename` |
+| `<stdio.h>` | `FILE` and the standard streams; `fopen`, `freopen`, `fdopen`, `fclose`, `fflush`, `setvbuf`; `fread`, `fwrite`, `fgetc`, `fgets`, `getline`, `getdelim`, `ungetc`, `fputc`, `fputs`, `puts`; `fseek`, `ftell`, `rewind`, `fgetpos`, `fsetpos`; `printf` and friends (with `%f %e %g %a`, exactly rounded), `asprintf`, `dprintf`; `scanf`, `fscanf`, `sscanf`; `tmpfile`, `popen`, `pclose`, `perror`, `remove`, `rename`; memory as a file: `open_memstream`, `fmemopen`, `fopencookie` |
 | `<stdlib.h>` | `malloc`, `calloc`, `realloc`, `free`, `aligned_alloc`, `posix_memalign`; `getenv`, `setenv`, `unsetenv`, `putenv`, `environ`; `strtol` and the rest, `strtod`, `strtof`, `strtold`, `atof`; `qsort`, `bsearch`; `rand`, `random`; `abs`, `div`; `exit`, `atexit`, `_Exit`, `system`; `mkstemp`, `mkdtemp`, `realpath`; `mbtowc` and the UTF-8 multibyte functions |
 | `<string.h>`, `<strings.h>` | the `mem*` and `str*` functions, `strtok_r`, `strsep`, `strlcpy`, `strlcat`, `stpcpy`, `strcasecmp`, `strcasestr`, `strerror`, `strsignal` |
 | `<ctype.h>`, `<wchar.h>` | character classes; wide strings (`wchar_t` is a code point) and UTF-8 conversions, `wcwidth` |
 | `<math.h>` | all of C's math library: musl's libm |
 | `<time.h>`, `<sys/time.h>` | `time`, `clock_gettime`, `nanosleep`, `gettimeofday`, `gmtime`, `localtime` (the time zone from Settings), `mktime`, `timegm`, `strftime` |
 | `<unistd.h>`, `<fcntl.h>`, `<sys/stat.h>`, `<dirent.h>` | file descriptors: `open`, `read`, `write`, `pread`, `lseek`, `close`, `ftruncate`, `fsync`, `pipe`; `stat`, `fstat`, `lstat`, `mkdir`, `rmdir`, `unlink`, `rename`, `access`, `chdir`, `getcwd`, `symlink`, `readlink`, `isatty`; `opendir`, `readdir`, `closedir`; `sleep`, `usleep`, `getpid`, `sysconf`, `getopt` |
-| `<pthread.h>`, `<semaphore.h>`, `<sched.h>` | threads, mutexes (normal, recursive, error-checking), condition variables, read-write locks, spin locks, `pthread_once`, keys; semaphores; `sched_yield` |
+| `<pthread.h>`, `<semaphore.h>`, `<sched.h>` | threads, mutexes (normal, recursive, error-checking), condition variables, read-write locks, spin locks, barriers, `pthread_once`, keys; semaphores; `sched_yield`. Thread-local variables (`__thread`, `_Thread_local`, C++'s `thread_local`) work in programs and in libraries, also ones loaded with `dlopen` |
 | `<sys/mman.h>`, `<poll.h>` | `mmap` (anonymous, and of files), `munmap`, `mprotect`; `poll` |
 | `<signal.h>`, `<setjmp.h>` | `signal`, `sigaction` (handlers run for `raise`; from outside, signals can be ignored or end the program), `raise`, `kill`; `setjmp`, `longjmp` |
 | `<errno.h>`, `<assert.h>`, `<limits.h>`, `<inttypes.h>`, `<locale.h>` | `errno` (one per thread), `assert`, limits, `PRId64` and friends, the "C" locale |
+| `<endian.h>`, `<alloca.h>`, `<syslog.h>`, `<sys/file.h>` | byte order (`htobe32` and friends); `alloca`; `syslog` (to standard error: there's no system log); `flock` (accepted, but nothing is locked) |
 
 The compiler's own headers work too: `<stdint.h>`, `<stddef.h>`, `<stdbool.h>`,
 `<stdarg.h>`, `<float.h>`. `main(int argc, char **argv)` is called as usual; returning
 from it ends the program with that exit code.
 
-Not there: `fork` and `exec*` (`vx_spawn` starts programs), `dup`, `dlopen`, locales
-other than "C", and user and group IDs beyond stubs.
+Also there: `dup` and `dup2`, `posix_spawn` (`<spawn.h>`), and `dlopen`, `dlsym` and
+`dlclose` (`<dlfcn.h>`, for libraries in `/lib`). Not there: `fork` and `exec*`
+(`vx_spawn` and `posix_spawn` start programs), locales other than "C", and user and
+group IDs beyond stubs.
 
 ## `<vexa/syscall.h>`: system calls
 

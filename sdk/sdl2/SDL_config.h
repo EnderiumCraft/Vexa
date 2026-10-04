@@ -129,18 +129,21 @@
 #define SDL_HIDAPI_DISABLED 1
 #define SDL_JOYSTICK_DISABLED 1
 #define SDL_SENSOR_DISABLED 1
-#define SDL_LOADSO_DUMMY 1
 #define SDL_POWER_DISABLED 1
 
-/* Vexa's: pthreads (libvexa's), the monotonic clock, the home folder. */
+/* Vexa's: pthreads (libvexa's), the monotonic clock, the home folder,
+ * dlopen (for OpenGL: Mesa's libOSMesa.so). */
+#define SDL_LOADSO_DLOPEN 1
 #define SDL_THREAD_PTHREAD 1
 #define SDL_THREAD_PTHREAD_RECURSIVE_MUTEX 1
 #define SDL_TIMER_UNIX 1
 #define SDL_FILESYSTEM_UNIX 1
 
 /* Windows on the Vexa desktop (drawn in software: SDL's renderer, or the
- * window surface; no OpenGL or Vulkan), and sound on /dev/audio0. */
+ * window surface; or with OpenGL, through Mesa's OSMesa: SDL_GL_* only, SDL's
+ * renderer stays in software; no Vulkan), and sound on /dev/audio0. */
 #define SDL_VIDEO_DRIVER_VEXA 1
+#define SDL_VIDEO_OPENGL 1
 #define SDL_VIDEO_DRIVER_DUMMY 1
 #define SDL_VIDEO_RENDER_SW 1
 #define SDL_AUDIO_DRIVER_VEXA 1
