@@ -46,7 +46,7 @@ if [ $static = yes ]; then
 fi
 if [ $shared = yes ]; then
     # shellcheck disable=SC2086
-    exec "$HOST_CC" $COMMON "$@" "$SDK/lib/libvexa.so" "$LIBGCC"
+    exec "$HOST_CC" $COMMON "$SDK/lib/dso.o" "$@" "$SDK/lib/libvexa.so" "$LIBGCC"
 fi
 # shellcheck disable=SC2086
 exec "$HOST_CC" $COMMON -pie -Wl,-dynamic-linker,/lib/vexa-ld.so \

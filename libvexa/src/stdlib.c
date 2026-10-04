@@ -1,4 +1,5 @@
 #include <ctype.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -6,22 +7,73 @@
 #include <vexa/syscall.h>
 #include <vexa/thread.h>
 
-/* atexit: up to 64 functions, run last first by exit(). */
-static void (*exit_functions[64])(void);
+/* atexit, and C++'s __cxa_atexit (destructors of static objects, each with
+ * its argument and the shared object it's from): up to 1024, run last first
+ * by exit(), or by __cxa_finalize for a shared object going away. */
+#define EXIT_FUNCTIONS 1024
+
+static struct {
+    void (*fn)(void *);
+    void *arg;
+    void *dso;
+    bool plain; /* atexit's: called without the argument. */
+} exit_functions[EXIT_FUNCTIONS];
 static int exit_function_count;
+static struct vx_mutex exit_lock = VX_MUTEX_INIT;
+
+static int add_exit_function(void (*fn)(void *), void *arg, void *dso, bool plain) {
+    vx_mutex_lock(&exit_lock);
+    int result = -1;
+    if (exit_function_count < EXIT_FUNCTIONS) {
+        exit_functions[exit_function_count].fn = fn;
+        exit_functions[exit_function_count].arg = arg;
+        exit_functions[exit_function_count].dso = dso;
+        exit_functions[exit_function_count].plain = plain;
+        exit_function_count++;
+        result = 0;
+    }
+    vx_mutex_unlock(&exit_lock);
+    return result;
+}
 
 int atexit(void (*fn)(void)) {
-    if (exit_function_count == 64) {
-        return -1;
+    return add_exit_function((void (*)(void *))fn, NULL, NULL, true);
+}
+
+int __cxa_atexit(void (*fn)(void *), void *arg, void *dso) {
+    return add_exit_function(fn, arg, dso, false);
+}
+
+/* Runs (once) the functions registered for `dso`, or all of them for NULL. */
+void __cxa_finalize(void *dso) {
+    for (;;) {
+        vx_mutex_lock(&exit_lock);
+        int i = exit_function_count - 1;
+        while (i >= 0 && (!exit_functions[i].fn || (dso && exit_functions[i].dso != dso))) {
+            i--;
+        }
+        if (i < 0) {
+            vx_mutex_unlock(&exit_lock);
+            return;
+        }
+        void (*fn)(void *) = exit_functions[i].fn;
+        void *arg = exit_functions[i].arg;
+        bool plain = exit_functions[i].plain;
+        exit_functions[i].fn = NULL;
+        if (i == exit_function_count - 1) {
+            exit_function_count--;
+        }
+        vx_mutex_unlock(&exit_lock);
+        if (plain) {
+            ((void (*)(void))fn)();
+        } else {
+            fn(arg);
+        }
     }
-    exit_functions[exit_function_count++] = fn;
-    return 0;
 }
 
 void exit(int code) {
-    while (exit_function_count) {
-        exit_functions[--exit_function_count]();
-    }
+    __cxa_finalize(NULL);
     fflush(NULL);
     vx_exit(code);
 }

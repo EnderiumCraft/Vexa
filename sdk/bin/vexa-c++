@@ -1,0 +1,60 @@
+#!/bin/sh
+# vexa-c++: the build machine's g++ (or clang++, with VEXA_HOST_CXX=clang++),
+# set up like vexa-cc for C++ programs and libraries, with LLVM's libc++ and
+# libc++abi built for Vexa (in the SDK's include/c++/v1 and lib/).
+#
+# Vexa's C++ runtime has no exceptions (-fno-exceptions is the default here:
+# `new` that fails aborts) and no locales or iostreams; the rest of the
+# standard library (containers, strings, algorithms, threads, <chrono>,
+# <atomic>...) is there.
+set -e
+SDK=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+HOST_CXX=${VEXA_HOST_CXX:-g++}
+
+link=yes
+static=no
+shared=no
+for arg in "$@"; do
+    case $arg in
+    -c | -S | -E | -M | -MM) link=no ;;
+    -static) static=yes ;;
+    -shared) shared=yes ;;
+    --version | -v | -dumpversion | -dumpmachine | -print-*) exec "$HOST_CXX" "$@" ;;
+    esac
+done
+
+# (While libc++ itself is being built, its headers aren't in the SDK yet:
+# VEXA_CXX_BOOTSTRAP leaves them out.)
+CXX_INCLUDE=
+if [ -z "${VEXA_CXX_BOOTSTRAP:-}" ]; then
+    CXX_INCLUDE="-isystem $SDK/include/c++/v1"
+fi
+# shellcheck disable=SC2086
+set -- -nostdinc++ $CXX_INCLUDE -fno-exceptions -ffreestanding -fno-stack-protector -fPIC \
+    -fno-asynchronous-unwind-tables -fno-plt -m64 -march=x86-64 -D__vexa__=1 -D_REENTRANT \
+    -U__linux__ -U__linux -Ulinux -U__gnu_linux__ \
+    -nostdinc -isystem "$SDK/include" -isystem "$("$HOST_CXX" -print-file-name=include)" "$@"
+
+if [ $link = no ]; then
+    exec "$HOST_CXX" "$@"
+fi
+
+LIBGCC=$("$HOST_CXX" -print-libgcc-file-name)
+RUNTIME=
+if [ -z "${VEXA_CXX_BOOTSTRAP:-}" ]; then
+    RUNTIME="$SDK/lib/libc++.a $SDK/lib/libc++abi.a"
+fi
+COMMON="-nostdlib -L$SDK/lib -Wl,-z,max-page-size=0x1000 -Wl,-z,norelro -Wl,--hash-style=sysv \
+    -Wl,--build-id=none -Wl,-z,noexecstack"
+if [ $static = yes ]; then
+    # shellcheck disable=SC2086
+    exec "$HOST_CXX" $COMMON -Wl,--no-dynamic-linker -T "$SDK/lib/program.ld" \
+        "$SDK/lib/crt0.o" "$@" $RUNTIME "$SDK/lib/libvexa.a" "$LIBGCC"
+fi
+if [ $shared = yes ]; then
+    # shellcheck disable=SC2086
+    exec "$HOST_CXX" $COMMON "$SDK/lib/dso.o" "$@" $RUNTIME "$SDK/lib/libvexa.so" "$LIBGCC"
+fi
+# shellcheck disable=SC2086
+exec "$HOST_CXX" $COMMON -pie -Wl,-dynamic-linker,/lib/vexa-ld.so \
+    "$SDK/lib/crt0.o" "$@" $RUNTIME "$SDK/lib/libvexa.so" "$LIBGCC"

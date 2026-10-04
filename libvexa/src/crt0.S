@@ -12,6 +12,14 @@ _start:
     call __libvexa_start
     ud2
 
+/* C++: this module's handle, for __cxa_atexit (normally in crtbegin.o). */
+.data
+.globl __dso_handle
+.hidden __dso_handle
+.balign 8
+__dso_handle:
+    .quad __dso_handle
+
 /* The note that marks this as a native Vexa program (see abi/vexa/abi.h). */
 .section .note.vexa, "a", @note
 .balign 4

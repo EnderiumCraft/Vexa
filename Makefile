@@ -74,6 +74,7 @@ STATIC_PROGRAMS := hello-world
 LIBVEXA_SRCS := $(wildcard libvexa/src/*.c libvexa/src/*.S)
 LIBVEXA_OBJS := $(patsubst libvexa/src/%,$(BUILD)/libvexa/%.o,$(LIBVEXA_SRCS))
 CRT0 := $(BUILD)/libvexa/crt0.S.o
+DSO_O := $(BUILD)/libvexa-crt/dso.o
 # The math library (libm) is musl's, built position independent and linked
 # into libvexa: it uses nothing of musl's C library.
 MUSL_VERSION := 1.2.4
@@ -329,7 +330,11 @@ $(LIBVEXA_A): $(filter-out $(CRT0),$(LIBVEXA_OBJS)) $(LIBM)
 	ar rcs $@ $(filter %.o,$^)
 	printf 'OPEN %s\nADDLIB %s\nSAVE\nEND\n' $@ $(LIBM) | ar -M
 
-$(SDK_DIR)/.done: $(SDK_FILES) $(LIBVEXA_SO) $(LIBVEXA_A) $(CRT0) libvexa/program.ld \
+$(DSO_O): libvexa/crt/dso.S
+	@mkdir -p $(dir $@)
+	$(CC) -c $< -o $@
+
+$(SDK_DIR)/.done: $(SDK_FILES) $(LIBVEXA_SO) $(LIBVEXA_A) $(CRT0) $(DSO_O) libvexa/program.ld \
 		$(shell find libvexa/include -type f) abi/vexa/abi.h $(MUSL_TARBALL)
 	rm -rf $(SDK_DIR)
 	mkdir -p $(SDK_DIR)/include/vexa $(SDK_DIR)/lib $(SDK_DIR)/licenses
@@ -340,6 +345,7 @@ $(SDK_DIR)/.done: $(SDK_FILES) $(LIBVEXA_SO) $(LIBVEXA_A) $(CRT0) libvexa/progra
 	cp abi/vexa/abi.h $(SDK_DIR)/include/vexa/
 	cp $(LIBVEXA_SO) $(LIBVEXA_A) libvexa/program.ld $(SDK_DIR)/lib/
 	cp $(CRT0) $(SDK_DIR)/lib/crt0.o
+	cp $(DSO_O) $(SDK_DIR)/lib/dso.o
 	# -lm, -lpthread...: all in libvexa, so these are empty.
 	for lib in c m pthread rt dl; do ar rc $(SDK_DIR)/lib/lib$$lib.a; done
 	tar -xzf $(MUSL_TARBALL) -O musl-$(MUSL_VERSION)/COPYRIGHT > $(SDK_DIR)/licenses/musl-libm.txt
