@@ -148,9 +148,13 @@ void vx_draw_text_fit(struct vx_surface *s, int x, int y, int width, const char 
     vx_draw_text(s, x, y, line, fg, bg);
 }
 
-void vx_draw_button(struct vx_surface *s, int x, int y, int width, int height, const char *label,
-                    bool hot) {
+void vx_draw_button_flags(struct vx_surface *s, int x, int y, int width, int height,
+                          const char *label, unsigned flags) {
+    bool hot = (flags & VX_BUTTON_HOT) && !(flags & VX_BUTTON_DISABLED);
     uint32_t color = button_color(hot);
+    if (flags & VX_BUTTON_DISABLED) {
+        color = vx_mix(color, VX_COLOR_WINDOW, 120);
+    }
     vx_draw_gel(s, x, y, width, height, height / 2 < 9 ? height / 2 : 9, color);
     int text = vx_text_width(label);
     int tx = x + (width > text + 8 ? (width - text) / 2 : 4), ty = y + (height - VX_LINE_HEIGHT) / 2;
@@ -159,7 +163,58 @@ void vx_draw_button(struct vx_surface *s, int x, int y, int width, int height, c
         vx_draw_text_fit(s, tx, ty + 1, width - 8, label, vx_mix(color, 0x000000, 110),
                          VX_TRANSPARENT);
     }
-    vx_draw_text_fit(s, tx, ty, width - 8, label, hot ? 0xffffff : VX_COLOR_TEXT, VX_TRANSPARENT);
+    uint32_t fg = hot ? 0xffffff : flags & VX_BUTTON_DISABLED ? VX_COLOR_DIM : VX_COLOR_TEXT;
+    vx_draw_text_fit(s, tx, ty, width - 8, label, fg, VX_TRANSPARENT);
+}
+
+void vx_draw_button(struct vx_surface *s, int x, int y, int width, int height, const char *label,
+                    bool hot) {
+    vx_draw_button_flags(s, x, y, width, height, label, hot ? VX_BUTTON_HOT : 0);
+}
+
+void vx_draw_toolbar(struct vx_surface *s, int x, int y, int width, int height) {
+    uint32_t top = vx_theme.dark ? 0x3a3450 : 0xf4f5f8, bottom = vx_theme.dark ? 0x221d33 : 0xd6d9e0;
+    for (int row = 0; row < height - 1; row++) {
+        vx_fill(s, x, y + row, width, 1, vx_mix(top, bottom, row * 255 / (height > 2 ? height - 2 : 1)));
+    }
+    vx_fill(s, x, y, width, 1, vx_mix(top, 0xffffff, vx_theme.dark ? 30 : 160));
+    vx_fill(s, x, y + height - 1, width, 1, vx_mix(VX_COLOR_LINE, 0x000000, vx_theme.dark ? 80 : 40));
+}
+
+void vx_draw_tab(struct vx_surface *s, int x, int y, int width, int height, const char *label,
+                 bool chosen) {
+    if (chosen) {
+        vx_draw_gel(s, x, y, width, height, 7, VX_COLOR_ACCENT);
+        vx_draw_text_fit(s, x + 9, y + (height - VX_LINE_HEIGHT) / 2 + 1, width - 30, label,
+                         vx_mix(VX_COLOR_ACCENT, 0x000000, 110), VX_TRANSPARENT);
+    } else {
+        vx_fill_rounded(s, x, y, width, height, 7, vx_theme.dark ? 0xffffff : 0x000000, 18);
+    }
+    vx_draw_text_fit(s, x + 9, y + (height - VX_LINE_HEIGHT) / 2, width - 30, label,
+                     chosen ? 0xffffff : VX_COLOR_TEXT, VX_TRANSPARENT);
+}
+
+void vx_draw_selection(struct vx_surface *s, int x, int y, int width, int height) {
+    vx_draw_gel(s, x, y, width, height, height / 2 < 6 ? height / 2 : 6, VX_COLOR_SELECTED);
+}
+
+void vx_draw_progress(struct vx_surface *s, int x, int y, int width, int height,
+                      unsigned long long done, unsigned long long total) {
+    int radius = height / 2;
+    vx_fill_rounded(s, x, y, width, height, radius, vx_mix(VX_COLOR_LINE, 0x000000, 40), 255);
+    vx_fill_rounded(s, x + 1, y + 1, width - 2, height - 2, radius - 1, VX_COLOR_BUTTON_HOT, 255);
+    int filled = total ? (int)((unsigned long long)width * (done > total ? total : done) / total) : 0;
+    if (filled >= height) {
+        vx_draw_gel(s, x, y, filled, height, radius, VX_COLOR_ACCENT);
+    }
+}
+
+void vx_draw_sheet(struct vx_surface *s, int x, int y, int width, int height) {
+    vx_fill_rounded(s, x - 2, y + 1, width + 4, height + 5, 12, 0x000000, 28);
+    vx_fill_rounded(s, x - 1, y + 2, width + 2, height + 2, 11, 0x000000, 40);
+    vx_fill_rounded(s, x, y, width, height, 10, vx_mix(VX_COLOR_LINE, 0x000000, 30), 255);
+    vx_fill_rounded(s, x + 1, y + 1, width - 2, height - 2, 9, VX_COLOR_WINDOW, 255);
+    vx_fill(s, x + 10, y + 1, width - 20, 1, vx_mix(VX_COLOR_WINDOW, 0xffffff, 120));
 }
 
 void vx_draw_check(struct vx_surface *s, int x, int y, bool on) {

@@ -329,23 +329,28 @@ static void draw(void) {
     vx_fill(s, cl + 4, ct + 4, show_w, show_h, 0x101014);
     vx_blit(s, cl, ct, &canvas, view_x, view_y, show_w, show_h);
     /* The tools. */
-    vx_fill(s, 0, BAR, TOOLS, h - BAR, VX_COLOR_WINDOW);
+    vx_fill(s, 0, BAR, TOOLS, h - BAR, vx_theme.sidebar);
+    vx_fill(s, TOOLS - 1, BAR, 1, h - BAR, VX_COLOR_LINE);
     for (int i = 0; i < TOOL_COUNT; i++) {
         int x, y;
         tool_rect(i, &x, &y);
         vx_draw_button(s, x, y, TOOLS - 12, 38, tool_names[i], i == (int)tool);
     }
     /* Colours and sizes. */
-    vx_fill(s, 0, 0, w, BAR, VX_COLOR_WINDOW);
-    vx_fill(s, 0, BAR - 1, w, 1, VX_COLOR_LINE);
-    vx_fill(s, 10, 6, 32, 32, VX_COLOR_LINE);
-    vx_fill(s, 22, 18, 20, 20, colors[1]);
-    vx_fill(s, 10, 6, 20, 20, colors[0]);
-    vx_draw_outline(s, 10, 6, 20, 20, VX_COLOR_TEXT);
+    vx_draw_toolbar(s, 0, 0, w, BAR);
+    /* The two colours (back one behind), then the palette: rounded wells. */
+    vx_fill_rounded(s, 21, 17, 22, 22, 5, VX_COLOR_LINE, 255);
+    vx_fill_rounded(s, 22, 18, 20, 20, 4, colors[1], 255);
+    vx_fill_rounded(s, 9, 5, 22, 22, 5, VX_COLOR_TEXT, 255);
+    vx_fill_rounded(s, 10, 6, 20, 20, 4, colors[0], 255);
     for (int i = 0; i < 16; i++) {
         int x = 56 + (i % 8) * 20, y = 4 + (i / 8) * 18;
-        vx_fill(s, x, y, 18, 16, palette[i]);
-        vx_draw_outline(s, x, y, 18, 16, palette[i] == colors[0] ? VX_COLOR_ACCENT : VX_COLOR_LINE);
+        bool chosen = palette[i] == colors[0];
+        vx_fill_rounded(s, x, y, 18, 16, 4, chosen ? VX_COLOR_ACCENT : VX_COLOR_LINE, 255);
+        vx_fill_rounded(s, x + (chosen ? 2 : 1), y + (chosen ? 2 : 1), chosen ? 14 : 16,
+                        chosen ? 12 : 14, 3, palette[i], 255);
+        vx_fill(s, x + 3, y + 1 + (chosen ? 1 : 0), 12 - (chosen ? 2 : 0), 1,
+                vx_mix(palette[i], 0xffffff, 110)); /* (A little shine.) */
     }
     for (int i = 0; i < 4; i++) {
         int x = 230 + i * 34;

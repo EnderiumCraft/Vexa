@@ -331,6 +331,12 @@ two colors.
 | `void vx_draw_outline(s, x, y, width, height, color)` | a one-pixel outline |
 | `void vx_draw_text_fit(s, x, y, width, text, fg, bg)` | text cut to fit, ending in "…" |
 | `void vx_draw_button(s, x, y, width, height, label, bool hot)` | a glossy push button (`hot`: the accent) |
+| `void vx_draw_button_flags(s, x, y, width, height, label, flags)` | a button with `VX_BUTTON_HOT` (the accent) and/or `VX_BUTTON_DISABLED` |
+| `void vx_draw_toolbar(s, x, y, width, height)` | a toolbar's (or status bar's) brushed background, with a line under it |
+| `void vx_draw_tab(s, x, y, width, height, label, bool chosen)` | a tab: the chosen one a gel of the accent |
+| `void vx_draw_selection(s, x, y, width, height)` | the glossy bar behind a selected row or item |
+| `void vx_draw_progress(s, x, y, width, height, done, total)` | a progress (or usage) bar |
+| `void vx_draw_sheet(s, x, y, width, height)` | a rounded, shadowed panel over a window's content (a question, a sheet) |
 | `void vx_draw_check(s, x, y, bool on)` | a 16x16 check box (on: a gel of the accent with a tick) |
 | `void vx_draw_field(s, x, y, width, text, bool focused)` | a one-line text field (focused: a ring of the accent) |
 | `void vx_fill_rounded(s, x, y, width, height, radius, color, alpha)` | a rectangle with smooth round corners, `alpha` (0-255) of `color` over what's there |

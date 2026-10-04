@@ -909,20 +909,14 @@ static int tab_width(void) {
 }
 
 static void draw_tabs(struct vx_surface *s) {
-    vx_fill(s, 0, 0, s->width, TABS, VX_COLOR_WINDOW);
-    vx_fill(s, 0, TABS - 1, s->width, 1, VX_COLOR_LINE);
+    vx_draw_toolbar(s, 0, 0, s->width, TABS);
     int w = tab_width();
     for (int i = 0; i < doc_count; i++) {
         int x = 4 + i * w;
-        if (i == current) {
-            vx_fill(s, x, 3, w - 4, TABS - 4, VX_COLOR_VIEW);
-            vx_fill(s, x, 3, w - 4, 2, VX_COLOR_ACCENT);
-        }
         char label[300];
         snprintf(label, sizeof(label), "%s%s", docs[i]->modified ? "*" : "", doc_name(docs[i]));
-        vx_draw_text_fit(s, x + 8, 6, w - 30, label, i == current ? VX_COLOR_TEXT : VX_COLOR_DIM,
-                         VX_TRANSPARENT);
-        vx_draw_text(s, x + w - 18, 6, "x", VX_COLOR_DIM, VX_TRANSPARENT);
+        vx_draw_tab(s, x, 3, w - 4, TABS - 6, label, i == current);
+        vx_draw_text(s, x + w - 18, 5, "x", i == current ? 0xffffff : VX_COLOR_DIM, VX_TRANSPARENT);
     }
     vx_draw_text(s, 4 + doc_count * w + 6, 5, "+", VX_COLOR_TEXT, VX_TRANSPARENT);
 }
@@ -993,7 +987,7 @@ static void draw(void) {
     /* The find bar. */
     if (find_open) {
         int y = h - STATUS - FIND_BAR;
-        vx_fill(s, 0, y, w, FIND_BAR, VX_COLOR_WINDOW);
+        vx_draw_toolbar(s, 0, y, w, FIND_BAR);
         vx_fill(s, 0, y, w, 1, VX_COLOR_LINE);
         vx_draw_text(s, 8, y + 9, "Find", VX_COLOR_TEXT, VX_TRANSPARENT);
         vx_draw_field(s, 50, y + 5, 170, find_text, find_field == 0);
@@ -1004,7 +998,7 @@ static void draw(void) {
         vx_draw_button(s, 584, y + 5, 40, 24, "All", false);
     }
     /* The status line. */
-    vx_fill(s, 0, h - STATUS, w, STATUS, VX_COLOR_WINDOW);
+    vx_draw_toolbar(s, 0, h - STATUS, w, STATUS);
     vx_fill(s, 0, h - STATUS, w, 1, VX_COLOR_LINE);
     static const char *const languages[] = {"Plain text", "C", "Python", "Shell", "Markdown",
                                             "Settings"};

@@ -178,7 +178,7 @@ static void draw(void) {
     for (int i = 0; i < PLACE_COUNT; i++) {
         int y = TOP + i * ROW;
         if (!strcmp(d.folder, places[i].path)) {
-            vx_fill(s, 4, y, SIDEBAR - 8, ROW - 2, VX_COLOR_SELECTED);
+            vx_draw_selection(s, 4, y, SIDEBAR - 8, ROW - 2);
         }
         if (folder_icon) {
             vx_blit_alpha(s, 12, y + 3, 16, 16, &folder_icon->surface);
@@ -191,13 +191,13 @@ static void draw(void) {
     /* The folder. */
     int list_x = SIDEBAR + 10, list_w = WIDTH - SIDEBAR - 20;
     int list_h = HEIGHT - TOP - BOTTOM;
-    vx_fill(s, list_x, TOP, list_w, list_h, VX_COLOR_VIEW);
-    vx_draw_outline(s, list_x, TOP, list_w, list_h, VX_COLOR_LINE);
+    vx_fill_rounded(s, list_x, TOP, list_w, list_h, 6, VX_COLOR_LINE, 255);
+    vx_fill_rounded(s, list_x + 1, TOP + 1, list_w - 2, list_h - 2, 5, VX_COLOR_VIEW, 255);
     for (int row = 0; row < visible_rows() && d.top + row < d.count; row++) {
         int i = d.top + row;
         int y = TOP + 1 + row * ROW;
         if (i == d.selected) {
-            vx_fill(s, list_x + 1, y, list_w - 2, ROW, VX_COLOR_SELECTED);
+            vx_draw_selection(s, list_x + 3, y, list_w - 6, ROW);
         }
         struct vx_image *icon = d.entries[i].is_dir ? folder_icon : file_icon;
         if (icon) {

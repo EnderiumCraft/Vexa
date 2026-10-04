@@ -904,8 +904,8 @@ def sound_heard_seconds(path, start=44):
 
 
 # Installing (--install DISK): the Installer app puts Vexa on an empty disk
-# (without the Linux programs, to be quick), from the desktop; then the
-# install program itself would refuse a disk that's in use.
+# (without the Linux programs, to be quick), from the desktop; then again
+# with the install program, over the first.
 INSTALL_COMMANDS = [
     ("install --list", "vda", 10),
     ("desktop", 'desktop: window 1 "Terminal"', 30),
@@ -921,7 +921,10 @@ INSTALL_COMMANDS = [
     ("@sendkey ctrl-alt-q", "desktop: asking before leaving", 20),
     ("@sendkey ret", "desktop: back to the console", 20),
     ("@sendkey ctrl-u", None, 2),
-    ("install --yes vda", "error: vda is in use", 10),
+    # Installing again from the shell: what's mounted from the disk (the new
+    # system, its FAT32 boot partition) is ejected first.
+    ("install --yes --no-linux vda", "[storage] vda ejected", 20),
+    ("@sendkey shift", "done: Vexa is on vda", 300),
 ]
 
 # Starting from that disk (--installed DISK, no CD): the root file system is

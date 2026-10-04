@@ -226,8 +226,12 @@ glass (what's behind them shows through, blurred and tinted with the accent colo
 the window you're using), a window's buttons are gel balls (close is red, maximize
 green, minimize yellow; grey on windows in the back, and they show their signs when
 the pointer is over them), and menus, buttons, switches and fields in Vexa's apps are
-gel-like too. It's light by default, with a blue accent; Settings → Appearance has a
-dark theme and other colours.
+gel-like too, down to Files' sidebar and list headings, the calculator's keys and the
+tabs of the terminal and the editor. GTK programs (X) get a theme to match, "Vexa":
+Adwaita with a glossy header bar, red, yellow and green title buttons, gel buttons,
+switches, sliders, blue scroll bars and selections (and its dark version with the dark
+theme). It's light by default, with a blue accent; Settings → Appearance has a dark
+theme and other colours.
 
 ![The desktop](desktop-screenshot.png)
 

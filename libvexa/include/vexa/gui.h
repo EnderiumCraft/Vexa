@@ -224,6 +224,25 @@ void vx_draw_text_fit(struct vx_surface *s, int x, int y, int width, const char 
 /* A push button with its label centered; `hot`: under the pointer. */
 void vx_draw_button(struct vx_surface *s, int x, int y, int width, int height, const char *label,
                     bool hot);
+/* A push button's states, for vx_draw_button_flags. */
+#define VX_BUTTON_HOT 1      /* Under the pointer, or chosen: the accent. */
+#define VX_BUTTON_DISABLED 2 /* Greyed out. */
+void vx_draw_button_flags(struct vx_surface *s, int x, int y, int width, int height,
+                          const char *label, unsigned flags);
+/* A toolbar's background across (x, y, width, height): brushed, lighter at
+ * the top, with a line under it. */
+void vx_draw_toolbar(struct vx_surface *s, int x, int y, int width, int height);
+/* A tab: the chosen one a gel of the accent, the others plain. */
+void vx_draw_tab(struct vx_surface *s, int x, int y, int width, int height, const char *label,
+                 bool chosen);
+/* Behind a selected row or item in a list: a glossy bar. */
+void vx_draw_selection(struct vx_surface *s, int x, int y, int width, int height);
+/* A progress bar: `done` of `total` filled with the accent. */
+void vx_draw_progress(struct vx_surface *s, int x, int y, int width, int height,
+                      unsigned long long done, unsigned long long total);
+/* A panel over the window's content (a question, a sheet): rounded, with a
+ * soft shadow. */
+void vx_draw_sheet(struct vx_surface *s, int x, int y, int width, int height);
 /* A check box, 16 by 16: on, a gel of the accent with a white tick. */
 void vx_draw_check(struct vx_surface *s, int x, int y, bool on);
 /* A one-line text field: the text (its end, if it's long), and a cursor

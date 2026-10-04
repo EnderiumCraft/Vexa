@@ -1310,13 +1310,25 @@ static int drop_position = -1; /* A folder a drag would drop into, or -1. */
 static void draw_list(struct vx_surface *s) {
     int x0 = main_x(), w = main_w();
     /* Headings: a click sorts; the sorted one has an arrow. */
-    vx_fill(s, x0, TOOLBAR + 2, w, HEADER, VX_COLOR_WINDOW);
+    /* (Aqua's list headings: the sorted column's is a gel of the accent.) */
+    vx_draw_toolbar(s, x0, TOOLBAR + 2, w, HEADER);
     static const char *const headings[] = {"Name", "Kind", "Size", "Modified"};
     for (int c = 0; c < 4; c++) {
         char text[32];
         bool sorted = (int)sort_by == c;
         snprintf(text, sizeof(text), "%s%s", headings[c], sorted ? (sort_down ? " v" : " ^") : "");
-        vx_draw_text(s, column_x(c), TOOLBAR + 4, text, sorted ? VX_COLOR_ACCENT : VX_COLOR_DIM,
+        int left = c ? column_x(c) - 6 : x0, right = c < 3 ? column_x(c + 1) - 6 : x0 + w;
+        if (sorted) {
+            vx_fill(s, left, TOOLBAR + 2, right - left, HEADER - 1, VX_COLOR_ACCENT);
+            for (int row = 0; row < HEADER - 1; row++) {
+                vx_fill(s, left, TOOLBAR + 2 + row, right - left, 1,
+                        vx_gel_color(VX_COLOR_ACCENT, row, HEADER - 1));
+            }
+        }
+        if (c) {
+            vx_fill(s, left, TOOLBAR + 4, 1, HEADER - 5, VX_COLOR_LINE);
+        }
+        vx_draw_text(s, column_x(c), TOOLBAR + 4, text, sorted ? 0xffffff : VX_COLOR_TEXT,
                      VX_TRANSPARENT);
     }
     vx_fill(s, x0, list_y() - 1, w, 1, VX_COLOR_LINE);
@@ -1327,8 +1339,10 @@ static void draw_list(struct vx_surface *s) {
         if (i % 2) {
             vx_fill(s, x, y, cw, ch, vx_theme.stripe); /* Stripes. */
         }
-        if (item->selected || i == drop_position) {
-            vx_fill(s, x + 2, y, cw - 4, ch, i == drop_position ? VX_COLOR_ACCENT : VX_COLOR_SELECTED);
+        if (i == drop_position) {
+            vx_draw_gel(s, x + 2, y, cw - 4, ch, 6, VX_COLOR_ACCENT);
+        } else if (item->selected) {
+            vx_draw_selection(s, x + 2, y, cw - 4, ch);
         }
         struct vx_image *icon = icon_for(item);
         if (icon) {
@@ -1362,8 +1376,9 @@ static void draw_icons(struct vx_surface *s) {
             break;
         }
         bool hot = item->selected || i == drop_position;
-        if (hot) {
-            vx_fill(s, x + 22, y + 4, 60, 58, i == drop_position ? VX_COLOR_ACCENT : VX_COLOR_BUTTON);
+        if (hot) { /* (Behind the icon: a soft rounded square.) */
+            vx_fill_rounded(s, x + 22, y + 4, 60, 58, 10,
+                            i == drop_position ? VX_COLOR_ACCENT : VX_COLOR_SELECTED, 200);
         }
         struct vx_image *thumb = item->thumb;
         if (thumb) {
@@ -1411,9 +1426,11 @@ static void draw_icons(struct vx_surface *s) {
             int tw = vx_text_width(part);
             int ty = y + 64 + line * (VX_LINE_HEIGHT + 1);
             if (item->selected) {
-                vx_fill(s, x + (cw - tw) / 2 - 3, ty - 1, tw + 6, VX_LINE_HEIGHT + 2, VX_COLOR_SELECTED);
+                vx_draw_gel(s, x + (cw - tw) / 2 - 5, ty - 1, tw + 10, VX_LINE_HEIGHT + 2,
+                            (VX_LINE_HEIGHT + 2) / 2, VX_COLOR_ACCENT);
             }
-            vx_draw_text(s, x + (cw - tw) / 2, ty, part, VX_COLOR_TEXT, VX_TRANSPARENT);
+            vx_draw_text(s, x + (cw - tw) / 2, ty, part, item->selected ? 0xffffff : VX_COLOR_TEXT,
+                         VX_TRANSPARENT);
         }
     }
 }
@@ -1429,30 +1446,29 @@ static void draw_sidebar(struct vx_surface *s) {
     for (int i = 0; i < place_count; i++) {
         int y = place_y(i);
         bool here = !strcmp(cwd, places[i].path);
-        if (here || i == drop_place) {
-            vx_fill(s, 4, y, SIDEBAR - 9, 22, i == drop_place ? VX_COLOR_ACCENT : VX_COLOR_SELECTED);
+        bool lit = here || i == drop_place;
+        if (lit) { /* (The place you're in: a gel of the accent, as in Finder.) */
+            vx_draw_gel(s, 4, y, SIDEBAR - 9, 22, 7, VX_COLOR_ACCENT);
         }
         if (*places[i].icon) {
             vx_blit_alpha(s, 12, y + 2, 18, 18, &(*places[i].icon)->surface);
         }
-        vx_draw_text_fit(s, 36, y + 3, SIDEBAR - 44, places[i].label, VX_COLOR_TEXT, VX_TRANSPARENT);
+        vx_draw_text_fit(s, 36, y + 3, SIDEBAR - 44, places[i].label, lit ? 0xffffff : VX_COLOR_TEXT,
+                         VX_TRANSPARENT);
     }
 }
 
 static void draw_toolbar(struct vx_surface *s, int hot) {
     static const char *const labels[] = {"<", ">", "^", "List", "Icons"};
-    vx_fill(s, 0, 0, s->width, TOOLBAR, VX_COLOR_WINDOW);
-    vx_fill(s, 0, TOOLBAR - 1, s->width, 1, VX_COLOR_LINE);
+    vx_draw_toolbar(s, 0, 0, s->width, TOOLBAR);
     for (int b = 0; b < BUTTON_COUNT; b++) {
         int x, w;
         button_rect(b, &x, &w);
         bool on = (b == B_LIST && !icon_view) || (b == B_ICONS && icon_view);
         bool off = (b == B_BACK && !back_count) || (b == B_FORWARD && !forward_count) ||
                    (b == B_UP && !strcmp(cwd, "/"));
-        vx_draw_button(s, x, 8, w, 24, labels[b], hot == b || on);
-        if (off) {
-            vx_draw_text(s, x + (w - vx_text_width(labels[b])) / 2, 12, labels[b], VX_COLOR_DIM, VX_COLOR_BUTTON);
-        }
+        vx_draw_button_flags(s, x, 8, w, 24, labels[b],
+                             (hot == b || on ? VX_BUTTON_HOT : 0) | (off ? VX_BUTTON_DISABLED : 0));
     }
     vx_draw_field(s, path_x(), 8, path_w(), field == FIELD_PATH ? typed : cwd, field == FIELD_PATH);
     vx_draw_field(s, search_x(), 8, 160, search, field == FIELD_SEARCH);
@@ -1472,7 +1488,7 @@ static void draw_status(struct vx_surface *s) {
         snprintf(text, sizeof(text), "%d item%s%s%s", shown_count, shown_count == 1 ? "" : "s",
                  search[0] ? " matching " : "", search);
     }
-    vx_fill(s, 0, h - STATUS, s->width, STATUS, VX_COLOR_WINDOW);
+    vx_draw_toolbar(s, 0, h - STATUS, s->width, STATUS);
     vx_fill(s, 0, h - STATUS, s->width, 1, VX_COLOR_LINE);
     vx_draw_text_fit(s, 10, h - STATUS + 3, s->width - 20, text, VX_COLOR_DIM, VX_TRANSPARENT);
 }
@@ -1487,9 +1503,7 @@ static void panel_rect(int width, int height, int *x, int *y) {
 static void panel(int width, int height, int *x, int *y) {
     struct vx_surface *s = &window->surface;
     panel_rect(width, height, x, y);
-    vx_fill(s, *x + 4, *y + 4, width, height, vx_theme.shadow);
-    vx_fill(s, *x, *y, width, height, VX_COLOR_WINDOW);
-    vx_draw_outline(s, *x, *y, width, height, VX_COLOR_ACCENT);
+    vx_draw_sheet(s, *x, *y, width, height);
 }
 
 /* A dialog's buttons, right-aligned at its bottom (0 the rightmost). */
@@ -1546,7 +1560,7 @@ static void draw_info(struct vx_surface *s) {
 static void draw_preview(struct vx_surface *s) {
     int w = s->width * 3 / 4, h = s->height * 3 / 4, x, y;
     panel(w, h, &x, &y);
-    vx_fill(s, x + 1, y + 1, w - 2, 24, VX_COLOR_BUTTON);
+    vx_draw_toolbar(s, x + 1, y + 1, w - 2, 26);
     vx_draw_text_fit(s, x + 10, y + 5, w - 20, preview_name, VX_COLOR_TEXT, VX_TRANSPARENT);
     int ax = x + 10, ay = y + 32, aw = w - 20, ah = h - 42;
     if (preview_image) {
@@ -1816,8 +1830,9 @@ static void draw(void) {
         int count = selected_count();
         snprintf(text, sizeof(text), "%s%d item%s", ctrl ? "+ " : "", count, count == 1 ? "" : "s");
         int tw = vx_text_width(text) + 12;
-        vx_fill(s, pointer_x + 14, pointer_y + 10, tw, VX_LINE_HEIGHT + 6, VX_COLOR_SELECTED);
-        vx_draw_text(s, pointer_x + 20, pointer_y + 13, text, VX_COLOR_TEXT, VX_TRANSPARENT);
+        vx_draw_gel(s, pointer_x + 14, pointer_y + 10, tw, VX_LINE_HEIGHT + 6,
+                    (VX_LINE_HEIGHT + 6) / 2, VX_COLOR_ACCENT);
+        vx_draw_text(s, pointer_x + 20, pointer_y + 13, text, 0xffffff, VX_TRANSPARENT);
     }
     if (mode == MENU) {
         vx_draw_menu(s, menu_x, menu_y, menu, menu_count, menu_hot);

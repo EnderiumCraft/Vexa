@@ -16,8 +16,6 @@
 #define COLOR_TITLE VX_COLOR_ACCENT
 #define COLOR_LABEL VX_COLOR_DIM
 #define COLOR_TEXT VX_COLOR_TEXT
-#define COLOR_BAR VX_COLOR_BUTTON
-#define COLOR_BAR_USED VX_COLOR_ACCENT
 
 static int line(struct vx_surface *s, int y, const char *label, const char *value) {
     vx_draw_text(s, LEFT, y, label, COLOR_LABEL, VX_TRANSPARENT);
@@ -46,11 +44,7 @@ static void draw(struct vx_window *window) {
     snprintf(text, sizeof(text), "%llu of %llu MiB used", used >> 20, info.memory_total >> 20);
     y = line(s, y, "Memory", text);
     int bar = WIDTH - VALUE_LEFT - LEFT;
-    vx_fill(s, VALUE_LEFT, y - 4, bar, 6, COLOR_BAR);
-    if (info.memory_total) {
-        vx_fill(s, VALUE_LEFT, y - 4, (int)((unsigned long long)bar * used / info.memory_total), 6,
-                COLOR_BAR_USED);
-    }
+    vx_draw_progress(s, VALUE_LEFT, y - 6, bar, 10, used, info.memory_total);
     y += 8;
 
     unsigned long long seconds = info.uptime_ms / 1000;

@@ -109,8 +109,13 @@ static void draw_choose(struct vx_surface *s) {
     for (int i = 0; i < disk_count; i++) {
         int ry = y + i * 52;
         bool on = i == chosen;
-        vx_fill(s, 28, ry, WIDTH - 56, 46, on ? VX_COLOR_SELECTED : VX_COLOR_VIEW);
-        vx_draw_outline(s, 28, ry, WIDTH - 56, 46, on ? VX_COLOR_ACCENT : VX_COLOR_LINE);
+        if (on) {
+            vx_fill_rounded(s, 28, ry, WIDTH - 56, 46, 9, VX_COLOR_ACCENT, 255);
+            vx_draw_selection(s, 30, ry + 2, WIDTH - 60, 42);
+        } else {
+            vx_fill_rounded(s, 28, ry, WIDTH - 56, 46, 9, VX_COLOR_LINE, 255);
+            vx_fill_rounded(s, 29, ry + 1, WIDTH - 58, 44, 8, VX_COLOR_VIEW, 255);
+        }
         char line[96];
         snprintf(line, sizeof(line), "%s  (%s)", disks[i].model, disks[i].name);
         vx_text(s, vx_font(VX_FACE_BOLD, VX_UI_FONT_SIZE), 42, ry + 6, line, VX_COLOR_TEXT,
@@ -146,9 +151,11 @@ static void draw_installing(struct vx_surface *s) {
                                                                          : "Installing Vexa...",
                   NULL);
     int bw = WIDTH - 56;
-    vx_fill(s, 28, y, bw, 10, VX_COLOR_BUTTON);
-    vx_fill(s, 28, y, bw * (page == DONE ? 100 : percent) / 100, 10,
-            page == FAILED ? 0xd9534f : VX_COLOR_ACCENT);
+    if (page == FAILED) {
+        vx_draw_gel(s, 28, y, bw, 12, 6, 0xd9534f);
+    } else {
+        vx_draw_progress(s, 28, y, bw, 12, page == DONE ? 100 : (unsigned)percent, 100);
+    }
     y += 26;
     for (int i = 0; i < step_count; i++) {
         bool last = i == step_count - 1;

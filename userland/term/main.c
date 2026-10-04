@@ -601,19 +601,25 @@ static void draw_tab_bar(struct vx_surface *s) {
     if (tab_count < 2) {
         return;
     }
-    vx_fill(s, 0, 0, s->width, TAB_BAR, 0x0e0819);
+    /* (The terminal stays dark: a dark toolbar, the current tab a gel of
+     * the accent.) */
+    for (int row = 0; row < TAB_BAR; row++) {
+        vx_fill(s, 0, row, s->width, 1, vx_mix(0x2a2238, 0x120c1e, row * 255 / (TAB_BAR - 1)));
+    }
+    vx_fill(s, 0, TAB_BAR - 1, s->width, 1, 0x05030a);
     int w = (s->width - 36) / tab_count;
     w = w > 200 ? 200 : w;
     for (int i = 0; i < tab_count; i++) {
         int x = 4 + i * w;
-        vx_fill(s, x, 4, w - 4, TAB_BAR - 4, i == current ? COLOR_BACKGROUND : 0x221838);
-        if (i == current) {
-            vx_fill(s, x, 4, w - 4, 2, COLOR_CURSOR);
+        bool on = i == current;
+        if (on) {
+            vx_draw_gel(s, x, 4, w - 4, TAB_BAR - 8, 7, VX_COLOR_ACCENT);
+        } else {
+            vx_fill_rounded(s, x, 4, w - 4, TAB_BAR - 8, 7, 0xffffff, 16);
         }
         const char *title = tabs[i]->title[0] ? tabs[i]->title : "vsh";
-        vx_draw_text_fit(s, x + 8, 9, w - 32, title, i == current ? COLOR_TEXT : 0x9c90b8,
-                         VX_TRANSPARENT);
-        vx_draw_text(s, x + w - 20, 9, "x", 0x9c90b8, VX_TRANSPARENT);
+        vx_draw_text_fit(s, x + 8, 7, w - 32, title, on ? 0xffffff : 0xb8aed0, VX_TRANSPARENT);
+        vx_draw_text(s, x + w - 20, 7, "x", on ? 0xffffff : 0x9c90b8, VX_TRANSPARENT);
     }
     vx_draw_text(s, 4 + tab_count * w + 6, 7, "+", COLOR_TEXT, VX_TRANSPARENT);
 }

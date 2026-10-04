@@ -1,0 +1,161 @@
+/* The glossy parts, over Adwaita (light unless gtk-dark.css set these). */
+@define-color vexa_accent #4c8dff;
+@define-color vexa_accent_light #a9cbff;
+@define-color vexa_accent_deep #2f74ea;
+@define-color theme_selected_bg_color @vexa_accent;
+@define-color theme_selected_fg_color #ffffff;
+
+/* A gel: shiny top half, deeper middle, a glow along the bottom. */
+button, headerbar button, spinbutton button, combobox button, notebook > header tab button {
+    background-image: linear-gradient(to bottom, #ffffff 0%, #eef0f4 48%, #dde1e8 52%, #f2f4f7 100%);
+    border: 1px solid #9aa0ab;
+    border-radius: 12px;
+    box-shadow: inset 0 1px rgba(255, 255, 255, 0.8);
+    text-shadow: none;
+}
+button:hover {
+    background-image: linear-gradient(to bottom, #ffffff 0%, #f5f7fa 48%, #e6eaf0 52%, #fafbfd 100%);
+}
+button:active, button:checked, button.suggested-action, button.default:focus,
+headerbar button:checked, .linked > button:checked, stackswitcher > button:checked,
+.linked > button:active, headerbar .linked > button:checked {
+    background-image: linear-gradient(to bottom, @vexa_accent_light 0%, #7fb1ff 48%, @vexa_accent 52%, #93c1ff 100%);
+    border-color: @vexa_accent_deep;
+    color: #ffffff;
+    text-shadow: 0 1px rgba(0, 40, 120, 0.5);
+}
+button.destructive-action {
+    background-image: linear-gradient(to bottom, #ffb3ae 0%, #ff8c85 48%, #f0524f 52%, #ff9a94 100%);
+    border-color: #b8302d;
+    color: #ffffff;
+}
+button:disabled {
+    background-image: none;
+    background-color: #eef0f4;
+    border-color: #c4c9d3;
+}
+button.flat, button.flat:hover:not(:active) {
+    background-image: none;
+    border-color: transparent;
+    box-shadow: none;
+}
+
+/* The header bar (GTK's own title bars): glossy, like glass in the light. */
+headerbar, .titlebar:not(headerbar) {
+    background-image: linear-gradient(to bottom, #f4f8ff 0%, #d5e4fb 48%, #c0d6f8 52%, #dce9fc 100%);
+    border-bottom: 1px solid #8c8c9c;
+    box-shadow: inset 0 1px rgba(255, 255, 255, 0.9);
+    min-height: 34px;
+    padding: 0 6px;
+}
+headerbar:backdrop, .titlebar:not(headerbar):backdrop {
+    background-image: linear-gradient(to bottom, #f6f6f8 0%, #e8e8ec 48%, #dedee4 52%, #ececf0 100%);
+}
+headerbar .title {
+    font-weight: bold;
+    text-shadow: 0 1px rgba(255, 255, 255, 0.8);
+}
+
+/* Close, maximize, minimize: glossy balls (grey in the back). */
+headerbar button.titlebutton {
+    min-width: 14px;
+    min-height: 14px;
+    padding: 0;
+    margin: 0 2px;
+    border-radius: 50%;
+    border: 1px solid rgba(0, 0, 0, 0.35);
+    box-shadow: inset 0 1px rgba(255, 255, 255, 0.6);
+    color: transparent;
+    -gtk-icon-shadow: none;
+}
+headerbar button.titlebutton:hover {
+    color: rgba(0, 0, 0, 0.55);
+}
+headerbar button.titlebutton.close {
+    background-image: radial-gradient(circle at 50% 30%, #ffd2cf 0%, #ff5f57 45%, #c93a33 100%);
+}
+headerbar button.titlebutton.maximize {
+    background-image: radial-gradient(circle at 50% 30%, #c9f5d0 0%, #2ac845 45%, #1a8c2e 100%);
+}
+headerbar button.titlebutton.minimize {
+    background-image: radial-gradient(circle at 50% 30%, #fff0c7 0%, #febc2e 45%, #c68a0e 100%);
+}
+headerbar:backdrop button.titlebutton:not(:hover) {
+    background-image: radial-gradient(circle at 50% 30%, #f4f4f6 0%, #bcbcc4 45%, #8a8a94 100%);
+}
+
+/* Text fields: sunken and rounded; focused, a ring of the accent. */
+entry {
+    border-radius: 6px;
+    box-shadow: inset 0 1px rgba(0, 0, 0, 0.12);
+}
+entry:focus {
+    border-color: @vexa_accent;
+    box-shadow: inset 0 1px rgba(0, 0, 0, 0.12), 0 0 0 2px alpha(@vexa_accent, 0.35);
+}
+
+/* What's selected: a glossy bar of the accent. */
+row:selected, treeview.view:selected, iconview:selected, flowboxchild:selected,
+menuitem:hover, modelbutton.flat:hover, list row:selected:focus {
+    background-image: linear-gradient(to bottom, #8fbcff 0%, #5d9aff 48%, @vexa_accent 52%, #7fb3ff 100%);
+    color: #ffffff;
+}
+
+/* Switches, check boxes and radio buttons: on, a gel of the accent. */
+switch {
+    border-radius: 14px;
+    background-image: linear-gradient(to bottom, #c9ced8, #e2e5eb);
+}
+switch:checked {
+    background-image: linear-gradient(to bottom, @vexa_accent_light 0%, #7fb1ff 48%, @vexa_accent 52%, #93c1ff 100%);
+}
+switch slider {
+    border-radius: 50%;
+    background-image: linear-gradient(to bottom, #ffffff 0%, #f0f1f4 48%, #dfe2e8 52%, #f6f7f9 100%);
+    border: 1px solid #8f95a0;
+}
+check:checked, radio:checked {
+    background-image: linear-gradient(to bottom, @vexa_accent_light 0%, #7fb1ff 48%, @vexa_accent 52%, #93c1ff 100%);
+    border-color: @vexa_accent_deep;
+    color: #ffffff;
+}
+
+/* Sliders and progress bars: a gel of the accent along a sunken track. */
+scale trough, progressbar trough {
+    border-radius: 6px;
+    background-image: linear-gradient(to bottom, #b8bdc8, #dfe2e8);
+}
+scale highlight, progressbar progress {
+    border-radius: 6px;
+    background-image: linear-gradient(to bottom, @vexa_accent_light 0%, #7fb1ff 48%, @vexa_accent 52%, #93c1ff 100%);
+    border: 1px solid @vexa_accent_deep;
+}
+scale slider {
+    border-radius: 50%;
+    background-image: linear-gradient(to bottom, #ffffff 0%, #f0f1f4 48%, #dfe2e8 52%, #f6f7f9 100%);
+    border: 1px solid #8f95a0;
+}
+
+/* Scroll bars: Aqua's blue capsules. */
+scrollbar slider {
+    min-width: 8px;
+    min-height: 8px;
+    border-radius: 6px;
+    background-image: linear-gradient(to right, #8fbcff 0%, #5d9aff 48%, @vexa_accent 52%, #7fb3ff 100%);
+    border: 1px solid @vexa_accent_deep;
+}
+scrollbar.horizontal slider {
+    background-image: linear-gradient(to bottom, #8fbcff 0%, #5d9aff 48%, @vexa_accent 52%, #7fb3ff 100%);
+}
+
+/* Tabs: the chosen one a gel of the accent. */
+notebook > header tab:checked {
+    background-image: linear-gradient(to bottom, @vexa_accent_light 0%, #7fb1ff 48%, @vexa_accent 52%, #93c1ff 100%);
+    border-radius: 8px;
+    color: #ffffff;
+}
+
+/* Menus and popovers: rounded, softly shadowed. */
+menu, .menu, popover {
+    border-radius: 8px;
+}

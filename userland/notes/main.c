@@ -412,7 +412,7 @@ static void draw(void) {
         int i = shown[list_top + r];
         int y = TOP + r * ITEM;
         if (i == chosen) {
-            vx_fill(s, 6, y + 2, LIST - 12, ITEM - 4, VX_COLOR_SELECTED);
+            vx_draw_selection(s, 6, y + 2, LIST - 12, ITEM - 4);
         }
         const struct vx_font *bold = vx_font(VX_FACE_BOLD, 13);
         char title[80];

@@ -905,7 +905,7 @@ $(GL_TEST): tests/gl/gl-test.c $(MESA)
 
 $(LINUX_ROOT)/.done: $(BUSYBOX) $(BASH) $(COREUTILS) $(PYTHON) $(X11) $(MUSL_LIBC) $(LINUX_TESTS) \
 		$(XCLIPBOARD) $(OPENSSL) $(CURL) $(MESA) $(GL_TEST) $(ALSA) tools/make-linux-root.sh \
-		$(wildcard tools/linux-files/* tools/linux-files/applications/*)
+		$(wildcard tools/linux-files/* tools/linux-files/applications/* tools/linux-files/gtk-theme/*)
 	tools/make-linux-root.sh $(LINUX_ROOT) $(MUSL_LIBC) $(BUSYBOX) \
 		$(BUSYBOX_BUILD)/busybox.links $(BASH) $(COREUTILS) $(COREUTILS_BUILD)/programs.txt \
 		$(PYTHON_ROOT) $(X11_SYSROOT) $(LINUX_TESTS)

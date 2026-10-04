@@ -238,8 +238,7 @@ static void draw(void) {
         snprintf(status, sizeof(status), "%s", path);
     }
     /* The toolbar. */
-    vx_fill(s, 0, 0, s->width, TOOLBAR, VX_COLOR_WINDOW);
-    vx_fill(s, 0, TOOLBAR - 1, s->width, 1, VX_COLOR_LINE);
+    vx_draw_toolbar(s, 0, 0, s->width, TOOLBAR);
     for (int b = 0; b < BUTTONS; b++) {
         if (button_x(b) + widths[b] > s->width - 4) {
             break;
@@ -247,7 +246,7 @@ static void draw(void) {
         vx_draw_button(s, button_x(b), 6, widths[b], 24, labels[b],
                        hot == b || (b == B_SLIDES && slideshow) || (b == B_FIT && !zoom_percent));
     }
-    vx_fill(s, 0, s->height - STATUS, s->width, STATUS, VX_COLOR_WINDOW);
+    vx_draw_toolbar(s, 0, s->height - STATUS, s->width, STATUS);
     vx_draw_text_fit(s, 8, s->height - STATUS + 3, s->width - 16, status, VX_COLOR_DIM,
                      VX_TRANSPARENT);
     vx_window_present(window, 0, 0, s->width, s->height);

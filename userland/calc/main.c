@@ -220,16 +220,16 @@ static int key_at(int px, int py) {
     return -1;
 }
 
-static void rounded(struct vx_surface *s, int x, int y, int w, int h, uint32_t color) {
-    vx_fill(s, x + 3, y, w - 6, h, color);
-    vx_fill(s, x, y + 3, w, h - 6, color);
-    vx_fill(s, x + 1, y + 1, w - 2, h - 2, color);
-}
 
 static void draw(void) {
     struct vx_surface *s = &window->surface;
     bool dark = vx_theme.dark;
     vx_fill(s, 0, 0, WIDTH, HEIGHT, dark ? 0x1c1c22 : 0xf2f2f5);
+    /* The display: a sunken, rounded glass panel. */
+    uint32_t lcd = dark ? 0x101016 : 0xfdfdfe;
+    vx_fill_rounded(s, PAD - 4, 8, WIDTH - 2 * PAD + 8, DISPLAY - 12, 10, dark ? 0x000000 : 0xb8bcc8, 255);
+    vx_fill_rounded(s, PAD - 3, 9, WIDTH - 2 * PAD + 6, DISPLAY - 14, 9, lcd, 255);
+    vx_fill(s, PAD + 4, 10, WIDTH - 2 * PAD - 8, 1, vx_mix(lcd, 0x000000, 30));
     /* The display: what's been done above, the number big. */
     const struct vx_font *small = vx_font_ui();
     int hw = vx_text_width_font(small, history);
@@ -261,9 +261,14 @@ static void draw(void) {
             } else if (i == hot) {
                 color = vx_mix(color, 0xffffff, 30);
             }
-            rounded(s, x, y, w, h, color);
+            vx_draw_gel(s, x, y, w, h, 10, color);
             const struct vx_font *f = vx_font(VX_FACE_SANS, 20);
             uint32_t text = operator ? 0xffffff : top && dark ? 0xffffff : dark ? 0xf0f0f4 : 0x1c1c22;
+            if (operator) { /* (White on the orange, over a darker copy.) */
+                int sw = vx_text_width_font(f, keys[r][c]);
+                vx_text(s, f, x + (w - sw) / 2, y + (h - vx_font_height(f)) / 2 + 1, keys[r][c],
+                        vx_mix(color, 0x000000, 110), VX_TRANSPARENT);
+            }
             int tw = vx_text_width_font(f, keys[r][c]);
             vx_text(s, f, x + (w - tw) / 2, y + (h - vx_font_height(f)) / 2, keys[r][c], text,
                     VX_TRANSPARENT);

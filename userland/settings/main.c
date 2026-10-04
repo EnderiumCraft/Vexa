@@ -341,10 +341,7 @@ static void open_menu(int x, int y) {
 static void draw_preview(int x, int y, const char *theme, bool on) {
     struct vx_theme t;
     vx_theme_make(&t, theme, vx_settings_get(&desk, "accent", "blue"));
-    vx_draw_outline(S(), x - 3, y - 3, 146, 96, on ? VX_COLOR_ACCENT : VX_COLOR_LINE);
-    if (on) {
-        vx_draw_outline(S(), x - 2, y - 2, 144, 94, VX_COLOR_ACCENT);
-    }
+    vx_fill_rounded(S(), x - 4, y - 4, 148, 98, 8, on ? VX_COLOR_ACCENT : VX_COLOR_LINE, 255);
     /* A little desktop: the wallpaper's blue, a window with a glass title bar
      * (its three balls) and a button. */
     for (int row = 0; row < 90; row++) {
@@ -479,7 +476,7 @@ static void draw_wallpaper(void) {
     for (int i = 0; i < picture_count; i++) {
         int x = LEFT + (i % 4) * 128, py = y + (i / 4) * 98;
         bool on = !strcmp(wallpaper, "image") && !strcmp(image, pictures[i].path);
-        vx_fill(S(), x - 3, py - 3, 118, 76, on ? VX_COLOR_ACCENT : VX_COLOR_LINE);
+        vx_fill_rounded(S(), x - 3, py - 3, 118, 76, 6, on ? VX_COLOR_ACCENT : VX_COLOR_LINE, 255);
         if (pictures[i].thumb) {
             vx_blit(S(), x, py, &pictures[i].thumb->surface, 0, 0, 112, 70);
         } else {
@@ -602,8 +599,8 @@ static void draw_date(void) {
     y += 28;
     const char *zone = vx_settings_get(&desk, "time_zone", "");
     int list_w = window->surface.width - LEFT - 24;
-    vx_fill(S(), LEFT, y, list_w, ZONE_ROWS * 22 + 4, VX_COLOR_VIEW);
-    vx_draw_outline(S(), LEFT, y, list_w, ZONE_ROWS * 22 + 4, VX_COLOR_LINE);
+    vx_fill_rounded(S(), LEFT, y, list_w, ZONE_ROWS * 22 + 4, 6, VX_COLOR_LINE, 255);
+    vx_fill_rounded(S(), LEFT + 1, y + 1, list_w - 2, ZONE_ROWS * 22 + 2, 5, VX_COLOR_VIEW, 255);
     long now = vx_time();
     for (int row = 0; row < ZONE_ROWS; row++) {
         int i = zone_top + row - 1; /* -1: UTC, no zone. */
@@ -614,7 +611,7 @@ static void draw_date(void) {
         const char *city = i < 0 ? "UTC" : vx_zones[i].city;
         bool on = i < 0 ? !zone[0] || !strcmp(zone, "UTC") : !strcmp(zone, city);
         if (on) {
-            vx_fill(S(), LEFT + 2, ry, list_w - 4, 22, VX_COLOR_SELECTED);
+            vx_draw_selection(S(), LEFT + 3, ry, list_w - 6, 22);
         }
         int offset = i < 0 ? 0 : vx_zone_offset(&vx_zones[i], now);
         int a = offset < 0 ? -offset : offset;
@@ -816,11 +813,9 @@ static void draw_display(void) {
         int x = LEFT + (int)(i % cols) * (w + 8), ry = y + (int)(i / cols) * 32;
         bool on = modes.modes[i].width == display_info.width &&
                   modes.modes[i].height == display_info.height;
-        vx_fill(S(), x, ry, w, 26, on ? VX_COLOR_SELECTED : VX_COLOR_BUTTON);
-        vx_draw_outline(S(), x, ry, w, 26, on ? VX_COLOR_ACCENT : VX_COLOR_LINE);
         char name[32];
         snprintf(name, sizeof(name), "%u x %u", modes.modes[i].width, modes.modes[i].height);
-        text(x + 12, ry + 5, name, VX_COLOR_TEXT);
+        vx_draw_button(S(), x, ry, w, 26, name, on);
         struct hit *h = add_hit(x, ry, w, 26, H_MODE);
         h->index = (int)i;
     }

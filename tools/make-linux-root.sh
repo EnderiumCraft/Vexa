@@ -59,6 +59,9 @@ mkdir -p "$root/usr/share/glib-2.0" "$root/usr/share/icons" "$root/etc/gtk-3.0"
 cp -a "$x11/usr/share/glib-2.0/schemas" "$root/usr/share/glib-2.0/"
 cp -a "$x11/usr/share/icons/hicolor" "$root/usr/share/icons/"
 cp "$(dirname "$0")/linux-files/gtk-settings.ini" "$root/etc/gtk-3.0/settings.ini"
+# Vexa's own GTK theme (glossy, over Adwaita), the one settings.ini names.
+mkdir -p "$root/usr/share/themes/Vexa/gtk-3.0"
+cp "$(dirname "$0")"/linux-files/gtk-theme/*.css "$root/usr/share/themes/Vexa/gtk-3.0/"
 # D-Bus: the message bus (xrun starts a session bus for X programs), its
 # settings, and its tools.
 for program in dbus-daemon dbus-launch dbus-send dbus-monitor dbus-run-session dbus-uuidgen; do

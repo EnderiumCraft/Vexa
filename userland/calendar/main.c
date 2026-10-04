@@ -206,7 +206,7 @@ static void draw(void) {
         cell_rect(d, &x, &y);
         bool is_today = d == today.day && month == today.month && year == today.year;
         if (d == day) {
-            vx_fill(s, x + 1, y + 1, cell_w() - 1, cell_h() - 1, VX_COLOR_SELECTED);
+            vx_draw_selection(s, x + 2, y + 2, cell_w() - 3, cell_h() - 3);
         }
         snprintf(line, sizeof(line), "%d", d);
         int tw = vx_text_width(line);

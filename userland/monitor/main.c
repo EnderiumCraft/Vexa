@@ -156,8 +156,8 @@ static int visible_rows(void) {
 
 static void graph(struct vx_surface *s, int x, int y, int w, int h, const int *values,
                   uint32_t color, const char *title, const char *now) {
-    vx_fill(s, x, y, w, h, VX_COLOR_VIEW);
-    vx_draw_outline(s, x, y, w, h, VX_COLOR_LINE);
+    vx_fill_rounded(s, x, y, w, h, 6, VX_COLOR_LINE, 255);
+    vx_fill_rounded(s, x + 1, y + 1, w - 2, h - 2, 5, VX_COLOR_VIEW, 255);
     for (int i = 0; i < SAMPLES; i++) {
         int bar = values[i] * (h - 2) / 100;
         int bx = x + 1 + i * (w - 2) / SAMPLES, bw = (w - 2) / SAMPLES;
@@ -172,6 +172,7 @@ static void draw(void) {
     int w = s->width, h = s->height;
     vx_fill(s, 0, 0, w, h, VX_COLOR_WINDOW);
     /* The toolbar. */
+    vx_draw_toolbar(s, 0, 0, w, TOOLBAR);
     vx_draw_button(s, 10, 8, 70, 24, "Quit", hot_button == 0);
     vx_draw_button(s, 86, 8, 96, 24, "Force Quit", hot_button == 1);
     char line[96];
@@ -196,7 +197,7 @@ static void draw(void) {
         struct process *p = &list[top + r];
         int y = ly + HEADER + r * ROW;
         if (p->id == selected_id) {
-            vx_fill(s, 0, y, w, ROW, VX_COLOR_SELECTED);
+            vx_draw_selection(s, 2, y, w - 4, ROW);
         } else if (r % 2) {
             vx_fill(s, 0, y, w, ROW, vx_theme.stripe);
         }

@@ -511,7 +511,7 @@ static void draw(void) {
         if (y >= TOP && y < h - 20) {
             int indent = blocks[b].level == 3 ? 26 : 12;
             if (b == current) {
-                vx_fill(s, 4, y - 2, SIDEBAR - 8, 22, VX_COLOR_SELECTED);
+                vx_draw_selection(s, 4, y - 2, SIDEBAR - 8, 22);
             }
             char title[128];
             const char *t = blocks[b].text;
@@ -528,8 +528,7 @@ static void draw(void) {
         y += 22;
     }
     /* The search field, over the top. */
-    vx_fill(s, 0, 0, w, TOP, VX_COLOR_WINDOW);
-    vx_fill(s, 0, TOP - 1, w, 1, VX_COLOR_LINE);
+    vx_draw_toolbar(s, 0, 0, w, TOP);
     vx_text(s, vx_font(VX_FACE_BOLD, 15), 14, 13, "Vexa Help", VX_COLOR_TEXT, VX_TRANSPARENT);
     vx_draw_field(s, w - 280, 10, 266, search, searching);
     if (!search[0] && !searching) {

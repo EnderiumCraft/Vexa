@@ -1,0 +1,6 @@
+/* Vexa's GTK 3 theme: Adwaita, made glossy like Vexa's own look (Aqua and
+ * Aero's spirit): a glass-like header bar with red, yellow and green
+ * buttons, gel buttons, switches, sliders and scroll bars, and the accent
+ * blue for what's chosen. gtk-dark.css is the same over Adwaita's dark. */
+@import url("resource:///org/gtk/libgtk/theme/Adwaita/gtk-contained.css");
+@import url("vexa.css");

@@ -206,7 +206,7 @@ static void draw_list(struct vx_surface *s) {
         }
         const struct vx_device_info *d = &devices[row->device];
         if (d->id == selected_id) {
-            vx_fill(s, 0, y, lw, ROW, VX_COLOR_SELECTED);
+            vx_draw_selection(s, 2, y, lw - 4, ROW);
         }
         int x = 12 + row->depth * 18;
         vx_fill(s, x, y + 6, 10, 10, kind_color(d->kind));
@@ -313,10 +313,9 @@ static void draw(void) {
     struct vx_surface *s = &window->surface;
     int w = s->width, h = s->height;
     vx_fill(s, 0, 0, w, h, VX_COLOR_WINDOW);
-    vx_draw_button(s, 10, 8, 90, 24, by_connection ? "By type" : "By type \xe2\x9c\x93",
-                   hot_button == 0);
-    vx_draw_button(s, 106, 8, 130, 24, by_connection ? "By connection \xe2\x9c\x93" : "By connection",
-                   hot_button == 1);
+    vx_draw_toolbar(s, 0, 0, w, TOOLBAR);
+    vx_draw_button(s, 10, 8, 90, 24, "By type", hot_button == 0 || !by_connection);
+    vx_draw_button(s, 106, 8, 130, 24, "By connection", hot_button == 1 || by_connection);
     int missing = 0;
     for (int i = 0; i < count; i++) {
         missing += needs_driver(&devices[i]);
