@@ -36,6 +36,7 @@ You need a Linux machine (or WSL) with:
 | CMake (LLVM for Mesa, and the SDK's check) | `cmake` |
 | Clang (the SDK's C++: libc++ and native Mesa) | `clang` |
 | Python's Mako, flex (Mesa) | `python3-mako`, `flex` |
+| libpng and zlib headers (NetSurf's build tools) | `libpng-dev`, `zlib1g-dev` |
 
 X.Org's packages want a newer Meson than some distributions have; CI uses
 `pipx install meson==1.12.1` and `pipx inject meson packaging`.
