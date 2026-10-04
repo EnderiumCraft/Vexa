@@ -60,8 +60,7 @@ static void copy_file(const char *from, const char *to, mode_t mode, off_t size)
         tick((uint64_t)n);
     }
     close(in);
-    close(out);
-    chmod(to, mode & 07777);
+    close(out); /* (open gave it its permission bits: it's a new file.) */
     files_done++;
 }
 

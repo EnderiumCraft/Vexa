@@ -13,6 +13,7 @@
 #include <vexa/gui.h>
 #include <vexa/settings.h>
 #include <vexa/time.h>
+#include <vexa/users.h>
 
 #define MAX_WINDOWS 32
 #define PANEL_HEIGHT 26
@@ -20,11 +21,12 @@
 #define BORDER 1
 #define SHADOW 12 /* How far a window's shadow reaches. */
 
-/* The folders a desktop has (made at boot by vinit). */
-#define HOME "/home"
-#define DESKTOP_FOLDER "/home/Desktop"
-#define PICTURES_FOLDER "/home/Pictures"
-#define TRASH_FOLDER "/Trash"
+/* The folders a desktop has: the logged-in account's (main.c sets them). */
+extern char home_folder[256], desktop_folder[300], pictures_folder[300], trash_folder[300];
+#define HOME home_folder
+#define DESKTOP_FOLDER desktop_folder
+#define PICTURES_FOLDER pictures_folder
+#define TRASH_FOLDER trash_folder
 
 struct rect {
     int x, y, width, height;
@@ -220,6 +222,12 @@ void shot_tick(void); /* The flash fading. */
 
 /* ---- lock.c: the screensaver and the lock screen ---- */
 extern bool locked, saver_on;
+/* Sessions (main.c): who's logged in. The login screen (lock.c) picks one
+ * of `users` and calls session_start. */
+extern struct vx_user session_user;
+extern bool session_has_password;
+void session_start(const struct vx_user *user);
+void login_begin(const struct vx_user *users, int count);
 void lock_now(void);
 void lock_settings(void); /* Reads them (Settings changed something). */
 /* Every input event goes here first: false if it's used up (waking the

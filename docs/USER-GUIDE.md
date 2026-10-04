@@ -9,6 +9,7 @@ writing programs for it, see the [developer guide](DEVELOPER-GUIDE.md).
 - [The shell](#the-shell)
 - [Commands](#commands)
 - [Files and folders](#files-and-folders)
+- [Accounts](#accounts)
 - [The desktop](#the-desktop)
 - [Apps](#apps)
 - [Files, the file manager](#files-the-file-manager)
@@ -76,9 +77,14 @@ settings, installed apps. **Everything on that disk is erased.**
 
 - In the desktop: **Install Vexa** (in the Vexa menu, or search for it). Choose the
   disk, choose whether the Linux programs (bash, Python, X, GTK...: about 190 MB) come
-  along, confirm, and wait; then take the CD out and restart.
+  along, make your account (your name, an account name and a password, typed twice:
+  the installed Vexa's administrator), confirm, and wait; then take the CD out and
+  restart. The installed Vexa starts with the login screen.
 - At the shell: `install --list` lists the disks it can use, and `install vda` installs
-  on one (`--no-linux` leaves the Linux programs out; `--yes` doesn't ask first).
+  on one (`--no-linux` leaves the Linux programs out; `--yes` doesn't ask first;
+  `--user NAME --full "Full Name" --password-stdin` makes the account, with the
+  password read from the input; without `--user`, the live CD's `vexa` comes along).
+  Only administrators may install.
 
 The disk gets a GPT partition table with two partitions: a 128 MiB FAT32 one with the
 kernel and the boot menu (Limine, which starts with BIOS and UEFI firmware alike), and
@@ -197,12 +203,11 @@ Vexa's file system starts in memory and has these folders:
 | `/bin` | Vexa's programs (the apps' programs are links into their bundles) |
 | `/lib` | `libvexa.so` and Vexa's dynamic loader, `vexa-ld.so` |
 | `/apps` | the desktop's apps, as `.vxapp` bundles |
-| `/home` | your folders: `Desktop` (its files are the desktop's icons), `Documents`, `Pictures` (screenshots go here) |
-| `/etc` | settings: `motd`, `desktop.conf`, `hosts`, `resolv.conf` |
+| `/home` | each account's home folder: `/home/vexa` on the live CD, with `Desktop` (its files are the desktop's icons), `Documents`, `Pictures` (screenshots go here), `Music`, `Videos` and the Trash (`.Trash`) |
+| `/etc` | settings: `motd`, `desktop.conf`, `hosts`, `resolv.conf`; the accounts: `passwd`, `group`, `shadow` |
 | `/share/pictures` | pictures (the default wallpaper, `glass.png`, and `aurora.png` and `meadow.png`) |
 | `/share/fonts` | the fonts Vexa's apps draw text with (DejaVu Sans, Sans Bold, Sans Mono) |
-| `/tmp` | scratch space |
-| `/Trash` | what Files moved to the Trash |
+| `/tmp` | scratch space (anyone may put files there; only their owner may remove them) |
 | `/dev` | devices: the console, terminals (`/dev/pts`), `/dev/input`, `/dev/display0`, `/dev/dri/card0` (for Linux programs), `/dev/random` |
 | `/proc` | the processes and the system, in Linux's format (`cat /proc/meminfo`) |
 | `/run` | the desktop's socket and shared window buffers |
@@ -214,6 +219,46 @@ Everything outside `/mnt` is in memory: it starts fresh at every boot. To keep f
 put them on a disk (see [Disks and CDs](#disks-and-cds)). When Vexa has a disk it can
 write to (the first writable ext2 disk), `/home` is kept on it (as `home` there), so
 the Desktop, Documents and Pictures folders stay from one boot to the next.
+
+## Accounts
+
+Vexa has user accounts, like Unix. Each has a name, a home folder in `/home`, and
+perhaps a password; files and folders belong to an account (their owner) and a group,
+with the usual permission bits for reading, writing and running them (`ls -l` shows
+them: `-rw-r--r--  vexa`). Your files are yours: others can read what you let them,
+and can't change or remove them. **Root** (user 0) may do anything; the system's
+files are root's. **Administrators** (the group `admin`) may change the system:
+install Vexa, add and remove accounts, name the computer, and run any command as root
+with `sudo`.
+
+- **The live CD** has one account, `vexa`, an administrator without a password: the
+  desktop logs it in by itself. The console's shell is root's.
+- **The Installer** makes your account (your name, an account name and a password)
+  on the disk it installs on, as its administrator, in place of `vexa`.
+- **Logging in.** When there's more than one account, or the only one has a password,
+  the desktop starts with the **login screen**: the accounts' pictures (click one, or
+  Left and Right), and the password. **Log Out** in the Vexa menu ends the session:
+  the programs started in it close, and the login screen comes back. Once an account
+  has a password, the text console asks who's there too (`login:` and `Password:`).
+- **Settings → Users** lists the accounts, and lets administrators add one (with a
+  password, and whether it's an administrator too), remove one, or make one an
+  administrator. **Settings → Lock Screen** changes your own password (it asks for the
+  current one first).
+- **Your settings are yours**: what you change in Settings is kept in your home folder
+  (`.config/vexa/desktop.conf`), over the system's (`/etc/desktop.conf`).
+
+At the shell:
+
+| Command | What it does |
+| --- | --- |
+| `whoami`, `id [NAME]` | who you are: the account, its user and group ids, its other groups |
+| `accounts` | the accounts; `accounts add NAME --full "Full Name" [--admin]`, `accounts remove NAME`, `accounts password [NAME]`, `accounts admin NAME yes\|no`, `accounts rename NAME "Full Name"` |
+| `sudo [-u USER] COMMAND` | runs a command as root (or someone else); for administrators, after their password |
+| `chmod MODE FILE...`, `chown USER[:GROUP] FILE...` | permission bits (`644`, `u+x`, `go-w`), owner and group |
+
+Passwords are kept in `/etc/shadow` (root's alone), salted and stretched (SHA-256,
+5000 rounds). Disks Vexa didn't make (FAT, exFAT) have no owners: anyone may use what's
+on them. Whole disks (`/dev/vda`...) are for root and administrators.
 
 ## The desktop
 
@@ -238,7 +283,8 @@ theme and other colours.
 **The panel** along the top has:
 
 - the **Vexa menu** (top left): the apps, then the Linux programs, then Lock Screen,
-  Restart..., Shut Down... and Back to the console...; each shows its keyboard shortcut
+  Log Out (with your name), Restart..., Shut Down... and Back to the console...; each
+  shows its keyboard shortcut
 - a **button for each window**: a click shows it (or minimizes it, if it's in front)
 - the **magnifier**: search (below)
 - the **clock**: a click opens the **calendar** (the arrows go to other months; the
@@ -246,7 +292,7 @@ theme and other colours.
   first, which Clear takes away. A dot by the clock means there are new ones.
 
 **Desktop icons.** On the left: the apps (Terminal, Files, Editor, Settings, XTerm),
-then whatever is in the **Desktop folder** (`/home/Desktop`), as on a Mac; the **Trash**
+then whatever is in the **Desktop folder** (`Desktop` in your home folder), as on a Mac; the **Trash**
 is in the bottom right corner. A click selects an icon (Ctrl+click adds to the
 selection; dragging over the desktop selects all the icons it covers), a double click
 opens it. Drag files' icons to move them on the desktop (they stay where they're put),
@@ -277,18 +323,18 @@ Trash; on the Trash, Open and Empty Trash.
 
 **Search** (Ctrl+Space or Super+Space, or the magnifier on the panel): type, and it
 finds apps, Settings' sections (by name or by what's in them: "password", "resolution")
-and files (in `/home`, `/share`, `/tmp` and the disks). It also does sums: `12*(3+4)`
+and files (in your home folder, `/share`, `/tmp` and the disks). It also does sums: `12*(3+4)`
 shows 84. Up and Down choose, Enter opens, Escape closes.
 
 **Screenshots**: PrintScreen takes the whole screen, Alt+PrintScreen the window in
 front, and Shift+PrintScreen an area (drag over it; Escape cancels). They're saved in
-`/home/Pictures` as PNG files ("Screenshot 2026-10-02 at 20.45.13.png"), and a
+your `Pictures` folder as PNG files ("Screenshot 2026-10-02 at 20.45.13.png"), and a
 notification says so.
 
 **The lock screen and the screensaver.** Super+L (or Ctrl+Alt+L, or Lock Screen in the
-Vexa menu) locks the screen: the time and date over the blurred wallpaper, and the
-password field if a password is set (Settings, Lock Screen); without one, any key or
-click unlocks. After some minutes without the keyboard or the mouse (10, unless
+Vexa menu) locks the screen: the time and date over the blurred wallpaper, your name,
+and the password field if your account has a password (Settings, Lock Screen);
+without one, any key or click unlocks. After some minutes without the keyboard or the mouse (10, unless
 Settings says otherwise), the screensaver starts: the time drifting slowly over the
 dark, blurred wallpaper. Any key or movement wakes it, to the lock screen if Settings
 says so.
@@ -421,7 +467,7 @@ OPL2 FM synthesizer, like a 1990s Sound Blaster.
 
 Arrow keys move, Ctrl fires, Space opens doors, Shift runs, 1 to 7 choose a weapon,
 Tab shows the map and Escape the menu (where Options sets the mouse, the sound and the
-keys). Its settings and saved games are kept in `/home/.local/share/chocolate-doom`.
+keys). Its settings and saved games are kept in `.local/share/chocolate-doom` in your home folder.
 
 Network games: one player starts `chocolate-doom -server` at a terminal (it waits for
 the others; Escape there starts the game), the others `chocolate-doom -connect
@@ -445,7 +491,7 @@ The toolbar has Back, Forward, Home, Stop and Reload, the address (click it, typ
 web address and press Enter), and a menu; the wheel or the scroll bars scroll, Page Up
 and Page Down too, and a click on a link follows it. At a terminal, `netsurf
 https://example.org` opens a page. Its settings, cookies and history are kept in
-`/home/.netsurf`.
+`.netsurf` in your home folder.
 
 ### Calculator
 
@@ -458,13 +504,13 @@ A month, with today marked and the day's events in it. A click picks a day; its
 events are on the right, where you add one (type it, with a time first if you like:
 "09:30 Dentist", and press Enter) or take one away (its x). The arrows (or Page Up and
 Page Down, or the wheel) go to other months, Today comes back. Events are kept in
-`/home/.calendar`.
+`.calendar` in your home folder.
 
 ### Notes
 
 Your notes on the left, the newest first, each named by its first line; the one you
 chose on the right, wrapped to the window. Notes are saved as you type, as text files
-in `/home/Notes`. Ctrl+N (or +) makes one, Ctrl+Delete deletes it, and the search field
+in `Notes` in your home folder. Ctrl+N (or +) makes one, Ctrl+Delete deletes it, and the search field
 finds notes by what's in them.
 
 ### Paint
@@ -558,7 +604,7 @@ keyboard:
 | Rename | F2 | type the new name, Enter (Esc keeps the old one) |
 | New Folder | Ctrl+Shift+N | "untitled folder", named right away |
 | New Text Document | (menu) | an empty "untitled.txt", named right away |
-| Move to Trash | Delete | moves it to `/Trash` |
+| Move to Trash | Delete | moves it to the Trash (`.Trash` in your home folder) |
 | Delete Immediately | Delete, in the Trash | removes it for good (asks first) |
 | Empty Trash | (menu, in the Trash) | removes everything in the Trash (asks first) |
 | Get Info | Ctrl+I | kind, size (a folder's files counted), where, when modified, where an alias points, an app's program and file types, the app a file opens with |
@@ -587,13 +633,14 @@ at once. `settings Display` opens a section directly.
 | **Desktop & Panel** | desktop icons on or off, and which apps have one; the clock (24 or 12 hours, the weekday, the date, seconds); snapping windows to the edges; animations; what a double click on a title bar does (maximize, minimize, nothing); how long notifications stay |
 | **Date & Time** | the time now, and the time zone: a city (54 of them) from a list, with summer time handled by itself (the European, North American, Australian and New Zealand rules) |
 | **Mouse & Keyboard** | pointer speed, double click speed (with a place to try it), natural scrolling, left-handed buttons; the keyboard layout (US, UK, German, French, Spanish, Dvorak), how soon and how fast a held key repeats; the keyboard shortcuts |
-| **Lock Screen** | when the screensaver starts (never, or after 1 to 30 minutes), whether the lock screen comes when it ends, the password (or none), and a button to lock now |
+| **Lock Screen** | when the screensaver starts (never, or after 1 to 30 minutes), whether the lock screen comes when it ends, your account's password (or none), and a button to lock now |
 | **Display** | the resolution (a list of sizes, on QEMU's and Bochs's standard VGA; elsewhere the firmware's size) and the scale (everything twice as big); after a change, "Keep" it, or it goes back by itself in 15 seconds |
 | **Default Apps** | which app opens each kind of file (`.png`, `.txt`, `.c`...) |
 | **Startup** | whether a terminal opens when the desktop starts, and which apps open with it |
 | **Network** | the computer's name (Linux programs see it too), and each interface's address, router, DNS server, hardware address and traffic |
 | **Storage** | each disk and file system with how full it is, and where settings are kept |
 | **About** | the version, the computer's name, CPUs, memory, time since boot, the display, and Restart and Shut Down |
+| **Users** | the accounts; for administrators, adding one (name, account name, password, administrator or not), removing one, making one an administrator |
 
 **Where settings live.** In plain text files in `/etc`: `desktop.conf` (most of them),
 `apps.conf` (default apps) and `hostname`:
@@ -621,9 +668,7 @@ it starts. Without a disk, settings last until Vexa restarts. Storage says which
 types ê, ´ then a types á (the accent twice, or then Space, types it alone). X programs
 get the whole layout, through XKB. The text console (outside the desktop) stays US.
 
-**The lock screen's password** is kept in `desktop.conf` as a hash (`lock_password`),
-not as itself. It's there to keep someone at the keyboard out, not someone who can
-read your disk.
+**The lock screen's password** is your account's (see [Accounts](#accounts)).
 
 **Restarting and turning off.** The Vexa menu has **Restart...** and **Shut Down...**
 (each asks first), and so does About; from the shell, `shutdown` and `shutdown -r`.

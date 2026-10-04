@@ -111,6 +111,14 @@ static int children[MAX_CHILDREN];
 int pointer_x, pointer_y, buttons;
 static struct rect damage; /* What must be drawn again (width 0: nothing). */
 static bool quit;
+static bool logging_out; /* quit, and vinit starts the desktop again for someone else. */
+/* Who's logged in, and their folders (see shell.h). */
+struct vx_user session_user;
+bool session_has_password;
+char home_folder[256] = "/home", desktop_folder[300] = "/home/Desktop";
+char pictures_folder[300] = "/home/Pictures", trash_folder[300] = "/home/.Trash";
+static int boot_argc;
+static char **boot_argv;
 static bool frames_wanted; /* An animation: draw again soon. */
 static bool hide_cursor;   /* For screenshots. */
 
@@ -233,7 +241,7 @@ struct rect work_area(void) {
 enum menu_action {
     RUN_APP,       /* An app from /apps (see <vexa/app.h>). */
     RUN_LINUX_APP, /* An X program from /linux/usr/share/applications, through xrun. */
-    SEPARATOR, LOCK, LEAVE, RESTART, POWER_OFF
+    SEPARATOR, LOCK, LOGOUT, LEAVE, RESTART, POWER_OFF
 };
 
 /* The apps in /apps, and their icons. */
@@ -422,6 +430,12 @@ static void build_menu(void) {
           compare_labels);
     add_menu_item("", "", SEPARATOR);
     add_menu_item("Lock Screen", "Super+L", LOCK);
+    if (session_user.uid != 0) {
+        char label[80];
+        snprintf(label, sizeof(label), "Log Out %s...",
+                 session_user.full_name[0] ? session_user.full_name : session_user.name);
+        add_menu_item(label, "", LOGOUT);
+    }
     add_menu_item("Restart...", "", RESTART);
     add_menu_item("Shut Down...", "", POWER_OFF);
     add_menu_item("Back to the console...", "Ctrl+Alt+Q", LEAVE);
@@ -847,7 +861,7 @@ static void draw_menu(struct vx_surface *view, int ox, int oy) {
 
 enum popup_action {
     POP_TERMINAL, POP_FILES, POP_NEW_FOLDER, POP_SETTINGS, POP_ABOUT, POP_ICON, POP_RESTART,
-    POP_POWER_OFF, POP_LEAVE, POP_NONE
+    POP_POWER_OFF, POP_LEAVE, POP_LOGOUT, POP_NONE
 };
 
 #define MAX_POPUP 10
@@ -917,14 +931,18 @@ static void ask(enum popup_action action, int x, int y) {
     close_popup();
     popup_count = 0;
     popup_icon = -1;
-    popup_add(action == POP_RESTART ? "Restart Now" : action == POP_POWER_OFF ? "Shut Down Now"
-                                                                            : "Leave the Desktop",
+    popup_add(action == POP_RESTART     ? "Restart Now"
+              : action == POP_POWER_OFF ? "Shut Down Now"
+              : action == POP_LOGOUT    ? "Log Out Now"
+                                        : "Leave the Desktop",
               NULL, action, 0);
     popup_add(NULL, NULL, POP_NONE, 0);
     popup_add("Cancel", NULL, POP_NONE, 0);
     place_popup(x, y);
-    printf("desktop: asking before %s\n", action == POP_RESTART ? "restarting"
-                                          : action == POP_POWER_OFF ? "turning off" : "leaving");
+    printf("desktop: asking before %s\n", action == POP_RESTART     ? "restarting"
+                                          : action == POP_POWER_OFF ? "turning off"
+                                          : action == POP_LOGOUT    ? "logging out"
+                                                                    : "leaving");
 }
 
 /* ---- Notifications ---- */
@@ -1903,6 +1921,45 @@ static bool apply_display(void);
 static void fit_windows(void);
 static void apply_key_repeat(void);
 
+/* Settings changed (or someone logged in): reads them again and applies them. */
+static void reload_settings(void) {
+    /* The wallpaper is made again only if it changed (a big picture
+     * takes a while to read). */
+    char before[600];
+    snprintf(before, sizeof(before), "%s|%s|%s", setting_wallpaper, setting_image,
+             setting_wallpaper_mode);
+    read_config();
+    char after[600];
+    snprintf(after, sizeof(after), "%s|%s|%s", setting_wallpaper, setting_image,
+             setting_wallpaper_mode);
+    bool resized = apply_display();
+    if (resized) {
+        /* Something on the screen at once: reading a big picture takes a while. */
+        gradient(&wallpaper, 0x202028, 0x08080c);
+        fit_windows();
+        damage_all();
+        redraw_damage();
+    }
+    if (resized || strcmp(before, after)) {
+        make_wallpaper();
+    }
+    apply_key_repeat();
+    set_menu(false);
+    close_popup();
+    build_menu();
+    icons_load();
+    /* Every program reads the theme again, and draws itself. */
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        if (clients[i].handle >= 0) {
+            struct desktop_message theme = {.type = DESKTOP_THEME};
+            send_to(i, &theme);
+        }
+    }
+    damage_all();
+    printf("desktop: settings reloaded (%s, %s)\n", vx_theme.dark ? "dark" : "light",
+           vx_settings_get(&config, "accent", "blue"));
+}
+
 static void client_message(int client) {
     struct desktop_message m;
     long n = vx_read(clients[client].handle, &m, sizeof(m));
@@ -1986,44 +2043,9 @@ static void client_message(int client) {
         }
         printf("desktop: clipboard changed%s\n", m.a ? " (from X)" : "");
         break;
-    case DESKTOP_RELOAD: {
-        /* The wallpaper is made again only if it changed (a big picture
-         * takes a while to read). */
-        char before[600];
-        snprintf(before, sizeof(before), "%s|%s|%s", setting_wallpaper, setting_image,
-                 setting_wallpaper_mode);
-        read_config();
-        char after[600];
-        snprintf(after, sizeof(after), "%s|%s|%s", setting_wallpaper, setting_image,
-                 setting_wallpaper_mode);
-        bool resized = apply_display();
-        if (resized) {
-            /* Something on the screen at once: reading a big picture takes a while. */
-            gradient(&wallpaper, 0x202028, 0x08080c);
-            fit_windows();
-            damage_all();
-            redraw_damage();
-        }
-        if (resized || strcmp(before, after)) {
-            make_wallpaper();
-        }
-        apply_key_repeat();
-        set_menu(false);
-        close_popup();
-        build_menu();
-        icons_load();
-        /* Every program reads the theme again, and draws itself. */
-        for (int i = 0; i < MAX_CLIENTS; i++) {
-            if (clients[i].handle >= 0) {
-                struct desktop_message theme = {.type = DESKTOP_THEME};
-                send_to(i, &theme);
-            }
-        }
-        damage_all();
-        printf("desktop: settings reloaded (%s, %s)\n", vx_theme.dark ? "dark" : "light",
-               vx_settings_get(&config, "accent", "blue"));
+    case DESKTOP_RELOAD:
+        reload_settings();
         break;
-    }
     case DESKTOP_INFO: {
         struct desktop_message reply = {.type = DESKTOP_INFO_REPLY, .a = screen.width,
                                         .b = screen.height};
@@ -2160,6 +2182,7 @@ static void run_popup_item(int index) {
         vx_power(popup_actions[index] == POP_RESTART ? VX_POWER_RESTART : VX_POWER_OFF);
         break;
     case POP_LEAVE: quit = true; break;
+    case POP_LOGOUT: logging_out = quit = true; break;
     case POP_NONE: break;
     }
 }
@@ -2298,6 +2321,7 @@ static void run_menu_item(int index) {
     struct menu_item *item = &menu_items[index];
     switch (item->action) {
     case LEAVE: ask(POP_LEAVE, 31, PANEL_HEIGHT + 4); return;
+    case LOGOUT: ask(POP_LOGOUT, 31, PANEL_HEIGHT + 4); return;
     case RESTART: ask(POP_RESTART, pointer_x, pointer_y); return;
     case POWER_OFF: ask(POP_POWER_OFF, pointer_x, pointer_y); return;
     case LOCK: lock_now(); return;
@@ -3316,15 +3340,8 @@ static bool setup(void) {
         fprintf(stderr, "desktop: out of memory\n");
         return false;
     }
-    /* The folders the desktop uses (vinit makes them; a desktop started
-     * another way still has them). */
-    vx_mkdir(HOME);
-    vx_mkdir(DESKTOP_FOLDER);
-    vx_mkdir(PICTURES_FOLDER);
-    vx_mkdir(TRASH_FOLDER);
     make_wallpaper();
     build_menu();
-    icons_load();
     keyboard = open_input(VX_INPUT_KEYS);
     mouse = open_input(VX_INPUT_POINTER);
     apply_key_repeat();
@@ -3366,20 +3383,47 @@ static bool listed_app(const char *list, const struct vx_app *app) {
     return false;
 }
 
-int main(int argc, char **argv) {
-    if (!setup()) {
-        return 1;
+/* ---- Sessions: who uses the desktop ---- */
+
+/* Starts `user`'s session: the desktop becomes them (when it runs as root),
+ * with their settings, folders and startup apps. */
+void session_start(const struct vx_user *user) {
+    struct vx_credentials me = {0};
+    vx_credentials(NULL, &me);
+    session_user = *user;
+    if (me.uid == 0 && user->uid != 0) {
+        session_has_password = vx_user_has_password(user->name);
+        /* Its socket is theirs too: the desktop takes it away when it ends. */
+        vx_chown(DESKTOP_SOCKET, user->uid, user->gid, 0);
+        long error = vx_become_user(user);
+        if (error) {
+            fprintf(stderr, "desktop: can't become %s: %s\n", user->name, vx_strerror(error));
+        }
+    } else if (me.uid == 0) {
+        session_has_password = vx_user_has_password(user->name);
+    } else {
+        session_has_password = !vx_password_check(user->name, "");
     }
-    printf("desktop: started on a %dx%d screen%s%s\n", screen.width, screen.height,
-           keyboard >= 0 ? ", keyboard" : "", mouse >= 0 ? ", mouse" : "");
-    fflush(stdout);
+    vx_chdir(user->home);
+    snprintf(home_folder, sizeof(home_folder), "%s", user->home);
+    vx_home_path(desktop_folder, sizeof(desktop_folder), "Desktop");
+    vx_home_path(pictures_folder, sizeof(pictures_folder), "Pictures");
+    vx_home_path(trash_folder, sizeof(trash_folder), VX_TRASH_NAME);
+    /* The folders the desktop uses (vinit makes them; a desktop started
+     * another way still has them). */
+    vx_mkdir(HOME);
+    vx_mkdir(DESKTOP_FOLDER);
+    vx_mkdir(PICTURES_FOLDER);
+    vx_mkdir(TRASH_FOLDER);
+    reload_settings(); /* Theirs now (see <vexa/settings.h>). */
+    printf("desktop: session for %s (user %u)\n", user->name, user->uid);
     /* The first program: a terminal, unless told otherwise (or Settings
-     * says not to); then the apps Settings chose to start with the desktop. */
-    /* (--boot: started by vinit when the computer starts, where a terminal
+     * says not to); then the apps Settings chose to start with the desktop.
+     * (--boot: started by vinit when the computer starts, where a terminal
      * isn't wanted unless Settings asks for one; then maybe a program.) */
-    bool boot = argc > 1 && strcmp(argv[1], "--boot") == 0;
-    if (argc > (boot ? 2 : 1)) {
-        launch(argv[boot ? 2 : 1]);
+    bool boot = boot_argc > 1 && strcmp(boot_argv[1], "--boot") == 0;
+    if (boot_argc > (boot ? 2 : 1)) {
+        launch(boot_argv[boot ? 2 : 1]);
     } else if (vx_settings_bool(&config, "startup_terminal", !boot)) {
         launch("/bin/term");
     }
@@ -3390,6 +3434,64 @@ int main(int argc, char **argv) {
             run_app(i);
         }
     }
+}
+
+/* At the start: someone to log in. A desktop a user started is theirs; with
+ * one account and no password, it's that one's; otherwise the login screen
+ * asks. */
+static void begin(void) {
+    struct vx_credentials me = {0};
+    vx_credentials(NULL, &me);
+    struct vx_user user;
+    if (me.uid == 0) {
+        vx_remove(DESKTOP_CLIPBOARD_FILE); /* The last session's (whoever's it was). */
+    }
+    if (me.uid != 0) {
+        if (vx_user_by_id(me.uid, &user)) {
+            user = (struct vx_user){.uid = me.uid, .gid = me.gid, .home = "/tmp"};
+            snprintf(user.name, sizeof(user.name), "%u", me.uid);
+        }
+        session_start(&user);
+        return;
+    }
+    static struct vx_user users[VX_USERS_MAX];
+    int n = vx_users(users, VX_USERS_MAX);
+    if (n == 0) {
+        if (vx_user_by_id(0, &user)) {
+            user = (struct vx_user){.name = "root", .home = "/root"};
+        }
+        session_start(&user);
+    } else if (n == 1 && !vx_user_has_password(users[0].name)) {
+        printf("desktop: logging in %s (no password)\n", users[0].name);
+        session_start(&users[0]);
+    } else {
+        login_begin(users, n);
+    }
+}
+
+/* Logging out: everything the session started goes too. */
+static void end_session(void) {
+    struct vx_process_info list[256];
+    long n = vx_process_list(list, 256);
+    long me = vx_process_id();
+    for (long i = 0; i < n && i < 256; i++) {
+        if (list[i].uid == session_user.uid && list[i].id != (unsigned int)me && list[i].state == 0) {
+            vx_kill(list[i].id, VX_SIGTERM);
+        }
+    }
+    printf("desktop: %s logged out\n", session_user.name);
+}
+
+int main(int argc, char **argv) {
+    if (!setup()) {
+        return 1;
+    }
+    printf("desktop: started on a %dx%d screen%s%s\n", screen.width, screen.height,
+           keyboard >= 0 ? ", keyboard" : "", mouse >= 0 ? ", mouse" : "");
+    fflush(stdout);
+    boot_argc = argc;
+    boot_argv = argv;
+    begin();
 
     while (!quit) {
         long tick = setting_clock_seconds ? vx_time() : vx_time() / 60;
@@ -3465,6 +3567,11 @@ int main(int argc, char **argv) {
             }
         }
         reap_children();
+    }
+    vx_remove(DESKTOP_SOCKET);
+    if (logging_out) {
+        end_session();
+        return DESKTOP_EXIT_LOGOUT; /* vinit starts the desktop again. */
     }
     printf("desktop: back to the console\n");
     return 0; /* Closing the display brings the console back. */

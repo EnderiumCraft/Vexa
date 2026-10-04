@@ -17,6 +17,7 @@
 #include <vexa/files.h>
 #include <vexa/gui.h>
 #include <vexa/syscall.h>
+#include <vexa/users.h>
 
 #define TOOLBAR 36
 #define STATUS 22
@@ -255,7 +256,7 @@ static void draw(void) {
 static void open_another(void) {
     char folder[512], file[512];
     folder_of(folder, sizeof(folder));
-    if (vx_open_dialog("Open a Picture", path[0] ? folder : "/home/Pictures", file, sizeof(file))) {
+    if (vx_open_dialog("Open a Picture", path[0] ? folder : vx_home_folder("Pictures"), file, sizeof(file))) {
         load(file, false);
     }
 }

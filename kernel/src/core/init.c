@@ -122,6 +122,8 @@ void init_thread(void *unused) {
         must(vfs_mount("tmpfs", NULL, "tmpfs", "/run"), "mounting /run");
         vfs_chmod("/tmp", 4, 01777);
     }
+    /* Anyone may put files in /tmp and /run; only their owner may remove them. */
+    vfs_chmod("/run", 4, 01777);
     vfs_mkdir("/run/shm", 8);
     vfs_chmod("/run/shm", 8, 01777);
 

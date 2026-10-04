@@ -116,6 +116,18 @@ long vx_dup(int handle, int new_handle);
  * negative VX_E* error. */
 long vx_priority(long process_id, int nice, int *now);
 long vx_kernel_command(const char *command);
+/* Who this process is (see "Users and groups" in abi/vexa/abi.h): `set`
+ * (unless NULL) changes it, VX_ID_KEEP fields staying as they are; `now`
+ * (unless NULL) gets the result. */
+long vx_credentials(const struct vx_credentials *set, struct vx_credentials *now);
+/* A new owner and/or group (VX_ID_KEEP: unchanged), and new permission
+ * bits; VX_AT_* flags. */
+long vx_chown(const char *path, unsigned int uid, unsigned int gid, unsigned int flags);
+long vx_chmod(const char *path, unsigned int mode, unsigned int flags);
+long vx_handle_chown(int handle, unsigned int uid, unsigned int gid);
+long vx_handle_chmod(int handle, unsigned int mode);
+/* 0 if the real user may (VX_ACCESS_* bits), else a negative VX_E* error. */
+long vx_access(const char *path, unsigned int want);
 
 /* A short description of a (negative) VX_E* error. */
 const char *vx_strerror(long error);

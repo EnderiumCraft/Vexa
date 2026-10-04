@@ -42,6 +42,11 @@ runs X programs such as `xterm` in windows of their own on it. The kernel:
   in plain words
 - reads PS/2 and USB keyboards and mice (with scroll wheels) and tablets, as input
   events programs can read (the text console types a US layout; the desktop, the layout Settings chose)
+- has user accounts: files with owners and Unix permissions, checked by the kernel;
+  root and administrators; a login screen (and a console login) once an account has
+  a password, Log Out, the lock screen asking for the account's password, Settings →
+  Users to add and remove accounts, `sudo`, `accounts`, `id`, `chmod` and `chown`;
+  each account with its own home folder and settings
 - boots straight to its desktop (from the CD: the Installer first), with a glossy look
   in the spirit of Aqua and Aero: glass title bars and panel that blur what's behind
   them, red, yellow and green gel buttons, gel-like buttons, switches and menus in
@@ -71,7 +76,7 @@ runs X programs such as `xterm` in windows of their own on it. The kernel:
   things (Ctrl-click, Shift-click, Ctrl+A) and dragging them onto a folder (Ctrl
   copies), Quick Look (Space), search (Ctrl+F) and typing a name to go to it; copy,
   cut and paste (Ctrl+C, X, V), Duplicate (Ctrl+D), Make Alias, rename (F2), New
-  Folder and New Text Document, Move to Trash (`/Trash`, Delete) and Empty Trash,
+  Folder and New Text Document, Move to Trash (Delete) and Empty Trash,
   Get Info (Ctrl+I), Show Package Contents; right-click menus in Files and on the
   desktop
 - has System Settings like macOS's: dark and light themes with an accent color that

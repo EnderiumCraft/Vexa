@@ -19,7 +19,6 @@
 #define ICON_W 72
 #define ICON_H 72
 #define MAX_ICONS 96
-#define POSITIONS DESKTOP_FOLDER "/.positions"
 #define DRAG_START 5 /* Pixels the pointer moves before a press is a drag. */
 
 enum icon_kind { ICON_APP, ICON_FILE, ICON_TRASH };
@@ -166,7 +165,9 @@ static void save_positions(void) {
                                   strrchr(icons[i].path, '/') + 1, icons[i].column, icons[i].row);
         }
     }
-    int handle = vx_open(POSITIONS, VX_OPEN_WRITE | VX_OPEN_CREATE | VX_OPEN_TRUNCATE);
+    char positions[340];
+    vx_join_path(positions, sizeof(positions), DESKTOP_FOLDER, ".positions");
+    int handle = vx_open(positions, VX_OPEN_WRITE | VX_OPEN_CREATE | VX_OPEN_TRUNCATE);
     if (handle >= 0) {
         vx_write(handle, text, n);
         vx_close(handle);
@@ -290,8 +291,9 @@ void icons_load(void) {
         vx_close(handle);
     }
     qsort(icons + first_file, (size_t)(icon_count - first_file), sizeof(icons[0]), compare_names);
-    char positions[8192] = "";
-    int ph = vx_open(POSITIONS, VX_OPEN_READ);
+    char positions[8192] = "", positions_path[340];
+    vx_join_path(positions_path, sizeof(positions_path), DESKTOP_FOLDER, ".positions");
+    int ph = vx_open(positions_path, VX_OPEN_READ);
     if (ph >= 0) {
         long n = vx_read(ph, positions, sizeof(positions) - 1);
         positions[n > 0 ? n : 0] = '\0';

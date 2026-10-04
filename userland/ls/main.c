@@ -1,9 +1,11 @@
-/* ls: list directories. -l adds sizes and types, -a shows names starting with a dot. */
+/* ls: list directories. -l adds permissions, owners, sizes and types; -a shows
+ * names starting with a dot. */
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <vexa/syscall.h>
+#include <vexa/users.h>
 
 static bool long_format, show_all;
 
@@ -31,6 +33,43 @@ static void print_size(unsigned long long bytes) {
     }
 }
 
+/* "drwxr-xr-x  vexa  " */
+static void print_owner_and_mode(const struct vx_stat *st) {
+    char bits[11];
+    bits[0] = st->type == VX_TYPE_DIRECTORY      ? 'd'
+              : st->type == VX_TYPE_SYMLINK      ? 'l'
+              : st->type == VX_TYPE_CHAR_DEVICE  ? 'c'
+              : st->type == VX_TYPE_BLOCK_DEVICE ? 'b'
+              : st->type == VX_TYPE_SOCKET       ? 's'
+                                                 : '-';
+    static const char rwx[] = "rwxrwxrwx";
+    for (int i = 0; i < 9; i++) {
+        bits[1 + i] = st->mode & (0400 >> i) ? rwx[i] : '-';
+    }
+    if (st->mode & 04000) {
+        bits[3] = st->mode & 0100 ? 's' : 'S';
+    }
+    if (st->mode & 02000) {
+        bits[6] = st->mode & 0010 ? 's' : 'S';
+    }
+    if (st->mode & 01000) {
+        bits[9] = st->mode & 0001 ? 't' : 'T';
+    }
+    bits[10] = '\0';
+    static unsigned int last_uid = (unsigned int)-1;
+    static char owner[32];
+    if (st->uid != last_uid) {
+        struct vx_user user;
+        last_uid = st->uid;
+        if (vx_user_by_id(st->uid, &user) == 0) {
+            snprintf(owner, sizeof(owner), "%s", user.name);
+        } else {
+            snprintf(owner, sizeof(owner), "%u", st->uid);
+        }
+    }
+    printf("%s  %-8s ", bits, owner);
+}
+
 static int list(const char *path, bool with_title) {
     struct vx_stat st;
     long error = vx_stat(path, &st);
@@ -40,6 +79,7 @@ static int list(const char *path, bool with_title) {
     }
     if (st.type != VX_TYPE_DIRECTORY) {
         if (long_format) {
+            print_owner_and_mode(&st);
             print_size(st.size);
         }
         printf("%s\n", path);
@@ -77,8 +117,11 @@ static int list(const char *path, bool with_title) {
         if (long_format) {
             char full[512];
             snprintf(full, sizeof(full), "%s/%s", path, name);
-            if (entries[i].type != VX_TYPE_SYMLINK && vx_stat(full, &st) == 0 &&
-                st.type == VX_TYPE_FILE) {
+            bool known = vx_lstat(full, &st) == 0;
+            if (known) {
+                print_owner_and_mode(&st);
+            }
+            if (known && st.type == VX_TYPE_FILE) {
                 print_size(st.size);
             } else {
                 printf("%10s  ", type_name(entries[i].type));

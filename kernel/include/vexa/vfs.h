@@ -46,8 +46,9 @@ struct vnode_ops {
     int64_t (*read)(struct vnode *vnode, void *buffer, size_t size, uint64_t offset);
     int64_t (*write)(struct vnode *vnode, const void *buffer, size_t size, uint64_t offset);
     int (*truncate)(struct vnode *vnode, uint64_t size);
-    /* Stores new permission bits (vnode->mode is already updated). Optional:
-     * file systems without it keep modes in memory only. */
+    /* Stores new permission bits and owner (vnode->mode, uid and gid are
+     * already updated). Optional: file systems without it keep them in
+     * memory only. */
     int (*set_mode)(struct vnode *vnode);
     /* Optional: the physical page holding page `index` of the file, with a
      * reference for the caller, so it can be mapped shared (0 if it can't). */
@@ -77,6 +78,7 @@ struct vnode {
     uint64_t size;
     uint32_t links;
     uint32_t mode; /* Permission bits (07777). */
+    uint32_t uid, gid; /* Owner and group. */
     int64_t modified;
     const struct vnode_ops *ops;
     struct mount *mount;        /* The file system this vnode belongs to. */
@@ -143,6 +145,19 @@ int vfs_symlink(const char *target, const char *path, size_t length);
  * -VX_EINVAL if `path` isn't a symbolic link. */
 int vfs_readlink(const char *path, size_t length, char *buffer, size_t size);
 /* Changes permission bits (07777). */
+/* Opening for running a program: needs the execute bit instead of read. */
+#define VFS_OPEN_EXECUTE 0x80000000u
+
+/* Whether the calling process may read, write and/or execute (VX_ACCESS_*
+ * bits) `vnode`. Root may do anything, except run a file without any
+ * execute bit. Returns 0 or -VX_EACCES. */
+int vnode_access(struct vnode *vnode, uint32_t want);
+/* VX_ACCESS_* (with VX_ACCESS_EFFECTIVE: by the effective ids). */
+int vfs_access(const char *path, size_t length, uint32_t want);
+/* The owner and/or group (VX_ID_KEEP: unchanged). Only root may give a file
+ * away; its owner may change its group to one they belong to. */
+int vfs_chown(const char *path, size_t length, uint32_t uid, uint32_t gid, bool follow);
+int vfs_file_chown(struct file *file, uint32_t uid, uint32_t gid);
 int vfs_chmod(const char *path, size_t length, uint32_t mode);
 int vfs_file_chmod(struct file *file, uint32_t mode);
 /* Total and free bytes of the file system holding `path` (0 if unknown). */

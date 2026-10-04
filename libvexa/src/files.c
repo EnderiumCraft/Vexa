@@ -72,6 +72,15 @@ static long copy_file(const char *from, const char *to) {
     return error;
 }
 
+/* A copy keeps the permission bits, and (when root copies) the owner. */
+static void copy_owner_and_mode(const char *to, const struct vx_stat *stat) {
+    struct vx_credentials me;
+    if (vx_credentials(NULL, &me) == 0 && me.euid == 0) {
+        vx_chown(to, stat->uid, stat->gid, 0);
+    }
+    vx_chmod(to, stat->mode & 07777, 0);
+}
+
 long vx_copy_tree(const char *from, const char *to) {
     struct vx_stat stat;
     long error = vx_lstat(from, &stat);
@@ -91,7 +100,11 @@ long vx_copy_tree(const char *from, const char *to) {
         return vx_symlink(target, to);
     }
     if (stat.type != VX_TYPE_DIRECTORY) {
-        return copy_file(from, to);
+        error = copy_file(from, to);
+        if (!error) {
+            copy_owner_and_mode(to, &stat);
+        }
+        return error;
     }
     /* Not into itself ("copy /a to /a/b"). */
     size_t n = strlen(from);
@@ -113,6 +126,7 @@ long vx_copy_tree(const char *from, const char *to) {
         error = vx_copy_tree(a, b);
     }
     free(entries);
+    copy_owner_and_mode(to, &stat);
     return error;
 }
 

@@ -17,6 +17,7 @@
 #include <string.h>
 #include <vexa/gui.h>
 #include <vexa/syscall.h>
+#include <vexa/users.h>
 
 #define WIDTH 720
 #define HEIGHT 480
@@ -1015,7 +1016,8 @@ static void draw(void) {
 /* ---- Commands ---- */
 
 static void save_as(void) {
-    char path[512], folder[512] = "/home/Documents";
+    char path[512], folder[512];
+    snprintf(folder, sizeof(folder), "%s", vx_home_folder("Documents"));
     if (D->path[0]) {
         snprintf(folder, sizeof(folder), "%s", D->path);
         char *slash = strrchr(folder, '/');
@@ -1039,7 +1041,7 @@ static void save_current(void) {
 
 static void open_file(void) {
     char path[512];
-    if (vx_open_dialog("Open", "/home/Documents", path, sizeof(path))) {
+    if (vx_open_dialog("Open", vx_home_folder("Documents"), path, sizeof(path))) {
         /* Into this tab if it's an empty new one. */
         if (!D->path[0] && !D->modified && D->count == 1 && !D->lines[0].length) {
             close_doc(current);

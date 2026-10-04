@@ -134,7 +134,7 @@ static int64_t sys_open(uint64_t path, uint64_t length, uint64_t flags, uint64_t
         return error;
     }
     struct file *file;
-    error = vfs_open(kpath, strlen(kpath), (uint32_t)flags, &file);
+    error = vfs_open(kpath, strlen(kpath), (uint32_t)flags & ~VFS_OPEN_EXECUTE, &file);
     kfree(kpath);
     if (error) {
         return error;
@@ -666,11 +666,12 @@ static int64_t sys_kill(uint64_t id, uint64_t signal, uint64_t a2, uint64_t a3) 
     if (!target) {
         return -VX_ESRCH;
     }
-    if (signal) {
+    int error = process_may_signal(target) ? 0 : -VX_EPERM;
+    if (signal && !error) {
         signal_send(target, (int)signal);
     }
     object_put(&target->object);
-    return 0;
+    return error;
 }
 
 static int64_t sys_signal(uint64_t signal, uint64_t action, uint64_t a2, uint64_t a3) {
@@ -729,10 +730,11 @@ static void list_one(struct process *process, void *arg) {
     memcpy(info->name, process->name, sizeof(info->name));
     info->nice = process->nice;
     info->threads = process->thread_count;
+    info->uid = process->cred.uid;
 }
 
-/* A process's nice value: read, or set. (There are no users yet, so anyone
- * may set anyone's.) */
+/* A process's nice value: read, or set (one's own processes, and only root
+ * may raise a priority). */
 static int64_t sys_priority(uint64_t id, uint64_t nice, uint64_t out, uint64_t a3) {
     (void)a3;
     struct process *process = id ? process_find((uint32_t)id) : process_current();
@@ -744,7 +746,13 @@ static int64_t sys_priority(uint64_t id, uint64_t nice, uint64_t out, uint64_t a
     }
     int64_t value = (int64_t)nice;
     if (value != VX_PRIORITY_GET) {
-        sched_set_nice(process, value < -20 ? -20 : value > 19 ? 19 : (int)value);
+        value = value < -20 ? -20 : value > 19 ? 19 : value;
+        if (!process_may_signal(process) ||
+            (value < process->nice && !cred_is_root(cred_current()))) {
+            object_put(&process->object);
+            return -VX_EPERM;
+        }
+        sched_set_nice(process, (int)value);
     }
     int32_t now = process->nice;
     object_put(&process->object);
@@ -752,6 +760,112 @@ static int64_t sys_priority(uint64_t id, uint64_t nice, uint64_t out, uint64_t a
         return -VX_EFAULT;
     }
     return 0;
+}
+
+static int64_t sys_credentials(uint64_t new_cred, uint64_t out, uint64_t a2, uint64_t a3) {
+    (void)a2, (void)a3;
+    struct cred *cred = &me()->cred;
+    if (new_cred) {
+        struct vx_credentials want;
+        if (!copy_from_user(&want, new_cred, sizeof(want))) {
+            return -VX_EFAULT;
+        }
+        struct cred next = *cred;
+        uint32_t *ids[6] = {&next.uid, &next.euid, &next.suid, &next.gid, &next.egid, &next.sgid};
+        uint32_t wanted[6] = {want.uid, want.euid, want.suid, want.gid, want.egid, want.sgid};
+        for (int i = 0; i < 6; i++) {
+            if (wanted[i] == VX_ID_KEEP) {
+                continue;
+            }
+            /* Without root, only the ids it has already (as real, effective
+             * or saved) of the same kind. */
+            uint32_t *have = i < 3 ? &cred->uid : &cred->gid;
+            if (cred->euid != 0 && wanted[i] != have[0] && wanted[i] != have[1] &&
+                wanted[i] != have[2]) {
+                return -VX_EPERM;
+            }
+            *ids[i] = wanted[i];
+        }
+        if (want.group_count != VX_ID_KEEP) {
+            if (cred->euid != 0) {
+                return -VX_EPERM;
+            }
+            if (want.group_count > VX_GROUPS_MAX) {
+                return -VX_EINVAL;
+            }
+            next.group_count = want.group_count;
+            memcpy(next.groups, want.groups, sizeof(next.groups));
+        }
+        *cred = next;
+    }
+    if (out) {
+        struct vx_credentials now = {cred->uid, cred->euid, cred->suid, cred->gid,
+                                     cred->egid, cred->sgid, cred->group_count, {0}};
+        memcpy(now.groups, cred->groups, sizeof(now.groups));
+        if (!copy_to_user(out, &now, sizeof(now))) {
+            return -VX_EFAULT;
+        }
+    }
+    return 0;
+}
+
+/* vx_chown and vx_chmod: by path, or (VX_AT_HANDLE) on an open file. */
+static int64_t change_node(uint64_t path, uint64_t length, uint64_t flags, bool owner,
+                           uint32_t a, uint32_t b) {
+    if (flags & ~(uint64_t)(VX_AT_NO_FOLLOW | VX_AT_HANDLE)) {
+        return -VX_EINVAL;
+    }
+    int error;
+    if (flags & VX_AT_HANDLE) {
+        struct file *file = get_file((int64_t)path, 0, &error);
+        if (!file) {
+            return error;
+        }
+        error = owner ? vfs_file_chown(file, a, b) : vfs_file_chmod(file, a);
+        vfs_close(file);
+        return error;
+    }
+    char *kpath;
+    error = copy_path(path, length, &kpath);
+    if (error) {
+        return error;
+    }
+    bool follow = !(flags & VX_AT_NO_FOLLOW);
+    if (owner) {
+        error = vfs_chown(kpath, strlen(kpath), a, b, follow);
+    } else if (follow) {
+        error = vfs_chmod(kpath, strlen(kpath), a);
+    } else {
+        error = -VX_EOPNOTSUPP; /* Links have no permissions of their own. */
+    }
+    kfree(kpath);
+    return error;
+}
+
+static int64_t sys_chown(uint64_t path, uint64_t length, uint64_t ids, uint64_t flags) {
+    return change_node(path, length, flags, true, (uint32_t)ids, (uint32_t)(ids >> 32));
+}
+
+static int64_t sys_chmod(uint64_t path, uint64_t length, uint64_t mode, uint64_t flags) {
+    if (mode & ~07777ULL) {
+        return -VX_EINVAL;
+    }
+    return change_node(path, length, flags, false, (uint32_t)mode, 0);
+}
+
+static int64_t sys_access(uint64_t path, uint64_t length, uint64_t want, uint64_t a3) {
+    (void)a3;
+    if (want & ~(uint64_t)(7 | VX_ACCESS_EFFECTIVE)) {
+        return -VX_EINVAL;
+    }
+    char *kpath;
+    int error = copy_path(path, length, &kpath);
+    if (error) {
+        return error;
+    }
+    error = vfs_access(kpath, strlen(kpath), (uint32_t)want);
+    kfree(kpath);
+    return error;
 }
 
 static int64_t sys_process_list(uint64_t out, uint64_t count, uint64_t a2, uint64_t a3) {
@@ -1186,7 +1300,19 @@ static int64_t sys_control(uint64_t handle, uint64_t request, uint64_t arg, uint
     uint8_t buffer[CONTROL_MAX];
     memset(buffer, 0, sizeof(buffer));
     int64_t result = size && !copy_from_user(buffer, arg, size) ? -VX_EFAULT : 0;
-    if (!result) {
+    struct tty *tty = vfs_terminal((struct file *)object);
+    if (!result && request == VX_TTY_SET_ECHO) {
+        /* Any terminal, console or pty: typed characters shown or not. */
+        if (!tty || size != sizeof(int)) {
+            result = !tty ? -VX_ENOTTY : -VX_EINVAL;
+        } else {
+            struct tty_settings settings;
+            tty_get_settings(tty, &settings);
+            settings.lflag = *(int *)buffer ? settings.lflag | TTY_ECHO
+                                            : settings.lflag & ~(uint32_t)TTY_ECHO;
+            tty_set_settings(tty, &settings);
+        }
+    } else if (!result) {
         result = vfs_control((struct file *)object, (uint32_t)request, buffer, size);
     }
     if (result >= 0 && size && !copy_to_user(arg, buffer, size)) {
@@ -1343,6 +1469,9 @@ static int64_t sys_hostname(uint64_t out, uint64_t size, uint64_t new_name, uint
         if (!copy_from_user(name, new_name, length)) {
             return -VX_EFAULT;
         }
+        if (!cred_is_root(cred_current())) {
+            return -VX_EPERM; /* (`hostname` does it for administrators.) */
+        }
         int error = hostname_set(name, length);
         if (error) {
             return error;
@@ -1426,6 +1555,10 @@ static const syscall_fn syscalls[] = {
     [VX_SYS_DEVICE_LIST] = sys_device_list,
     [VX_SYS_DUP] = sys_dup,
     [VX_SYS_PRIORITY] = sys_priority,
+    [VX_SYS_CREDENTIALS] = sys_credentials,
+    [VX_SYS_CHOWN] = sys_chown,
+    [VX_SYS_ACCESS] = sys_access,
+    [VX_SYS_CHMOD] = sys_chmod,
 };
 
 static void vexa_syscall(struct interrupt_frame *frame) {

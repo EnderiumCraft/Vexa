@@ -95,6 +95,40 @@
                               VX_PRIORITY_GET, int *nice_out or NULL): its nice value
                               (-20 first .. 19 last), set and/or read */
 #define VX_PRIORITY_GET 1000
+#define VX_SYS_CREDENTIALS 64 /* vx_credentials(const struct vx_credentials *new or NULL,
+                                 struct vx_credentials *out or NULL): who this process is */
+#define VX_SYS_CHOWN 65    /* vx_chown(path, length, uid | gid << 32, VX_AT_* flags): a new
+                              owner and/or group (VX_ID_KEEP leaves one as it is) */
+#define VX_SYS_ACCESS 66   /* vx_access(path, length, VX_ACCESS_* bits): 0 if the real user
+                              may, else -VX_EACCES */
+#define VX_SYS_CHMOD 67    /* vx_chmod(path, length, mode, VX_AT_* flags): new permission bits
+                              (the owner or root only) */
+
+/* Users and groups. Each process has a real, an effective and a saved user
+ * id, the same for its group, and a list of other groups it belongs to.
+ * Files have an owner, a group and permission bits; the effective ids decide
+ * what a process may do with them. User 0 (root) may do anything. Programs
+ * with the set-user-id bit (04000) run as their file's owner, and with the
+ * set-group-id bit (02000) as its group. A new process gets its parent's
+ * effective ids as all three. */
+#define VX_GROUPS_MAX 16
+#define VX_ID_KEEP 0xffffffffu
+
+struct vx_credentials {
+    unsigned int uid, euid, suid; /* Setting: VX_ID_KEEP leaves one as it is. */
+    unsigned int gid, egid, sgid;
+    unsigned int group_count;     /* Setting: VX_ID_KEEP leaves the list as it is. */
+    unsigned int groups[VX_GROUPS_MAX];
+};
+
+/* For vx_chown and vx_chmod. */
+#define VX_AT_NO_FOLLOW 0x1 /* A symbolic link itself. */
+#define VX_AT_HANDLE 0x2    /* `path` is an open handle instead (length ignored). */
+
+#define VX_ACCESS_READ 4
+#define VX_ACCESS_WRITE 2
+#define VX_ACCESS_EXECUTE 1
+#define VX_ACCESS_EFFECTIVE 0x10 /* Check the effective ids instead of the real ones. */
 
 /* vx_power actions. */
 #define VX_POWER_RESTART 1
@@ -225,6 +259,8 @@ struct vx_process_info {
     char name[32];
     int nice;             /* Its priority: -20 (first) to 19 (last). */
     unsigned int threads;
+    unsigned int uid;     /* Its (real) user. */
+    unsigned int reserved;
 };
 
 /* ---- Sockets ----
@@ -508,6 +544,7 @@ struct vx_audio_info {
 #define VX_TTY_PTY_NUMBER 0x5401   /* int (out): N, on a /dev/ptmx handle */
 #define VX_TTY_SET_SIZE 0x5402     /* struct vx_tty_size (in) */
 #define VX_TTY_GET_SIZE 0x5403     /* struct vx_tty_size (out) */
+#define VX_TTY_SET_ECHO 0x5404     /* int (in): 0 hides what's typed (passwords), 1 shows it */
 
 struct vx_tty_size {
     unsigned short rows, columns;
@@ -555,6 +592,8 @@ struct vx_stat {
     unsigned int links;
     long long modified; /* Seconds since 1970, or 0 if unknown. */
     unsigned int mode;  /* Permission bits, Unix style (e.g. 0755). */
+    unsigned int uid;   /* Owner. */
+    unsigned int gid;   /* Group. */
     unsigned int reserved;
 };
 
@@ -574,7 +613,7 @@ struct vx_dir_entry {
 #define VX_EISDIR 7        /* It is a directory. */
 #define VX_ENOTEMPTY 8     /* The directory is not empty. */
 #define VX_EBADF 9         /* Not an open handle. */
-#define VX_EACCES 10       /* The handle wasn't opened for this. */
+#define VX_EACCES 10       /* Permission denied (or the handle wasn't opened for this). */
 #define VX_ENOSPC 11       /* No space left on the device. */
 #define VX_EIO 12          /* The device reported an error. */
 #define VX_ENAMETOOLONG 13 /* A name or path is too long. */
@@ -613,6 +652,7 @@ struct vx_dir_entry {
 #define VX_ECONNABORTED 46 /* The connection went away before it was accepted. */
 #define VX_EHOSTUNREACH 47 /* The host can't be reached. */
 #define VX_ENODEV 48       /* No such device (it was unplugged). */
+#define VX_EPERM 49        /* Only the owner (or root) may do that. */
 
 /* Every Vexa program carries an ELF note with this name and type, holding the
  * ABI version as a 32-bit integer. The kernel uses it to tell native programs

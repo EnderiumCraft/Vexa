@@ -1,3 +1,4 @@
+#include <vexa/cred.h>
 #include <vexa/kprintf.h>
 #include <vexa/mm.h>
 #include <vexa/mutex.h>
@@ -60,6 +61,64 @@ static void fs_leave(struct mount *mount, bool taken) {
         fs_leave(fs_mount_, fs_taken_);                                                    \
         fs_result_;                                                                        \
     })
+
+/* ---- Permissions ---- */
+
+static int access_as(struct vnode *vnode, uint32_t want, uint32_t uid, uint32_t gid,
+                     const struct cred *cred) {
+    want &= 7;
+    if (uid == 0) {
+        /* Root: anything, but running a file needs some execute bit. */
+        bool runs = (want & VX_ACCESS_EXECUTE) && vnode->type != VX_TYPE_DIRECTORY;
+        return runs && !(vnode->mode & 0111) ? -VX_EACCES : 0;
+    }
+    uint32_t bits;
+    if (vnode->uid == uid) {
+        bits = vnode->mode >> 6;
+    } else if (vnode->gid == gid || cred_in_group(cred, vnode->gid)) {
+        bits = vnode->mode >> 3;
+    } else {
+        bits = vnode->mode;
+    }
+    return (bits & want) == want ? 0 : -VX_EACCES;
+}
+
+int vnode_access(struct vnode *vnode, uint32_t want) {
+    const struct cred *cred = cred_current();
+    return access_as(vnode, want, cred->euid, cred->egid, cred);
+}
+
+static bool owns(struct vnode *vnode) {
+    const struct cred *cred = cred_current();
+    return cred->euid == 0 || cred->euid == vnode->uid;
+}
+
+/* Removing or replacing `child` in `dir`: write and search on the directory
+ * and, if it is sticky (like /tmp), owning the file or the directory. */
+static int may_delete(struct vnode *dir, struct vnode *child) {
+    int error = vnode_access(dir, VX_ACCESS_WRITE | VX_ACCESS_EXECUTE);
+    if (!error && (dir->mode & 01000) && !owns(child) && !owns(dir)) {
+        error = -VX_EACCES;
+    }
+    return error;
+}
+
+/* A node just made in `dir` belongs to whoever made it, in the directory's
+ * group if the directory is set-group-id (and then so are new directories). */
+static void set_new_owner(struct vnode *dir, struct vnode *created) {
+    const struct cred *cred = cred_current();
+    created->uid = cred->euid;
+    created->gid = cred->egid;
+    if (dir->mode & 02000) {
+        created->gid = dir->gid;
+        if (created->type == VX_TYPE_DIRECTORY) {
+            created->mode |= 02000;
+        }
+    }
+    if ((created->uid || created->gid || (created->mode & 02000)) && created->ops->set_mode) {
+        FS_CALL(created, created->ops->set_mode(created));
+    }
+}
 
 void vnode_ref(struct vnode *vnode) {
     __atomic_add_fetch(&vnode->refs, 1, __ATOMIC_RELAXED);
@@ -139,6 +198,10 @@ static int lookup_step(struct vnode *dir, const char *name, size_t length, struc
     }
     if (length > VX_NAME_MAX) {
         return -VX_ENAMETOOLONG;
+    }
+    int denied = vnode_access(dir, VX_ACCESS_EXECUTE);
+    if (denied) {
+        return denied;
     }
     struct vnode *found;
     int error = FS_CALL(dir, dir->ops->lookup(dir, name, length, &found));
@@ -419,6 +482,7 @@ int vfs_open(const char *path, size_t length, uint32_t flags, struct file **out)
     vfs_lock();
     struct walk walk = {0};
     struct vnode *vnode = NULL;
+    bool created = false;
     int error = resolve(&walk, path, length, false, !(flags & VX_OPEN_NO_FOLLOW), &vnode,
                         NULL, NULL);
     if (error == -VX_ENOENT && (flags & VX_OPEN_CREATE)) {
@@ -433,8 +497,15 @@ int vfs_open(const char *path, size_t length, uint32_t flags, struct file **out)
                     : dir->mount->read_only                            ? -VX_EROFS
                     : name_length > VX_NAME_MAX                        ? -VX_ENAMETOOLONG
                     : !dir->ops->create                                ? -VX_EROFS
-                    : FS_CALL(dir, dir->ops->create(dir, name, name_length, VX_TYPE_FILE,
-                                                    &vnode));
+                    : vnode_access(dir, VX_ACCESS_WRITE | VX_ACCESS_EXECUTE);
+            if (!error) {
+                error = FS_CALL(dir, dir->ops->create(dir, name, name_length, VX_TYPE_FILE,
+                                                      &vnode));
+                created = !error;
+            }
+            if (created) {
+                set_new_owner(dir, vnode);
+            }
             vnode_put(dir);
         }
     } else if (error) {
@@ -446,7 +517,17 @@ int vfs_open(const char *path, size_t length, uint32_t flags, struct file **out)
     }
     if (!error && vnode->type == VX_TYPE_DIRECTORY && writes(flags)) {
         error = -VX_EISDIR;
-    } else if (!error && writes(flags) && vnode->mount->read_only &&
+    } else if (!error && !created) {
+        /* (A file just created is its maker's, whatever its bits say.) */
+        uint32_t want = (flags & VFS_OPEN_EXECUTE) ? VX_ACCESS_EXECUTE
+                        : (flags & VX_OPEN_READ)    ? VX_ACCESS_READ
+                                                    : 0;
+        if (flags & (VX_OPEN_WRITE | VX_OPEN_TRUNCATE | VX_OPEN_APPEND)) {
+            want |= VX_ACCESS_WRITE;
+        }
+        error = vnode_access(vnode, want);
+    }
+    if (!error && writes(flags) && vnode->mount->read_only &&
                vnode->type == VX_TYPE_FILE) {
         error = -VX_EROFS;
     } else if (!error && (flags & VX_OPEN_TRUNCATE) && vnode->type == VX_TYPE_FILE) {
@@ -463,7 +544,7 @@ int vfs_open(const char *path, size_t length, uint32_t flags, struct file **out)
     vfs_unlock();
     object_init(&file->object, &file_object_type);
     file->vnode = vnode;
-    file->flags = flags;
+    file->flags = flags & ~VFS_OPEN_EXECUTE;
     file->path = kmalloc(length + 1);
     if (file->path) {
         memcpy(file->path, path, length);
@@ -497,6 +578,8 @@ static void fill_stat(struct vnode *vnode, struct vx_stat *stat) {
     stat->links = vnode->links;
     stat->modified = vnode->modified;
     stat->mode = vnode->mode;
+    stat->uid = vnode->uid;
+    stat->gid = vnode->gid;
 }
 
 static int stat_path(const char *path, size_t length, bool follow, struct vx_stat *stat) {
@@ -569,9 +652,13 @@ static int modify_parent(const char *path, size_t length, uint32_t create, const
         error = -VX_ENAMETOOLONG;
     } else if (dir->mount->read_only || (create ? !dir->ops->create : !dir->ops->remove)) {
         error = -VX_EROFS;
-    } else {
+    } else if (!(error = vnode_access(dir, VX_ACCESS_EXECUTE))) {
         struct vnode *existing;
         error = FS_CALL(dir, dir->ops->lookup(dir, name, name_length, &existing));
+        if (create && error == -VX_ENOENT) {
+            int denied = vnode_access(dir, VX_ACCESS_WRITE);
+            error = denied ? denied : error;
+        }
         if (create) {
             if (!error) {
                 vnode_put(existing);
@@ -579,6 +666,9 @@ static int modify_parent(const char *path, size_t length, uint32_t create, const
             } else if (error == -VX_ENOENT) {
                 struct vnode *created = NULL;
                 error = FS_CALL(dir, dir->ops->create(dir, name, name_length, create, &created));
+                if (!error) {
+                    set_new_owner(dir, created);
+                }
                 if (!error && target) {
                     size_t target_length = strlen(target);
                     int64_t n = created->ops->write
@@ -599,8 +689,11 @@ static int modify_parent(const char *path, size_t length, uint32_t create, const
             }
         } else if (!error) {
             bool busy = existing->mounted_here != NULL;
+            int denied = may_delete(dir, existing);
             vnode_put(existing);
-            error = busy ? -VX_EBUSY : FS_CALL(dir, dir->ops->remove(dir, name, name_length));
+            error = busy     ? -VX_EBUSY
+                    : denied ? denied
+                             : FS_CALL(dir, dir->ops->remove(dir, name, name_length));
         }
     }
     vnode_put(dir);
@@ -658,6 +751,8 @@ int vfs_link(const char *from, size_t from_length, const char *to, size_t to_len
         error = dir->mount->read_only ? -VX_EROFS : -VX_EACCES;
     } else if (!error && name_length > VX_NAME_MAX) {
         error = -VX_ENAMETOOLONG;
+    } else if (!error) {
+        error = vnode_access(dir, VX_ACCESS_WRITE | VX_ACCESS_EXECUTE);
     }
     if (!error) {
         struct vnode *existing;
@@ -712,10 +807,24 @@ int vfs_rename(const char *from, size_t from_length, const char *to, size_t to_l
         error = -VX_EROFS;
     }
     if (!error) {
+        error = vnode_access(new_dir, VX_ACCESS_WRITE | VX_ACCESS_EXECUTE);
+    }
+    if (!error) {
         error = FS_CALL(old_dir, old_dir->ops->lookup(old_dir, old_name, old_length, &moving));
     }
     if (!error && moving->mounted_here) {
         error = -VX_EBUSY;
+    }
+    if (!error) {
+        error = may_delete(old_dir, moving);
+    }
+    if (!error) {
+        /* Whatever it replaces must be deletable too. */
+        struct vnode *replaced;
+        if (FS_CALL(new_dir, new_dir->ops->lookup(new_dir, new_name, new_length, &replaced)) == 0) {
+            error = replaced != moving ? may_delete(new_dir, replaced) : 0;
+            vnode_put(replaced);
+        }
     }
     if (!error) {
         error = FS_CALL(old_dir, old_dir->ops->rename(old_dir, old_name, old_length, new_dir,
@@ -827,6 +936,13 @@ static int set_mode_locked(struct vnode *vnode, uint32_t mode) {
     if (vnode->mount->read_only) {
         return -VX_EROFS;
     }
+    if (!owns(vnode)) {
+        return -VX_EPERM;
+    }
+    const struct cred *cred = cred_current();
+    if (cred->euid != 0 && !cred_in_group(cred, vnode->gid)) {
+        mode &= ~02000u; /* Set-group-id only for a group of one's own. */
+    }
     vnode->mode = mode & 07777;
     return vnode->ops->set_mode ? FS_CALL(vnode, vnode->ops->set_mode(vnode)) : 0;
 }
@@ -848,6 +964,78 @@ int vfs_chmod(const char *path, size_t length, uint32_t mode) {
 int vfs_file_chmod(struct file *file, uint32_t mode) {
     vfs_lock();
     int error = set_mode_locked(file->vnode, mode);
+    vfs_unlock();
+    return error;
+}
+
+static int set_owner_locked(struct vnode *vnode, uint32_t uid, uint32_t gid) {
+    const struct cred *cred = cred_current();
+    if (uid == vnode->uid) {
+        uid = VX_ID_KEEP;
+    }
+    if (gid == vnode->gid) {
+        gid = VX_ID_KEEP;
+    }
+    if (uid == VX_ID_KEEP && gid == VX_ID_KEEP) {
+        return 0;
+    }
+    if (cred->euid != 0 && (uid != VX_ID_KEEP || cred->euid != vnode->uid ||
+                            !cred_in_group(cred, gid))) {
+        return -VX_EPERM;
+    }
+    if (vnode->mount->read_only) {
+        return -VX_EROFS;
+    }
+    if (uid != VX_ID_KEEP) {
+        vnode->uid = uid;
+    }
+    if (gid != VX_ID_KEEP) {
+        vnode->gid = gid;
+    }
+    if (vnode->type != VX_TYPE_DIRECTORY) {
+        vnode->mode &= ~06000u; /* A file given away isn't set-id any more. */
+    }
+    return vnode->ops->set_mode ? FS_CALL(vnode, vnode->ops->set_mode(vnode)) : 0;
+}
+
+int vfs_chown(const char *path, size_t length, uint32_t uid, uint32_t gid, bool follow) {
+    vfs_lock();
+    struct walk walk = {0};
+    struct vnode *vnode;
+    int error = resolve(&walk, path, length, false, follow, &vnode, NULL, NULL);
+    walk_done(&walk);
+    if (!error) {
+        error = set_owner_locked(vnode, uid, gid);
+        vnode_put(vnode);
+    }
+    vfs_unlock();
+    return error;
+}
+
+int vfs_file_chown(struct file *file, uint32_t uid, uint32_t gid) {
+    vfs_lock();
+    int error = set_owner_locked(file->vnode, uid, gid);
+    vfs_unlock();
+    return error;
+}
+
+int vfs_access(const char *path, size_t length, uint32_t want) {
+    vfs_lock();
+    struct walk walk = {0};
+    struct vnode *vnode;
+    int error = resolve(&walk, path, length, false, true, &vnode, NULL, NULL);
+    walk_done(&walk);
+    if (!error) {
+        const struct cred *cred = cred_current();
+        bool effective = want & VX_ACCESS_EFFECTIVE;
+        error = access_as(vnode, want, effective ? cred->euid : cred->uid,
+                          effective ? cred->egid : cred->gid, cred);
+        if (!error && (want & VX_ACCESS_WRITE) && vnode->mount->read_only &&
+            vnode->type != VX_TYPE_CHAR_DEVICE) {
+            error = -VX_EROFS;
+        }
+        vnode_put(vnode);
+    }
     vfs_unlock();
     return error;
 }

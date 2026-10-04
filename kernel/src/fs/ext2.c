@@ -674,6 +674,10 @@ static int get_node(struct ext2 *fs, uint32_t number, struct vnode **out) {
     node->vnode.size = inode_size(&node->inode);
     node->vnode.links = node->inode.links_count;
     node->vnode.mode = node->inode.mode & 07777;
+    /* Linux keeps the high 16 bits of the ids in osd2. */
+    const uint8_t *high = node->inode.osd2;
+    node->vnode.uid = node->inode.uid | (uint32_t)(high[4] | high[5] << 8) << 16;
+    node->vnode.gid = node->inode.gid | (uint32_t)(high[6] | high[7] << 8) << 16;
     node->vnode.modified = node->inode.mtime;
     node->vnode.data = fs;
     node->next = fs->open_nodes;
@@ -1246,6 +1250,12 @@ static int ext2_truncate(struct vnode *vnode, uint64_t size) {
 static int ext2_set_mode(struct vnode *vnode) {
     struct ext2_node *node = node_of(vnode);
     node->inode.mode = (uint16_t)((node->inode.mode & MODE_TYPE_MASK) | (vnode->mode & 07777));
+    node->inode.uid = (uint16_t)vnode->uid;
+    node->inode.gid = (uint16_t)vnode->gid;
+    node->inode.osd2[4] = (uint8_t)(vnode->uid >> 16);
+    node->inode.osd2[5] = (uint8_t)(vnode->uid >> 24);
+    node->inode.osd2[6] = (uint8_t)(vnode->gid >> 16);
+    node->inode.osd2[7] = (uint8_t)(vnode->gid >> 24);
     node->inode.ctime = (uint32_t)time_now();
     return write_inode(fs_of(vnode), node);
 }

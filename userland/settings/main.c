@@ -22,6 +22,7 @@
 #include <vexa/gui.h>
 #include <vexa/net.h>
 #include <vexa/settings.h>
+#include <vexa/users.h>
 #include <vexa/syscall.h>
 #include <vexa/time.h>
 
@@ -42,7 +43,7 @@ static int pointer_x, pointer_y;
 
 enum section {
     S_APPEARANCE, S_WALLPAPER, S_DESKTOP, S_DATE, S_INPUT, S_DISPLAY, S_SOUND, S_LOCK, S_DEFAULTS,
-    S_STARTUP, S_NETWORK, S_STORAGE, S_ABOUT, SECTION_COUNT
+    S_STARTUP, S_NETWORK, S_STORAGE, S_ABOUT, S_USERS, SECTION_COUNT
 };
 
 static const struct {
@@ -67,6 +68,7 @@ static const struct {
     {"Network", "computer name hostname address ip dns router internet", 0x4c8dff, 'N'},
     {"Storage", "disks space free used mounts", 0x8e8ea0, 'H'},
     {"About", "version system memory cpu restart shut down power off", 0x9b6bff, 'i'},
+    {"Users", "accounts people login password administrator add remove", 0x3fbf6f, 'U'},
 };
 
 static enum section current = S_APPEARANCE;
@@ -74,8 +76,14 @@ static char search[40];
 
 /* ---- Fields (typing) ---- */
 
-static enum { FIELD_NONE, FIELD_SEARCH, FIELD_PICTURE, FIELD_NAME, FIELD_PASSWORD } field;
-static char picture_path[256], computer_name[80], password[64];
+static enum {
+    FIELD_NONE, FIELD_SEARCH, FIELD_PICTURE, FIELD_NAME, FIELD_PASSWORD, FIELD_OLD_PASSWORD,
+    FIELD_NEW_LOGIN, FIELD_NEW_FULL, FIELD_NEW_PASSWORD
+} field;
+static char picture_path[256], computer_name[80], password[64], old_password[64];
+static char new_login[32], new_full[64], new_password[64];
+static bool new_admin;
+static char account_message[160]; /* What the last change to an account said. */
 
 /* ---- What was drawn where: clicking finds it here ---- */
 
@@ -83,7 +91,9 @@ enum hit_kind {
     H_SECTION, H_SEGMENT, H_TOGGLE, H_SLIDER, H_ACCENT, H_PICTURE, H_GRADIENT, H_PICTURE_FIELD,
     H_USE_PICTURE, H_ICON_APP, H_STARTUP_APP, H_ZONE, H_MODE, H_DEFAULT_APP, H_NAME_FIELD,
     H_SAVE_NAME, H_POWER, H_KEEP, H_REVERT, H_SEARCH_FIELD, H_TEST_AREA, H_PASSWORD_FIELD,
-    H_SET_PASSWORD, H_REMOVE_PASSWORD, H_LOCK_NOW, H_OUTPUT, H_TEST_SOUND,
+    H_SET_PASSWORD, H_REMOVE_PASSWORD, H_LOCK_NOW, H_OUTPUT, H_TEST_SOUND, H_OLD_PASSWORD_FIELD,
+    H_NEW_LOGIN_FIELD, H_NEW_FULL_FIELD, H_NEW_PASSWORD_FIELD, H_NEW_ADMIN, H_ADD_ACCOUNT,
+    H_REMOVE_ACCOUNT, H_ADMIN_ACCOUNT,
 };
 
 struct hit {
@@ -895,20 +905,90 @@ static void draw_startup(void) {
     }
 }
 
+/* ---- Accounts: `accounts` (set-user-id root) makes the changes ---- */
+
+/* Runs a program with `input` on its input; its first line of output (or
+ * errors) goes to account_message. Returns its exit code. */
+static long run_helper(const char *const *argv, int argc, const char *input) {
+    int in[2], out[2];
+    if (vx_pipe(in)) {
+        return -1;
+    }
+    if (vx_pipe(out)) {
+        vx_close(in[0]);
+        vx_close(in[1]);
+        return -1;
+    }
+    char path[64];
+    snprintf(path, sizeof(path), "/bin/%s", argv[0]);
+    struct vx_spawn spawn = {.argv = argv, .argc = (unsigned long)argc,
+                             .handles = {in[0], out[1], out[1]}};
+    int child = vx_spawn(path, &spawn);
+    vx_close(in[0]);
+    vx_close(out[1]);
+    if (child >= 0 && input) {
+        vx_write(in[1], input, strlen(input));
+    }
+    vx_close(in[1]);
+    char text[512];
+    long n = 0, got;
+    while (n < (long)sizeof(text) - 1 && (got = vx_read(out[0], text + n, sizeof(text) - 1 - (size_t)n)) > 0) {
+        n += got;
+    }
+    vx_close(out[0]);
+    text[n] = '\0';
+    text[strcspn(text, "\n")] = '\0';
+    const char *shown = !strncmp(text, "accounts: ", 10) ? text + 10 : text;
+    snprintf(account_message, sizeof(account_message), "%s", shown);
+    long code = child >= 0 ? vx_wait(child, 0) : child;
+    if (child >= 0) {
+        vx_close(child);
+    }
+    printf("settings: %s: %s (%ld)\n", argv[0], shown, code);
+    fflush(stdout);
+    return code;
+}
+
+static struct vx_user me_user;
+static bool me_admin, me_has_password;
+
+static void read_me(void) {
+    if (vx_current_user(&me_user)) {
+        memset(&me_user, 0, sizeof(me_user));
+        snprintf(me_user.name, sizeof(me_user.name), "root");
+    }
+    me_admin = me_user.uid == 0 || vx_user_is_admin(me_user.name);
+    me_has_password = !vx_password_check(me_user.name, "");
+}
+
 /* ---- Lock Screen ---- */
 
-static void save_password(void) {
+static void save_password(bool remove) {
     field = FIELD_NONE;
-    if (!password[0]) {
+    if (!remove && !password[0]) {
         return;
     }
-    char hash[17];
-    vx_password_hash(password, hash);
+    char input[160];
+    snprintf(input, sizeof(input), "%s%s%s\n", me_has_password ? old_password : "",
+             me_has_password ? "\n" : "", remove ? "" : password);
+    const char *argv[] = {"accounts", "password", "--password-stdin"};
+    long code = run_helper(argv, 3, input);
+    memset(input, 0, sizeof(input));
     memset(password, 0, sizeof(password));
-    vx_settings_set(&desk, "lock_password", hash);
-    vx_settings_save(&desk);
-    changed("lock_password", "(set)");
-    vx_desktop_reload();
+    memset(old_password, 0, sizeof(old_password));
+    changed("password", code == 0 ? (remove ? "removed" : "changed") : "not changed");
+    read_me();
+    vx_desktop_reload(); /* (The lock screen asks for it, or not.) */
+}
+
+static void dots_field(int x, int y, int width, const char *secret, bool active) {
+    char dots[200] = "";
+    size_t n = 0;
+    for (const char *p = secret; *p && n + 4 < sizeof(dots);) {
+        vx_utf8_next(&p);
+        n += (size_t)snprintf(dots + n, sizeof(dots) - n, "\xe2\x80\xa2"); /* A dot. */
+    }
+    vx_draw_field(S(), x, y, width, dots, active);
 }
 
 static void draw_lock(void) {
@@ -924,27 +1004,27 @@ static void draw_lock(void) {
     y += ROW;
     note(y, "The time drifts over the wallpaper, blurred; a key or the mouse wakes it.");
     y += 34;
-    heading("Password", y);
+    heading("Your password", y);
     y += 28;
-    bool set_already = vx_settings_get(&desk, "lock_password", "")[0];
-    label(y, set_already ? "New password" : "Password");
-    char dots[200] = "";
-    size_t n = 0;
-    for (const char *p = password; *p && n + 4 < sizeof(dots);) {
-        vx_utf8_next(&p);
-        n += (size_t)snprintf(dots + n, sizeof(dots) - n, "\xe2\x80\xa2"); /* A dot. */
+    if (me_has_password) {
+        label(y, "Current password");
+        dots_field(CONTROL, y + 1, 220, old_password, field == FIELD_OLD_PASSWORD);
+        add_hit(CONTROL, y + 1, 220, 24, H_OLD_PASSWORD_FIELD);
+        y += ROW;
     }
-    vx_draw_field(S(), CONTROL, y + 1, 220, dots, field == FIELD_PASSWORD);
+    label(y, me_has_password ? "New password" : "Password");
+    dots_field(CONTROL, y + 1, 220, password, field == FIELD_PASSWORD);
     add_hit(CONTROL, y + 1, 220, 24, H_PASSWORD_FIELD);
     vx_draw_button(S(), CONTROL + 228, y + 1, 60, 24, "Set", false);
     add_hit(CONTROL + 228, y + 1, 60, 24, H_SET_PASSWORD);
-    if (set_already) {
+    if (me_has_password) {
         vx_draw_button(S(), CONTROL + 296, y + 1, 80, 24, "Remove", false);
         add_hit(CONTROL + 296, y + 1, 80, 24, H_REMOVE_PASSWORD);
     }
     y += ROW;
-    note(y, set_already ? "A password is set: the lock screen asks for it."
-                        : "No password: any key or click unlocks the lock screen.");
+    note(y, account_message[0] ? account_message
+            : me_has_password  ? "Your account's password: logging in and the lock screen ask for it."
+                               : "No password: anyone can log in as you, and any key unlocks.");
     y += 34;
     heading("Lock now", y);
     y += 28;
@@ -952,6 +1032,96 @@ static void draw_lock(void) {
     add_hit(LEFT, y, 140, 28, H_LOCK_NOW);
     y += 38;
     note(y, "Anywhere: Super+L or Ctrl+Alt+L, or Lock Screen in the Vexa menu.");
+}
+
+/* ---- Users ---- */
+
+static struct vx_user user_list[VX_USERS_MAX];
+static int user_count;
+
+static void add_account(void) {
+    field = FIELD_NONE;
+    if (!new_login[0]) {
+        return;
+    }
+    const char *argv[7] = {"accounts", "add", new_login, "--full", new_full, "--password-stdin"};
+    int argc = 6;
+    if (new_admin) {
+        argv[argc++] = "--admin";
+    }
+    char input[80];
+    snprintf(input, sizeof(input), "%s\n", new_password);
+    long code = run_helper(argv, argc, input);
+    memset(input, 0, sizeof(input));
+    memset(new_password, 0, sizeof(new_password));
+    if (code == 0) {
+        changed("account", new_login);
+        new_login[0] = new_full[0] = '\0';
+        new_admin = false;
+    }
+}
+
+static void draw_users(void) {
+    int y = 64;
+    heading("Accounts", y);
+    y += 28;
+    user_count = vx_users(user_list, VX_USERS_MAX);
+    for (int i = 0; i < user_count; i++) {
+        const struct vx_user *u = &user_list[i];
+        bool admin = vx_user_is_admin(u->name), self = u->uid == me_user.uid;
+        vx_fill_rounded(S(), LEFT, y, 32, 32, 16, admin ? VX_COLOR_ACCENT : 0x8e8ea0, 255);
+        char initial[2] = {u->full_name[0] ? u->full_name[0] : u->name[0], '\0'};
+        if (initial[0] >= 'a' && initial[0] <= 'z') {
+            initial[0] = (char)(initial[0] - 32);
+        }
+        text(LEFT + 16 - vx_text_width(initial) / 2, y + 9, initial, 0xffffff);
+        char line[160];
+        snprintf(line, sizeof(line), "%s%s", u->full_name[0] ? u->full_name : u->name,
+                 self ? " (you)" : "");
+        text(LEFT + 44, y + 1, line, VX_COLOR_TEXT);
+        snprintf(line, sizeof(line), "%s - %s", u->name, admin ? "Administrator" : "Standard");
+        text(LEFT + 44, y + 17, line, VX_COLOR_DIM);
+        if (me_admin && !self) {
+            int bx = window->surface.width - 24 - 90;
+            vx_draw_button(S(), bx, y + 4, 90, 24, "Remove", false);
+            struct hit *h = add_hit(bx, y + 4, 90, 24, H_REMOVE_ACCOUNT);
+            h->index = i;
+            bx -= 156;
+            vx_draw_button(S(), bx, y + 4, 148, 24, admin ? "Make Standard" : "Make Administrator",
+                           false);
+            h = add_hit(bx, y + 4, 148, 24, H_ADMIN_ACCOUNT);
+            h->index = i;
+        }
+        y += 42;
+    }
+    y += 10;
+    heading("Add an account", y);
+    y += 28;
+    if (!me_admin) {
+        note(y, "Only administrators can add or remove accounts.");
+        return;
+    }
+    label(y, "Full name");
+    vx_draw_field(S(), CONTROL, y + 1, 220, new_full, field == FIELD_NEW_FULL);
+    add_hit(CONTROL, y + 1, 220, 24, H_NEW_FULL_FIELD);
+    y += ROW;
+    label(y, "Account name");
+    vx_draw_field(S(), CONTROL, y + 1, 220, new_login, field == FIELD_NEW_LOGIN);
+    add_hit(CONTROL, y + 1, 220, 24, H_NEW_LOGIN_FIELD);
+    y += ROW;
+    label(y, "Password");
+    dots_field(CONTROL, y + 1, 220, new_password, field == FIELD_NEW_PASSWORD);
+    add_hit(CONTROL, y + 1, 220, 24, H_NEW_PASSWORD_FIELD);
+    y += ROW;
+    checkbox(CONTROL, y, new_admin, "Administrator (can change the system)");
+    add_hit(CONTROL, y, 300, 26, H_NEW_ADMIN);
+    y += ROW;
+    vx_draw_button(S(), CONTROL, y, 120, 28, "Add Account", false);
+    add_hit(CONTROL, y, 120, 28, H_ADD_ACCOUNT);
+    y += 38;
+    note(y, account_message[0] ? account_message
+                               : "Account names: small letters, digits, - and _. Each gets a home "
+                                 "folder in /home.");
 }
 
 /* ---- Network ---- */
@@ -1176,6 +1346,7 @@ static void draw(void) {
     case S_INPUT: draw_input(); break;
     case S_DISPLAY: draw_display(); break;
     case S_SOUND: draw_sound(); break;
+    case S_USERS: draw_users(); break;
     case S_LOCK: draw_lock(); break;
     case S_DEFAULTS: draw_defaults(); break;
     case S_STARTUP: draw_startup(); break;
@@ -1229,14 +1400,12 @@ static void revert_display(void) {
 }
 
 static void save_name(void) {
-    long error = vx_set_hostname(computer_name);
-    if (error) {
-        printf("settings: can't name the computer \"%s\": %s\n", computer_name, vx_strerror(error));
+    /* `hostname` (set-user-id root, for administrators) names it and keeps it. */
+    const char *argv[] = {"hostname", computer_name};
+    if (run_helper(argv, 2, NULL) != 0) {
+        printf("settings: can't name the computer \"%s\": %s\n", computer_name, account_message);
         return;
     }
-    char text_line[96];
-    int n = snprintf(text_line, sizeof(text_line), "%s\n", computer_name);
-    vx_settings_write_file("hostname", text_line, (size_t)n);
     changed("hostname", computer_name);
     field = FIELD_NONE;
 }
@@ -1359,10 +1528,25 @@ static void click(struct hit *h, int px) {
     case H_DEFAULT_APP: choose_default_app(h->index, h->x, h->y + h->h); break;
     case H_NAME_FIELD: field = FIELD_NAME; break;
     case H_PASSWORD_FIELD: field = FIELD_PASSWORD; break;
-    case H_SET_PASSWORD: save_password(); break;
-    case H_REMOVE_PASSWORD:
-        set("lock_password", "");
+    case H_OLD_PASSWORD_FIELD: field = FIELD_OLD_PASSWORD; break;
+    case H_SET_PASSWORD: save_password(false); break;
+    case H_REMOVE_PASSWORD: save_password(true); break;
+    case H_NEW_LOGIN_FIELD: field = FIELD_NEW_LOGIN; break;
+    case H_NEW_FULL_FIELD: field = FIELD_NEW_FULL; break;
+    case H_NEW_PASSWORD_FIELD: field = FIELD_NEW_PASSWORD; break;
+    case H_NEW_ADMIN: new_admin = !new_admin; break;
+    case H_ADD_ACCOUNT: add_account(); break;
+    case H_REMOVE_ACCOUNT: {
+        const char *argv[] = {"accounts", "remove", user_list[h->index].name};
+        run_helper(argv, 3, NULL);
         break;
+    }
+    case H_ADMIN_ACCOUNT: {
+        bool admin = vx_user_is_admin(user_list[h->index].name);
+        const char *argv[] = {"accounts", "admin", user_list[h->index].name, admin ? "no" : "yes"};
+        run_helper(argv, 4, NULL);
+        break;
+    }
     case H_OUTPUT: {
         unsigned id = (unsigned)h->index;
         if (read_sound() && vx_control(audio_handle, VX_AUDIO_SET_OUTPUT, &id, sizeof(id)) == 0) {
@@ -1443,15 +1627,56 @@ static void key(const struct vx_gui_event *e) {
         }
         return;
     case FIELD_PASSWORD:
+    case FIELD_OLD_PASSWORD:
         if (e->key == VX_KEY_ENTER) {
-            save_password();
+            save_password(false);
+        } else if (e->key == VX_KEY_TAB && field == FIELD_OLD_PASSWORD) {
+            field = FIELD_PASSWORD;
         } else if (e->key == VX_KEY_ESC) {
             memset(password, 0, sizeof(password));
+            memset(old_password, 0, sizeof(old_password));
             field = FIELD_NONE;
+        } else if (field == FIELD_OLD_PASSWORD) {
+            vx_field_key(old_password, sizeof(old_password), e);
         } else {
             vx_field_key(password, sizeof(password), e);
         }
         return;
+    case FIELD_NEW_LOGIN:
+    case FIELD_NEW_FULL:
+    case FIELD_NEW_PASSWORD: {
+        char *buffer = field == FIELD_NEW_LOGIN ? new_login
+                       : field == FIELD_NEW_FULL ? new_full
+                                                 : new_password;
+        size_t size = field == FIELD_NEW_LOGIN  ? sizeof(new_login)
+                      : field == FIELD_NEW_FULL ? sizeof(new_full)
+                                                : sizeof(new_password);
+        if (e->key == VX_KEY_ENTER) {
+            add_account();
+        } else if (e->key == VX_KEY_TAB) {
+            field = field == FIELD_NEW_FULL    ? FIELD_NEW_LOGIN
+                    : field == FIELD_NEW_LOGIN ? FIELD_NEW_PASSWORD
+                                               : FIELD_NEW_FULL;
+        } else if (e->key == VX_KEY_ESC) {
+            field = FIELD_NONE;
+        } else {
+            vx_field_key(buffer, size, e);
+            if (field == FIELD_NEW_FULL && buffer[0]) {
+                /* The account name follows the full name, until it's typed itself. */
+                size_t n = 0;
+                for (const char *c = new_full; *c && n + 1 < sizeof(new_login); c++) {
+                    char low = *c >= 'A' && *c <= 'Z' ? (char)(*c + 32) : *c;
+                    if ((low >= 'a' && low <= 'z') || (low >= '0' && low <= '9' && n)) {
+                        new_login[n++] = low;
+                    } else if (*c == ' ') {
+                        break;
+                    }
+                }
+                new_login[n] = '\0';
+            }
+        }
+        return;
+    }
     case FIELD_NAME:
         if (e->key == VX_KEY_ENTER) {
             save_name();
@@ -1511,6 +1736,7 @@ int main(int argc, char **argv) {
         return 1;
     }
     vx_settings_load(&desk, "desktop.conf");
+    read_me();
     app_count = vx_app_list(apps, MAX_APPS);
     find_pictures();
     /* `settings Display` opens that section. */

@@ -110,6 +110,29 @@ TYPED_COMMANDS = ([
     ("rm -r a ; ls", "r.txt", 10),
     ("cd /", None, 10),
     ("fs-test", "fs-test: passed", 60),
+    # Accounts and permissions: the console's shell is root's; `sudo -u`
+    # runs things as someone else, who may only do what files allow.
+    ("id", "uid=0(root) gid=0(root)", 10),
+    ("accounts", "Vexa User", 10),
+    ("ls -l /bin/sudo", "-rwsr-xr-x  root", 10),
+    ("echo secret > /tmp/mine ; chmod 600 /tmp/mine ; ls -l /tmp/mine", "-rw-------  root", 10),
+    ("sudo -u vexa id", "uid=1000(vexa) gid=1000(vexa) groups=10(admin)", 10),
+    ("sudo -u vexa cat /tmp/mine", "permission denied", 10),
+    ("sudo -u vexa mkdir /etc/nope", "permission denied", 10),
+    ("sudo -u vexa cp /etc/motd /tmp/theirs ; ls -l /tmp/theirs", "-rw-r--r--  vexa", 10),
+    ("sudo -u nobody rm /tmp/theirs", "permission denied", 10),
+    ("sudo -u nobody sudo id", "only administrators", 10),
+    ("echo wonderland | accounts add alice --full Alice --password-stdin", "added alice", 30),
+    ("ls -l /home", "alice", 10),
+    # vauth checks a password (vsh expands $? when the line starts, so the
+    # code is shown on the next line).
+    ("echo alice > /tmp/a ; echo wonderland >> /tmp/a ; sudo -u alice vauth < /tmp/a", None, 20),
+    ("echo auth $?", "auth 0", 10),
+    ("echo alice > /tmp/a ; echo guess >> /tmp/a ; sudo -u alice vauth < /tmp/a", None, 20),
+    ("echo auth $?", "auth 1", 10),
+    ("cat /etc/shadow", "alice:$5v$", 10),
+    ("sudo -u alice cat /etc/shadow", "permission denied", 10),
+    ("accounts remove alice", "removed alice", 30),
     # The Phase 3 milestone: a native program in user mode.
     ("hello-world", "running in user mode.", 30),
     # A program that misbehaves is stopped, and the system carries on.
@@ -280,16 +303,25 @@ TYPED_COMMANDS = ([
     # A file in the Desktop folder is an icon on the desktop; Super+arrows
     # snap (the left half, then its top quarter, then the top right one);
     # Alt+Tab switches; Ctrl+Space searches (and does sums); PrintScreen
-    # saves a screenshot in Pictures; Super+L locks, and Enter unlocks.
-    ("@type echo hi > /home/Desktop/note.txt", "desktop: desktop folder changed", 20),
+    # saves a screenshot in Pictures; Super+L locks, and Enter unlocks. (The
+    # desktop logged in the live CD's account, vexa: its home is /home/vexa.)
+    ("@type echo hi > /home/vexa/Desktop/note.txt", "desktop: desktop folder changed", 20),
     ("@sendkey meta_l-up", "desktop: snapped window 1 to the top left", 10),
     ("@sendkey meta_l-right", "desktop: snapped window 1 to the top right", 10),
     ("@sendkey alt-tab", "desktop: switched to window", 10),
     ("@sendkey ctrl-spc", "desktop: search", 10),
     ("@type 12*(3+4)", 'desktop: notification "Calculator: 12*(3+4) = 84"', 10),
-    ("@sendkey print", "desktop: screenshot 1280x800 saved to /home/Pictures/Screenshot", 60),
+    ("@sendkey print", "desktop: screenshot 1280x800 saved to /home/vexa/Pictures/Screenshot", 60),
     ("@sendkey meta_l-l", "desktop: locked", 10),
     ("@sendkey ret", "desktop: unlocked", 10),
+    # With a password on the account, the lock screen wants it.
+    ("@type echo secret | accounts password --password-stdin > /dev/console",
+     "accounts: changed vexa's password", 20),
+    ("@sendkey meta_l-l", "desktop: locked", 10, 2),
+    ("@sendkey ret", "desktop: wrong password", 10),
+    ("@type secret", "desktop: unlocked", 20, 2),
+    ("@type echo secret > /tmp/p ; echo >> /tmp/p ; accounts password --password-stdin < /tmp/p > /dev/console",
+     "accounts: changed vexa's password", 20, 2),
     # The apps: a second tab in the terminal (exit closes it); the
     # Calculator (from search) does a sum; Notes makes a note.
     ("@sendkey alt-tab", "desktop: switched to window", 10),
@@ -358,8 +390,9 @@ TYPED_COMMANDS = ([
     ("@sendkey ret", "desktop: back to the console", 20),
     # (Keys typed while the desktop ran can be left at the console: Ctrl-U erases them.)
     ("@sendkey ctrl-u", None, 2),
-    ("ls /home/Desktop", "note.txt", 10),
-    ("ls /home/Pictures", "Screenshot 20", 10),
+    ("ls /home/vexa/Desktop", "note.txt", 10),
+    ("ls /home/vexa/Pictures", "Screenshot 20", 10),
+    ("ls -l /home", "vexa", 10),
     ("#shell",),
     ("Hello Vexa", "Hello: command not found", 10),
 ])
@@ -398,6 +431,9 @@ LINUX_COMMANDS = [
     ("/linux/bin/ls --version", "(GNU coreutils)", 20),
     ("bash -c 'timeout 1 sleep 5 ; echo timeout-status $?'", "timeout-status 124", 20),
     ("df /", "tmpfs", 20),
+    # Linux programs see the same accounts and owners.
+    ("/linux/bin/ls -l /bin/sudo", "-rwsr-xr-x 1 root root", 20),
+    ("busybox id -un | busybox sed s/^/me:/", "me:root", 20),
     # Python 3: threads, subprocess, multiprocessing, shared memory, signals...
     ("python-test.py", "python-test: passed", 300),
     # Linux threads (musl's pthreads): clone, futex, thread-local storage, tgkill.
@@ -921,10 +957,16 @@ INSTALL_COMMANDS = [
     ("desktop", 'desktop: window 1 "Terminal"', 30),
     ("@sendkey ctrl-spc", "desktop: search", 10),
     ("@type Install Vexa", "installer: 1 disk", 20),
+    ("@sendkey ret", None, 2),  # (Past the welcome.)
     ("@sendkey down", None, 2),
     ("@sendkey spc", None, 2),
     ("@sendkey ret", None, 2),
-    ("@sendkey ret", "installer: installing on vda (no Linux)", 10),
+    # The account: a name (the account name follows it), a password twice.
+    ("@type Alice Smith", None, 5),
+    ("@sendkey ret", None, 2),
+    ("@type wonderland", None, 2),
+    ("@type wonderland", "installer: the account is alice", 10),
+    ("@sendkey ret", "installer: installing on vda (no Linux) for alice", 10),
     ("@sendkey shift", "installer: copying the system to vda2", 120),
     ("@sendkey shift", "installer: done", 300),
     ("@sendkey alt-f4", "desktop: asked window", 10),
@@ -933,20 +975,28 @@ INSTALL_COMMANDS = [
     ("@sendkey ctrl-u", None, 2),
     # Installing again from the shell: what's mounted from the disk (the new
     # system, its FAT32 boot partition) is ejected first.
-    ("install --yes --no-linux vda", "[storage] vda ejected", 20),
+    ("echo wonderland | install --yes --no-linux --user alice --full Alice --password-stdin vda",
+     "[storage] vda ejected", 20),
     ("@sendkey shift", "done: Vexa is on vda", 300, 2),  # (The first: the Installer's.)
 ]
 
 # Starting from that disk (--installed DISK, no CD): the root file system is
 # on it, and what's written there is still there the next time (--boot 2).
 INSTALLED_COMMANDS = [
+    # The account the installer made has a password: the console asks for it
+    # (the login screen at boot already did).
+    ("@type alice", "Password: ", 10),
+    ("@type wonderland", "vinit: alice logged in on the console", 20),
+    ("id", "uid=1000(alice) gid=1000(alice) groups=10(admin)", 10),
     ("cat /etc/installed", "installed on vda", 10),
     ("df", "ext2", 10),
     ("ls /cdrom", "ls: /cdrom: ", 10),
     # (@BOOT@: this boot's number. The first one's line shows the next boot
     # kept it.)
-    ("echo boot @BOOT@ >> /home/note.txt", None, 10),
-    ("cat /home/note.txt", "boot 1", 10),
+    ("echo boot @BOOT@ >> /home/alice/note.txt", None, 10),
+    ("cat /home/alice/note.txt", "boot 1", 10),
+    ("ls -l /bin/sudo", "-rwsr-xr-x  root", 10),
+    ("cat /etc/shadow", "permission denied", 10),
     ("desktop", 'desktop: window 1 "Terminal"', 30),
     ("@sendkey ctrl-alt-q", "desktop: asking before leaving", 20),
     ("@sendkey ret", "desktop: back to the console", 20),
@@ -1123,6 +1173,16 @@ def main():
             if not wait_for(log_path, text, BOOT_TIMEOUT):
                 failures.append("boot: missing " + repr(text))
                 break
+        if args.installed and not failures:
+            # The installed system's account has a password: the login screen.
+            if not wait_for(log_path, "desktop: login screen", 30):
+                failures.append("boot: no login screen")
+            else:
+                time.sleep(1)
+                for key in keys_for("wonderland\n"):
+                    monitor.command("sendkey " + key)
+                if not wait_for(log_path, "desktop: logged in as alice", 30):
+                    failures.append("boot: couldn't log in at the login screen")
         if not failures:
             for attempt in range(3):
                 time.sleep(1)

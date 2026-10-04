@@ -4,6 +4,7 @@
 #include <vexa/files.h>
 #include <vexa/gui.h>
 #include <vexa/syscall.h>
+#include <vexa/users.h>
 
 /*
  * Open and Save dialogs (see <vexa/gui.h>): a window with the places on the
@@ -40,12 +41,18 @@ static struct dialog {
 } d;
 
 static const struct {
-    const char *label, *path;
+    const char *label, *path; /* (A path without a '/' is in the home folder; "" is it.) */
 } places[] = {
-    {"Home", "/home"}, {"Desktop", "/home/Desktop"}, {"Documents", "/home/Documents"},
-    {"Pictures", "/home/Pictures"}, {"Wallpapers", "/share/pictures"}, {"Vexa", "/"},
+    {"Home", ""}, {"Desktop", "Desktop"}, {"Documents", "Documents"},
+    {"Pictures", "Pictures"}, {"Wallpapers", "/share/pictures"}, {"Vexa", "/"},
     {"Temporary", "/tmp"},
 };
+
+static const char *place_path(int i) {
+    return places[i].path[0] == '/' ? places[i].path
+           : places[i].path[0]      ? vx_home_folder(places[i].path)
+                                    : vx_home();
+}
 #define PLACE_COUNT (int)(sizeof(places) / sizeof(places[0]))
 
 static struct vx_image *folder_icon, *file_icon;
@@ -177,7 +184,7 @@ static void draw(void) {
     vx_draw_text(s, 12, 12, "Places", VX_COLOR_DIM, VX_TRANSPARENT);
     for (int i = 0; i < PLACE_COUNT; i++) {
         int y = TOP + i * ROW;
-        if (!strcmp(d.folder, places[i].path)) {
+        if (!strcmp(d.folder, place_path(i))) {
             vx_draw_selection(s, 4, y, SIDEBAR - 8, ROW - 2);
         }
         if (folder_icon) {
@@ -296,7 +303,7 @@ static void pointer(const struct vx_gui_event *e, int *held) {
     if (e->x < SIDEBAR) {
         int i = (e->y - TOP) / ROW;
         if (e->y >= TOP && i >= 0 && i < PLACE_COUNT) {
-            go(places[i].path);
+            go(place_path(i));
         }
         return;
     }
@@ -343,10 +350,10 @@ static bool run(bool save, const char *title, const char *folder, const char *na
     if (name) {
         snprintf(d.name, sizeof(d.name), "%s", name);
     }
-    snprintf(d.folder, sizeof(d.folder), "%s", folder && folder[0] ? folder : "/home");
+    snprintf(d.folder, sizeof(d.folder), "%s", folder && folder[0] ? folder : vx_home());
     struct vx_stat st;
     if (vx_stat(d.folder, &st) || st.type != VX_TYPE_DIRECTORY) {
-        snprintf(d.folder, sizeof(d.folder), "/home");
+        snprintf(d.folder, sizeof(d.folder), "%s", vx_home());
     }
     read_folder();
     d.window = vx_window_create(title ? title : save ? "Save" : "Open", WIDTH, HEIGHT);

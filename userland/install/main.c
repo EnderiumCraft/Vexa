@@ -21,6 +21,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <vexa/syscall.h>
+#include <vexa/users.h>
 #include "install.h"
 
 #define ESP_BYTES (128ULL * 1024 * 1024)
@@ -203,9 +204,64 @@ static void make_limine_conf(const uint8_t uuid[16]) {
     step("the system's UUID is %s", id);
 }
 
+/* The new system's accounts: root, and `name` as its administrator (in
+ * place of the live CD's "vexa"). */
+static void write_accounts(const char *target, const char *name, const char *full_name,
+                           const char *password) {
+    char path[300], text[1024], hash[VX_HASH_MAX] = "";
+    if (password[0]) {
+        vx_password_make(password, hash);
+    }
+    snprintf(path, sizeof(path), "%s/etc/passwd", target);
+    snprintf(text, sizeof(text),
+             "root:x:0:0:Administrator:/root:/bin/vsh\n%s:x:1000:1000:%s:/home/%s:/bin/vsh\n"
+             "nobody:x:65534:65534:Nobody:/:/bin/vsh\n",
+             name, full_name, name);
+    write_whole(path, text);
+    snprintf(path, sizeof(path), "%s/etc/group", target);
+    snprintf(text, sizeof(text),
+             "root:x:0:\nadmin:x:10:%s\nusers:x:100:\n%s:x:1000:\nnogroup:x:65534:\n", name,
+             name);
+    write_whole(path, text);
+    snprintf(path, sizeof(path), "%s/etc/shadow", target);
+    snprintf(text, sizeof(text), "root::\n%s:%s:\nnobody:*:\n", name, hash);
+    write_whole(path, text);
+    chmod(path, 0600);
+    memset(text, 0, sizeof(text));
+    memset(hash, 0, sizeof(hash));
+    snprintf(path, sizeof(path), "%s/home/%s", target, name);
+    mkdir(path, 0755);
+    chown(path, 1000, 1000);
+}
+
+static bool account_name_ok(const char *name) {
+    if (!name[0] || strlen(name) >= 32 || name[0] < 'a' || name[0] > 'z') {
+        return false;
+    }
+    for (const char *c = name; *c; c++) {
+        if (!((*c >= 'a' && *c <= 'z') || (*c >= '0' && *c <= '9') || *c == '-' || *c == '_')) {
+            return false;
+        }
+    }
+    return true;
+}
+
+#define USAGE "usage: install --list | install [--yes] [--no-linux] " \
+              "[--user NAME [--full NAME] [--password-stdin]] DISK\n"
+
 int main(int argc, char **argv) {
-    bool yes = false, with_linux = true;
-    const char *disk = NULL;
+    bool yes = false, with_linux = true, password_stdin = false;
+    const char *disk = NULL, *user = NULL, *full_name = "";
+    /* Set-user-id root: for root and the administrators only. */
+    struct vx_credentials me;
+    struct vx_user caller;
+    vx_credentials(NULL, &me);
+    if (me.uid != 0 &&
+        (vx_user_by_id(me.uid, &caller) || !vx_user_is_admin(caller.name))) {
+        fprintf(stderr, "install: only administrators may install Vexa\n");
+        return 1;
+    }
+    umask(0); /* Files are copied with exactly their permission bits. */
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--list")) {
             list_disks();
@@ -214,18 +270,33 @@ int main(int argc, char **argv) {
             yes = true;
         } else if (!strcmp(argv[i], "--no-linux")) {
             with_linux = false;
+        } else if (!strcmp(argv[i], "--user") && i + 1 < argc) {
+            user = argv[++i];
+        } else if (!strcmp(argv[i], "--full") && i + 1 < argc) {
+            full_name = argv[++i];
+        } else if (!strcmp(argv[i], "--password-stdin")) {
+            password_stdin = true;
         } else if (argv[i][0] == '-') {
-            fprintf(stderr, "usage: install --list | install [--yes] [--no-linux] DISK\n");
+            fprintf(stderr, USAGE);
             return 2;
         } else {
             disk = !strncmp(argv[i], "/dev/", 5) ? argv[i] + 5 : argv[i];
         }
     }
     if (!disk) {
-        fprintf(stderr, "usage: install --list | install [--yes] [--no-linux] DISK\n"
-                        "The disks Vexa could go on:\n");
+        fprintf(stderr, USAGE "The disks Vexa could go on:\n");
         list_disks();
         return 2;
+    }
+    if (user && (!account_name_ok(user) || strchr(full_name, ':') || strchr(full_name, '\n'))) {
+        fail("%s isn't a name for an account (small letters, digits, - and _)", user);
+    }
+    char password[256] = "";
+    if (user && password_stdin) {
+        if (!fgets(password, sizeof(password), stdin)) {
+            password[0] = '\0';
+        }
+        password[strcspn(password, "\r\n")] = '\0';
     }
 
     char path[64];
@@ -330,6 +401,11 @@ int main(int argc, char **argv) {
              (long long)vx_time());
     snprintf(path, sizeof(path), "%s/etc/installed", target);
     write_whole(path, note);
+    if (user) {
+        step("making the account %s", user);
+        write_accounts(target, user, full_name, password);
+        memset(password, 0, sizeof(password));
+    }
 
     /* 5. Limine's BIOS boot code (UEFI finds EFI/BOOT/BOOTX64.EFI by itself). */
     step("putting the BIOS boot code on %s", disk);

@@ -150,7 +150,7 @@ static const uint8_t errno_of_vx[] = {
     [VX_EALREADY] = LE_EALREADY, [VX_EMSGSIZE] = LE_EMSGSIZE,
     [VX_EDESTADDRREQ] = LE_EDESTADDRREQ, [VX_ENOPROTOOPT] = LE_ENOPROTOOPT,
     [VX_ECONNABORTED] = LE_ECONNABORTED, [VX_EHOSTUNREACH] = LE_EHOSTUNREACH,
-    [VX_ENODEV] = LE_ENODEV,
+    [VX_ENODEV] = LE_ENODEV, [VX_EPERM] = LE_EPERM,
 };
 
 /* Converts a core result (negative VX_E* on failure) into a Linux one. */
@@ -912,6 +912,8 @@ static void fill_stat(const struct vx_stat *vx, struct linux_stat *st) {
     st->blksize = 4096;
     st->blocks = (int64_t)((vx->size + 511) / 512);
     st->atime = st->mtime = st->ctime = vx->modified;
+    st->uid = vx->uid;
+    st->gid = vx->gid;
     if (vx->type == VX_TYPE_CHAR_DEVICE) {
         st->rdev = vx->inode;
     }
@@ -997,18 +999,10 @@ static int64_t access_at(int64_t dirfd, uint64_t user_path, uint64_t mode) {
     if (error) {
         return error;
     }
-    struct vx_stat vx;
-    error = vfs_stat(path, strlen(path), &vx);
+    /* F_OK (0) only asks whether it exists. */
+    error = vfs_access(path, strlen(path), (uint32_t)mode & 7);
     kfree(path);
-    if (error) {
-        return lx(error);
-    }
-    /* Everyone is root: reading and writing are always allowed, running
-     * needs an execute bit (or a directory). */
-    if ((mode & LINUX_X_OK) && vx.type != VX_TYPE_DIRECTORY && !(vx.mode & 0111)) {
-        return -LE_EACCES;
-    }
-    return 0;
+    return lx(error);
 }
 
 static int64_t sys_access(struct interrupt_frame *f, uint64_t path, uint64_t mode, uint64_t a2,
@@ -1040,6 +1034,50 @@ static int64_t sys_chmod(struct interrupt_frame *f, uint64_t path, uint64_t mode
 static int64_t sys_fchmodat(struct interrupt_frame *f, uint64_t dirfd, uint64_t path,
                             uint64_t mode, uint64_t a3, uint64_t a4, uint64_t a5) {
     return chmod_at((int)dirfd, path, mode);
+}
+
+static int64_t chown_at(int64_t dirfd, uint64_t user_path, uint64_t uid, uint64_t gid,
+                        uint64_t flags) {
+    char *path;
+    int64_t error = path_at(dirfd, user_path, &path);
+    if (error) {
+        return error;
+    }
+    error = lx(vfs_chown(path, strlen(path), (uint32_t)uid, (uint32_t)gid,
+                         !(flags & LINUX_AT_SYMLINK_NOFOLLOW)));
+    kfree(path);
+    return error;
+}
+
+static int64_t sys_chown(struct interrupt_frame *f, uint64_t path, uint64_t uid, uint64_t gid,
+                         uint64_t a3, uint64_t a4, uint64_t a5) {
+    return chown_at(LINUX_AT_FDCWD, path, uid, gid, 0);
+}
+
+static int64_t sys_lchown(struct interrupt_frame *f, uint64_t path, uint64_t uid, uint64_t gid,
+                          uint64_t a3, uint64_t a4, uint64_t a5) {
+    return chown_at(LINUX_AT_FDCWD, path, uid, gid, LINUX_AT_SYMLINK_NOFOLLOW);
+}
+
+static int64_t sys_fchown(struct interrupt_frame *f, uint64_t fd, uint64_t uid, uint64_t gid,
+                          uint64_t a3, uint64_t a4, uint64_t a5) {
+    int64_t error;
+    struct file *file = get_file(fd, 0, &error);
+    if (!file) {
+        return error == -LE_ESPIPE ? 0 : error;
+    }
+    error = lx(vfs_file_chown(file, (uint32_t)uid, (uint32_t)gid));
+    vfs_close(file);
+    return error;
+}
+
+static int64_t sys_fchownat(struct interrupt_frame *f, uint64_t dirfd, uint64_t path,
+                            uint64_t uid, uint64_t gid, uint64_t flags, uint64_t a5) {
+    char first;
+    if ((flags & LINUX_AT_EMPTY_PATH) && copy_from_user(&first, path, 1) && first == '\0') {
+        return sys_fchown(f, dirfd, uid, gid, 0, 0, 0);
+    }
+    return chown_at((int)dirfd, path, uid, gid, flags);
 }
 
 static int64_t sys_fchmod(struct interrupt_frame *f, uint64_t fd, uint64_t mode, uint64_t a2,
@@ -2314,17 +2352,157 @@ static int64_t sys_getppid(struct interrupt_frame *f, uint64_t a0, uint64_t a1, 
     return parent ? parent->id : 1;
 }
 
+/* ---- Users and groups (struct cred) ---- */
+
 static int64_t sys_zero(struct interrupt_frame *f, uint64_t a0, uint64_t a1, uint64_t a2,
                         uint64_t a3, uint64_t a4, uint64_t a5) {
-    return 0; /* getuid and friends: everyone is root, for now. */
+    return 0;
 }
 
-static int64_t sys_getresid(struct interrupt_frame *f, uint64_t r, uint64_t e, uint64_t s,
-                            uint64_t a3, uint64_t a4, uint64_t a5) {
-    uint32_t zero = 0;
-    return copy_to_user(r, &zero, 4) && copy_to_user(e, &zero, 4) && copy_to_user(s, &zero, 4)
+static int64_t sys_getuid(struct interrupt_frame *f, uint64_t a0, uint64_t a1, uint64_t a2,
+                          uint64_t a3, uint64_t a4, uint64_t a5) {
+    return me()->cred.uid;
+}
+
+static int64_t sys_geteuid(struct interrupt_frame *f, uint64_t a0, uint64_t a1, uint64_t a2,
+                           uint64_t a3, uint64_t a4, uint64_t a5) {
+    return me()->cred.euid;
+}
+
+static int64_t sys_getgid(struct interrupt_frame *f, uint64_t a0, uint64_t a1, uint64_t a2,
+                          uint64_t a3, uint64_t a4, uint64_t a5) {
+    return me()->cred.gid;
+}
+
+static int64_t sys_getegid(struct interrupt_frame *f, uint64_t a0, uint64_t a1, uint64_t a2,
+                           uint64_t a3, uint64_t a4, uint64_t a5) {
+    return me()->cred.egid;
+}
+
+static int64_t put_ids(uint64_t r, uint64_t e, uint64_t s, uint32_t real, uint32_t effective,
+                       uint32_t saved) {
+    return copy_to_user(r, &real, 4) && copy_to_user(e, &effective, 4) &&
+                   copy_to_user(s, &saved, 4)
                ? 0
                : -LE_EFAULT;
+}
+
+static int64_t sys_getresuid(struct interrupt_frame *f, uint64_t r, uint64_t e, uint64_t s,
+                             uint64_t a3, uint64_t a4, uint64_t a5) {
+    struct cred *cred = &me()->cred;
+    return put_ids(r, e, s, cred->uid, cred->euid, cred->suid);
+}
+
+static int64_t sys_getresgid(struct interrupt_frame *f, uint64_t r, uint64_t e, uint64_t s,
+                             uint64_t a3, uint64_t a4, uint64_t a5) {
+    struct cred *cred = &me()->cred;
+    return put_ids(r, e, s, cred->gid, cred->egid, cred->sgid);
+}
+
+/* setresuid/setresgid: -1 keeps an id. Without root, each new id must be
+ * one of the three it has. */
+static int64_t set_ids(bool users, uint64_t r, uint64_t e, uint64_t s) {
+    struct cred *cred = &me()->cred;
+    uint32_t *ids[3] = {users ? &cred->uid : &cred->gid, users ? &cred->euid : &cred->egid,
+                        users ? &cred->suid : &cred->sgid};
+    uint32_t want[3] = {(uint32_t)r, (uint32_t)e, (uint32_t)s};
+    for (int i = 0; i < 3; i++) {
+        if (want[i] != VX_ID_KEEP && cred->euid != 0 && want[i] != *ids[0] &&
+            want[i] != *ids[1] && want[i] != *ids[2]) {
+            return -LE_EPERM;
+        }
+    }
+    for (int i = 0; i < 3; i++) {
+        if (want[i] != VX_ID_KEEP) {
+            *ids[i] = want[i];
+        }
+    }
+    return 0;
+}
+
+static int64_t sys_setresuid(struct interrupt_frame *f, uint64_t r, uint64_t e, uint64_t s,
+                             uint64_t a3, uint64_t a4, uint64_t a5) {
+    return set_ids(true, r, e, s);
+}
+
+static int64_t sys_setresgid(struct interrupt_frame *f, uint64_t r, uint64_t e, uint64_t s,
+                             uint64_t a3, uint64_t a4, uint64_t a5) {
+    return set_ids(false, r, e, s);
+}
+
+/* setreuid/setregid: setting the real id, or the effective one to anything
+ * but the real id, also sets the saved id to the new effective id (POSIX). */
+static int64_t set_real_effective(bool users, uint64_t r, uint64_t e) {
+    struct cred *cred = &me()->cred;
+    uint32_t real = (uint32_t)r, effective = (uint32_t)e;
+    uint32_t old_real = users ? cred->uid : cred->gid;
+    uint32_t old_effective = users ? cred->euid : cred->egid;
+    uint32_t saved = VX_ID_KEEP;
+    if (real != VX_ID_KEEP || (effective != VX_ID_KEEP && effective != old_real)) {
+        saved = effective != VX_ID_KEEP ? effective : old_effective;
+    }
+    return set_ids(users, real, effective, saved);
+}
+
+static int64_t sys_setreuid(struct interrupt_frame *f, uint64_t r, uint64_t e, uint64_t a2,
+                            uint64_t a3, uint64_t a4, uint64_t a5) {
+    return set_real_effective(true, r, e);
+}
+
+static int64_t sys_setregid(struct interrupt_frame *f, uint64_t r, uint64_t e, uint64_t a2,
+                            uint64_t a3, uint64_t a4, uint64_t a5) {
+    return set_real_effective(false, r, e);
+}
+
+static int64_t sys_setuid(struct interrupt_frame *f, uint64_t id, uint64_t a1, uint64_t a2,
+                          uint64_t a3, uint64_t a4, uint64_t a5) {
+    struct cred *cred = &me()->cred;
+    if (cred->euid == 0) {
+        cred->uid = cred->euid = cred->suid = (uint32_t)id; /* Root gives everything up. */
+        return 0;
+    }
+    return set_ids(true, VX_ID_KEEP, id, VX_ID_KEEP);
+}
+
+static int64_t sys_setgid(struct interrupt_frame *f, uint64_t id, uint64_t a1, uint64_t a2,
+                          uint64_t a3, uint64_t a4, uint64_t a5) {
+    struct cred *cred = &me()->cred;
+    if (cred->euid == 0) {
+        cred->gid = cred->egid = cred->sgid = (uint32_t)id;
+        return 0;
+    }
+    return set_ids(false, VX_ID_KEEP, id, VX_ID_KEEP);
+}
+
+static int64_t sys_getgroups(struct interrupt_frame *f, uint64_t size, uint64_t list,
+                             uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5) {
+    struct cred *cred = &me()->cred;
+    if (size == 0) {
+        return cred->group_count;
+    }
+    if (size < cred->group_count) {
+        return -LE_EINVAL;
+    }
+    return copy_to_user(list, cred->groups, cred->group_count * 4) ? (int64_t)cred->group_count
+                                                                   : -LE_EFAULT;
+}
+
+static int64_t sys_setgroups(struct interrupt_frame *f, uint64_t size, uint64_t list,
+                             uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5) {
+    struct cred *cred = &me()->cred;
+    if (cred->euid != 0) {
+        return -LE_EPERM;
+    }
+    if (size > VX_GROUPS_MAX) {
+        return -LE_EINVAL;
+    }
+    uint32_t groups[VX_GROUPS_MAX] = {0};
+    if (size && !copy_from_user(groups, list, size * 4)) {
+        return -LE_EFAULT;
+    }
+    memcpy(cred->groups, groups, sizeof(groups));
+    cred->group_count = (uint32_t)size;
+    return 0;
 }
 
 static int64_t sys_getpgid(struct interrupt_frame *f, uint64_t pid, uint64_t a1, uint64_t a2,
@@ -2552,11 +2730,12 @@ static int64_t send_signal(int64_t pid, uint64_t signal) {
         if (!target) {
             return -LE_ESRCH;
         }
-        if (signal) {
+        int64_t error = process_may_signal(target) ? 0 : -LE_EPERM;
+        if (signal && !error) {
             signal_send(target, (int)signal);
         }
         object_put(&target->object);
-        return 0;
+        return error;
     }
     uint32_t group = pid == 0 ? me()->group : (uint32_t)-pid;
     if (pid == -1) {
@@ -3164,6 +3343,9 @@ static int64_t sys_sethostname(struct interrupt_frame *f, uint64_t name, uint64_
     if (!copy_from_user(text, name, length)) {
         return -LE_EFAULT;
     }
+    if (me()->cred.euid != 0) {
+        return -LE_EPERM;
+    }
     return hostname_set(text, length) ? -LE_EINVAL : 0;
 }
 
@@ -3569,33 +3751,33 @@ static const linux_fn syscalls[] = {
     CALL(readlink, sys_readlink),
     CALL(chmod, sys_chmod),
     CALL(fchmod, sys_fchmod),
-    CALL(chown, sys_accept_quietly),
-    CALL(fchown, sys_accept_quietly),
-    CALL(lchown, sys_accept_quietly),
+    CALL(chown, sys_chown),
+    CALL(fchown, sys_fchown),
+    CALL(lchown, sys_lchown),
     CALL(umask, sys_umask),
     CALL(gettimeofday, sys_gettimeofday),
     CALL(getrlimit, sys_getrlimit),
     CALL(getrusage, sys_getrusage),
     CALL(sysinfo, sys_sysinfo),
     CALL(times, sys_times),
-    CALL(getuid, sys_zero),
-    CALL(getgid, sys_zero),
-    CALL(setuid, sys_zero),
-    CALL(setgid, sys_zero),
-    CALL(geteuid, sys_zero),
-    CALL(getegid, sys_zero),
+    CALL(getuid, sys_getuid),
+    CALL(getgid, sys_getgid),
+    CALL(setuid, sys_setuid),
+    CALL(setgid, sys_setgid),
+    CALL(geteuid, sys_geteuid),
+    CALL(getegid, sys_getegid),
     CALL(setpgid, sys_setpgid),
     CALL(getppid, sys_getppid),
     CALL(getpgrp, sys_getpgrp),
     CALL(setsid, sys_setsid),
-    CALL(setreuid, sys_zero),
-    CALL(setregid, sys_zero),
-    CALL(getgroups, sys_zero),
-    CALL(setgroups, sys_zero),
-    CALL(setresuid, sys_zero),
-    CALL(getresuid, sys_getresid),
-    CALL(setresgid, sys_zero),
-    CALL(getresgid, sys_getresid),
+    CALL(setreuid, sys_setreuid),
+    CALL(setregid, sys_setregid),
+    CALL(getgroups, sys_getgroups),
+    CALL(setgroups, sys_setgroups),
+    CALL(setresuid, sys_setresuid),
+    CALL(getresuid, sys_getresuid),
+    CALL(setresgid, sys_setresgid),
+    CALL(getresgid, sys_getresgid),
     CALL(getpgid, sys_getpgid),
     CALL(getsid, sys_getsid),
     CALL(rt_sigpending, sys_rt_sigpending),
@@ -3632,7 +3814,7 @@ static const linux_fn syscalls[] = {
     CALL(openat, sys_openat),
     CALL(mkdirat, sys_mkdirat),
     CALL(mknodat, sys_not_permitted),
-    CALL(fchownat, sys_accept_quietly),
+    CALL(fchownat, sys_fchownat),
     CALL(futimesat, sys_accept_quietly),
     CALL(newfstatat, sys_newfstatat),
     CALL(unlinkat, sys_unlinkat),

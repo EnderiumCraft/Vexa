@@ -13,6 +13,7 @@
 #include <vexa/gui.h>
 #include <vexa/syscall.h>
 #include <vexa/time.h>
+#include <vexa/users.h>
 
 #define WIDTH 780
 #define HEIGHT 520
@@ -20,7 +21,7 @@
 #define TOP 44
 #define ITEM 52
 #define PAD 16
-#define FOLDER "/home/Notes"
+#define FOLDER vx_home_folder("Notes")
 #define MAX_NOTES 256
 #define LINE_HEIGHT 19
 
@@ -142,7 +143,7 @@ static void filter(void) {
 }
 
 static void read_notes(void) {
-    vx_mkdir("/home");
+    vx_mkdir(vx_home());
     vx_mkdir(FOLDER);
     note_count = 0;
     int handle = vx_open(FOLDER, VX_OPEN_READ);

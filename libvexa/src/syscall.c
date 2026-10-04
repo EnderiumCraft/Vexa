@@ -271,6 +271,32 @@ long vx_priority(long process_id, int nice, int *now) {
     return syscall3(VX_SYS_PRIORITY, process_id, (long)nice, (long)now);
 }
 
+long vx_credentials(const struct vx_credentials *set, struct vx_credentials *now) {
+    return syscall2(VX_SYS_CREDENTIALS, (long)set, (long)now);
+}
+
+long vx_chown(const char *path, unsigned int uid, unsigned int gid, unsigned int flags) {
+    return syscall4(VX_SYS_CHOWN, (long)path, (long)strlen(path),
+                    (long)((unsigned long)uid | (unsigned long)gid << 32), (long)flags);
+}
+
+long vx_chmod(const char *path, unsigned int mode, unsigned int flags) {
+    return syscall4(VX_SYS_CHMOD, (long)path, (long)strlen(path), (long)mode, (long)flags);
+}
+
+long vx_handle_chown(int handle, unsigned int uid, unsigned int gid) {
+    return syscall4(VX_SYS_CHOWN, (long)handle, 0,
+                    (long)((unsigned long)uid | (unsigned long)gid << 32), VX_AT_HANDLE);
+}
+
+long vx_handle_chmod(int handle, unsigned int mode) {
+    return syscall4(VX_SYS_CHMOD, (long)handle, 0, (long)mode, VX_AT_HANDLE);
+}
+
+long vx_access(const char *path, unsigned int want) {
+    return syscall3(VX_SYS_ACCESS, (long)path, (long)strlen(path), (long)want);
+}
+
 long vx_set_thread_pointer(void *address) {
     return syscall1(VX_SYS_SET_THREAD_POINTER, address);
 }
@@ -290,7 +316,7 @@ const char *vx_strerror(long error) {
     case VX_EISDIR: return "is a directory";
     case VX_ENOTEMPTY: return "directory not empty";
     case VX_EBADF: return "bad handle";
-    case VX_EACCES: return "not allowed";
+    case VX_EACCES: return "permission denied";
     case VX_ENOSPC: return "no space left";
     case VX_EIO: return "I/O error";
     case VX_ENAMETOOLONG: return "name too long";
@@ -329,6 +355,7 @@ const char *vx_strerror(long error) {
     case VX_ECONNABORTED: return "connection aborted";
     case VX_EHOSTUNREACH: return "host unreachable";
     case VX_ENODEV: return "no such device";
+    case VX_EPERM: return "operation not permitted";
     default: return "error";
     }
 }

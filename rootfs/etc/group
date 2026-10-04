@@ -1,0 +1,5 @@
+root:x:0:
+admin:x:10:vexa
+users:x:100:
+vexa:x:1000:
+nogroup:x:65534:

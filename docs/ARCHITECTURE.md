@@ -203,6 +203,36 @@ partition table again through controls on its `/dev` node (`VX_BLOCK_INFO`,
 `VX_BLOCK_RESCAN`); a rescan mounts the new partitions. The Installer app runs
 `/bin/install` and reads its steps (`step:`, `progress:`, `error:` lines) from a pipe.
 
+**Users and permissions.** Each process has credentials (`struct cred`,
+`<vexa/cred.h>`): real, effective and saved user and group ids and up to 16 other
+groups. A spawned process gets its parent's effective ids as all three; a forked one
+copies them; a program with the set-user-id (or set-group-id) bit runs as its file's
+owner (or group): `apply_set_ids` in `core/process.c`, not for scripts. Kernel threads
+are root. Vnodes have an owner and a group: ext2 keeps them in the inode (with Linux's
+high 16 bits in `osd2`), tmpfs in memory, the initramfs gives the tar archive's
+(root's), devfs makes devices `0666` and whole disks `0660` for group 10 (admin), and
+FAT, exFAT and CDs have none (root's; FAT files `0777`). The VFS checks every
+operation against the effective ids (`vnode_access`): search permission on each folder
+a path goes through, read, write or execute to open, write and search on a folder to
+make, remove or rename in it, the sticky bit's owner rule, and owner-only `chmod`;
+`chown` is root's (or the owner's, to a group of their own). New nodes belong to
+their maker, in the folder's group when it is set-group-id. `VX_SYS_CREDENTIALS`,
+`VX_SYS_CHOWN`, `VX_SYS_CHMOD` and `VX_SYS_ACCESS` are the native calls; the Linux
+subsystem's `getuid`/`setresuid`/`setgroups`/`chown`/`access`... use the same
+credentials. Signals (and `vx_priority`) reach only one's own processes, unless one
+is root.
+
+The accounts themselves are files, read by libvexa (`<vexa/users.h>`): `/etc/passwd`,
+`/etc/group` and `/etc/shadow` (`0600`, salted SHA-256 hashes). Set-user-id programs do
+what needs root for others: `vauth` checks a password (the lock screen), `sudo`,
+`accounts` (adding, removing, passwords), `install` and `hostname`, each checking who
+asked. vinit (root) makes each account's home folder; the desktop starts as root,
+logs someone in (by itself when there's one account without a password, otherwise
+through the login screen, `desktop/lock.c`), then becomes them with
+`vx_become_user`; logging out ends it with `DESKTOP_EXIT_LOGOUT`, and vinit starts it
+again. Once an account has a password, vinit's console asks for a login too, and
+starts that account's shell through `sudo -u`.
+
 ## Graphics and input today
 
 - **Devices with state per open file.** `vnode_ops` has optional `open`, `close`,
@@ -344,8 +374,8 @@ partition table again through controls on its `/dev` node (`VX_BLOCK_INFO`,
   (`Files.vxapp/Contents/Resources`), makes thumbnails of pictures one at a time when
   it has nothing else to do, and works on whole folders with `<vexa/files.h>` (`vx_copy_tree`,
   `vx_remove_tree`, `vx_move`, which copies and removes across file systems,
-  `vx_tree_size`, `vx_unique_name`); its clipboard is a file (`/tmp/.files-clipboard`)
-  so every Files window shares it, deleting moves things to `/Trash`, and its
+  `vx_tree_size`, `vx_unique_name`); its clipboard is a file (`/tmp/.files-clipboard-UID`, each account's own)
+  so every Files window shares it, deleting moves things to the account's Trash (`$HOME/.Trash`), and its
   right-click menus, like the desktop's, are `vx_draw_menu` (`<vexa/gui.h>`).
 - **X** runs as Linux programs. Xvexa (`third_party/xvexa`) is a kdrive X server
   built into X.Org's source tree, and it talks the desktop protocol itself, so the

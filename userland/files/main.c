@@ -28,11 +28,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <unistd.h>
 #include <vexa/app.h>
 #include <vexa/files.h>
 #include <vexa/gui.h>
 #include <vexa/settings.h>
 #include <vexa/syscall.h>
+#include <vexa/users.h>
 
 #define WIDTH 780
 #define HEIGHT 500
@@ -45,8 +47,8 @@
 #define CELL_H 90
 #define MAX_ENTRIES 1024
 #define DOUBLE_CLICK_MS double_click_ms /* Settings, Mouse & Keyboard. */
-#define TRASH "/Trash"
-#define CLIPBOARD "/tmp/.files-clipboard"
+#define TRASH trash_folder /* "$HOME/.Trash" (main sets it). */
+#define CLIPBOARD clipboard_file /* "/tmp/.files-clipboard-UID": each account's own. */
 #define RESOURCES "/apps/Files.vxapp/Contents/Resources"
 #define MAX_HISTORY 32
 #define MAX_THUMB_BYTES (8 * 1024 * 1024)
@@ -212,6 +214,10 @@ struct place {
     char path[256];
     struct vx_image **icon;
 };
+/* The account's own folders (main sets them). */
+static char home_folder[256], desktop_folder[300], documents_folder[300], pictures_folder[300];
+static char trash_folder[300], clipboard_file[64];
+
 #define MAX_PLACES 16
 static struct place places[MAX_PLACES];
 static int place_count, disks_start;
@@ -222,8 +228,8 @@ static void find_places(void) {
         const char *label, *path, *icon;
     } fixed[] = {
         {"Vexa", "/", "computer"}, {"Apps", VX_APPS_DIR, "apps"},
-        {"Home", "/home", "folder"}, {"Desktop", "/home/Desktop", "folder"},
-        {"Documents", "/home/Documents", "folder"}, {"Pictures", "/home/Pictures", "pictures"},
+        {"Home", home_folder, "folder"}, {"Desktop", desktop_folder, "folder"},
+        {"Documents", documents_folder, "folder"}, {"Pictures", pictures_folder, "pictures"},
         {"Wallpapers", "/share/pictures", "pictures"}, {"Temporary", "/tmp", "folder"},
         {"Trash", TRASH, "trash"},
     };
@@ -2237,6 +2243,12 @@ int main(int argc, char **argv) {
         fprintf(stderr, "files: no desktop to open a window on\n");
         return 1;
     }
+    snprintf(home_folder, sizeof(home_folder), "%s", vx_home());
+    vx_home_path(desktop_folder, sizeof(desktop_folder), "Desktop");
+    vx_home_path(documents_folder, sizeof(documents_folder), "Documents");
+    vx_home_path(pictures_folder, sizeof(pictures_folder), "Pictures");
+    vx_home_path(trash_folder, sizeof(trash_folder), VX_TRASH_NAME);
+    snprintf(clipboard_file, sizeof(clipboard_file), "/tmp/.files-clipboard-%u", getuid());
     load_resources();
     read_settings();
     go_to(argc > 1 ? argv[1] : "/", false);

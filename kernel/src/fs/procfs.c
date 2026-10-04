@@ -185,11 +185,13 @@ static void gen_status(struct text *text, struct process *process) {
     memory_of(process, &size, &resident);
     struct process *parent = process->parent;
     text_printf(text,
-                "Name:\t%s\nState:\t%s\nTgid:\t%u\nPid:\t%u\nPPid:\t%u\nUid:\t0\t0\t0\t0\n"
-                "Gid:\t0\t0\t0\t0\nVmSize:\t%lu kB\nVmRSS:\t%lu kB\nThreads:\t%u\n"
+                "Name:\t%s\nState:\t%s\nTgid:\t%u\nPid:\t%u\nPPid:\t%u\nUid:\t%u\t%u\t%u\t%u\n"
+                "Gid:\t%u\t%u\t%u\t%u\nVmSize:\t%lu kB\nVmRSS:\t%lu kB\nThreads:\t%u\n"
                 "SigPnd:\t%016lx\nPersonality:\t%s\n",
                 process->name, state_name(state_letter(process, &facts)), process->id,
-                process->id, parent ? parent->id : 0, size / 1024, resident / 1024,
+                process->id, parent ? parent->id : 0, process->cred.uid, process->cred.euid,
+                process->cred.suid, process->cred.euid, process->cred.gid, process->cred.egid,
+                process->cred.sgid, process->cred.egid, size / 1024, resident / 1024,
                 process->thread_count, process->pending_signals, process->personality ? process->personality->name : "-");
 }
 

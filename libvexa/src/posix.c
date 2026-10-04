@@ -35,6 +35,7 @@ static const unsigned char errno_of_vx[] = {
     [VX_EDESTADDRREQ] = EDESTADDRREQ, [VX_ENOPROTOOPT] = ENOPROTOOPT,
     [VX_ECONNABORTED] = ECONNABORTED, [VX_EHOSTUNREACH] = EHOSTUNREACH,
     [VX_ENODEV] = ENODEV,
+    [VX_EPERM] = EPERM,
 };
 
 int __vx_errno_of(long vx_error) {
@@ -55,6 +56,8 @@ int *__errno_location(void) {
 }
 
 /* ---- Files ---- */
+
+static mode_t current_umask = 022;
 
 int open(const char *path, int flags, ...) {
     unsigned vx = 0;
@@ -90,7 +93,20 @@ int open(const char *path, int flags, ...) {
             return -1;
         }
     }
+    bool creating = false;
+    mode_t mode = 0;
+    if (flags & O_CREAT) {
+        va_list args;
+        va_start(args, flags);
+        mode = (mode_t)va_arg(args, int);
+        va_end(args);
+        struct vx_stat st;
+        creating = vx_stat(path, &st) == -VX_ENOENT;
+    }
     int fd = (int)__vx_errno_result(vx_open(path, vx));
+    if (fd >= 0 && creating) {
+        vx_handle_chmod(fd, mode & ~current_umask & 07777);
+    }
     if (fd >= 0 && (flags & O_DIRECTORY)) {
         __vx_remember_dir(fd, path); /* (For openat and the rest.) */
     }
@@ -235,6 +251,8 @@ static void stat_of(const struct vx_stat *in, struct stat *out) {
     out->st_blksize = 4096;
     out->st_blocks = (blkcnt_t)((in->size + 511) / 512);
     out->st_atim.tv_sec = out->st_mtim.tv_sec = out->st_ctim.tv_sec = in->modified;
+    out->st_uid = in->uid;
+    out->st_gid = in->gid;
 }
 
 int stat(const char *path, struct stat *st) {
@@ -268,18 +286,37 @@ int fstat(int fd, struct stat *st) {
 }
 
 int mkdir(const char *path, mode_t mode) {
-    (void)mode;
-    return (int)__vx_errno_result(vx_mkdir(path));
+    long error = vx_mkdir(path);
+    if (!error && (mode & ~current_umask & 07777) != 0755) {
+        vx_chmod(path, mode & ~current_umask & 07777, 0);
+    }
+    return (int)__vx_errno_result(error);
 }
 
 int chmod(const char *path, mode_t mode) {
-    (void)path, (void)mode;
-    return 0;
+    return (int)__vx_errno_result(vx_chmod(path, mode & 07777, 0));
+}
+
+int fchmod(int fd, mode_t mode) {
+    return (int)__vx_errno_result(vx_handle_chmod(fd, mode & 07777));
+}
+
+int chown(const char *path, uid_t uid, gid_t gid) {
+    return (int)__vx_errno_result(vx_chown(path, uid, gid, 0));
+}
+
+int lchown(const char *path, uid_t uid, gid_t gid) {
+    return (int)__vx_errno_result(vx_chown(path, uid, gid, VX_AT_NO_FOLLOW));
+}
+
+int fchown(int fd, uid_t uid, gid_t gid) {
+    return (int)__vx_errno_result(vx_handle_chown(fd, uid, gid));
 }
 
 mode_t umask(mode_t mask) {
-    (void)mask;
-    return 022;
+    mode_t old = current_umask;
+    current_umask = mask & 0777;
+    return old;
 }
 
 int unlink(const char *path) {
@@ -310,9 +347,7 @@ int rename(const char *from, const char *to) {
 }
 
 int access(const char *path, int mode) {
-    (void)mode;
-    struct vx_stat st;
-    return (int)__vx_errno_result(vx_stat(path, &st));
+    return (int)__vx_errno_result(vx_access(path, (unsigned int)mode & 7));
 }
 
 int chdir(const char *path) {
@@ -504,24 +539,84 @@ pid_t getppid(void) {
     return 1;
 }
 
+static struct vx_credentials credentials(void) {
+    struct vx_credentials now = {0};
+    vx_credentials(NULL, &now);
+    return now;
+}
+
 uid_t getuid(void) {
-    return 0;
+    return credentials().uid;
 }
 
 uid_t geteuid(void) {
-    return 0;
+    return credentials().euid;
 }
 
 gid_t getgid(void) {
-    return 0;
+    return credentials().gid;
 }
 
 gid_t getegid(void) {
-    return 0;
+    return credentials().egid;
+}
+
+static int set_ids(unsigned int uid, unsigned int euid, unsigned int suid, unsigned int gid,
+                   unsigned int egid, unsigned int sgid) {
+    struct vx_credentials set = {uid, euid, suid, gid, egid, sgid, VX_ID_KEEP, {0}};
+    return (int)__vx_errno_result(vx_credentials(&set, NULL));
+}
+
+int setuid(uid_t uid) {
+    /* Root gives up root for good; others only switch the effective id. */
+    return geteuid() == 0 ? set_ids(uid, uid, uid, VX_ID_KEEP, VX_ID_KEEP, VX_ID_KEEP)
+                          : set_ids(VX_ID_KEEP, uid, VX_ID_KEEP, VX_ID_KEEP, VX_ID_KEEP, VX_ID_KEEP);
+}
+
+int seteuid(uid_t uid) {
+    return set_ids(VX_ID_KEEP, uid, VX_ID_KEEP, VX_ID_KEEP, VX_ID_KEEP, VX_ID_KEEP);
+}
+
+int setgid(gid_t gid) {
+    return geteuid() == 0 ? set_ids(VX_ID_KEEP, VX_ID_KEEP, VX_ID_KEEP, gid, gid, gid)
+                          : set_ids(VX_ID_KEEP, VX_ID_KEEP, VX_ID_KEEP, VX_ID_KEEP, gid, VX_ID_KEEP);
+}
+
+int setegid(gid_t gid) {
+    return set_ids(VX_ID_KEEP, VX_ID_KEEP, VX_ID_KEEP, VX_ID_KEEP, gid, VX_ID_KEEP);
+}
+
+int getgroups(int size, gid_t list[]) {
+    struct vx_credentials now = credentials();
+    if (size == 0) {
+        return (int)now.group_count;
+    }
+    if ((unsigned int)size < now.group_count) {
+        errno = EINVAL;
+        return -1;
+    }
+    for (unsigned int i = 0; i < now.group_count; i++) {
+        list[i] = now.groups[i];
+    }
+    return (int)now.group_count;
+}
+
+int setgroups(size_t size, const gid_t *list) {
+    if (size > VX_GROUPS_MAX) {
+        errno = EINVAL;
+        return -1;
+    }
+    struct vx_credentials set = {VX_ID_KEEP, VX_ID_KEEP, VX_ID_KEEP, VX_ID_KEEP,
+                                 VX_ID_KEEP, VX_ID_KEEP, (unsigned int)size, {0}};
+    for (size_t i = 0; i < size; i++) {
+        set.groups[i] = list[i];
+    }
+    return (int)__vx_errno_result(vx_credentials(&set, NULL));
 }
 
 char *getlogin(void) {
-    return "user";
+    const char *user = getenv("USER");
+    return user && user[0] ? (char *)user : "root";
 }
 
 int gethostname(char *name, size_t size) {

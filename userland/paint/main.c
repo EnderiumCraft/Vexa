@@ -13,6 +13,7 @@
 #include <string.h>
 #include <vexa/gui.h>
 #include <vexa/syscall.h>
+#include <vexa/users.h>
 
 #define WIDTH 860
 #define HEIGHT 600
@@ -282,7 +283,7 @@ static void save(void) {
 
 static void save_as(void) {
     char file[512];
-    if (vx_save_dialog("Save Picture", "/home/Pictures", path[0] ? strrchr(path, '/') + 1 : "Untitled.png",
+    if (vx_save_dialog("Save Picture", vx_home_folder("Pictures"), path[0] ? strrchr(path, '/') + 1 : "Untitled.png",
                        file, sizeof(file))) {
         size_t n = strlen(file);
         if (n < 4 || strcmp(file + n - 4, ".png")) {
@@ -295,7 +296,7 @@ static void save_as(void) {
 
 static void open_dialog(void) {
     char file[512];
-    if (vx_open_dialog("Open Picture", "/home/Pictures", file, sizeof(file))) {
+    if (vx_open_dialog("Open Picture", vx_home_folder("Pictures"), file, sizeof(file))) {
         open_file(file);
     }
 }

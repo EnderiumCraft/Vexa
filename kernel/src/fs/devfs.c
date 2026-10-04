@@ -238,6 +238,9 @@ static struct device_node *add_node(struct device_node *parent, const char *name
     node->block = block;
     if (block) {
         node->vnode.size = block_size_bytes(block);
+        /* Whole disks: root and the administrators (group 10, "admin"). */
+        node->vnode.mode = 0660;
+        node->vnode.gid = 10;
     }
     for (size_t i = 0; name[i] && i < sizeof(node->name) - 1; i++) {
         node->name[i] = name[i];

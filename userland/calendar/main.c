@@ -13,12 +13,13 @@
 #include <vexa/gui.h>
 #include <vexa/syscall.h>
 #include <vexa/time.h>
+#include <vexa/users.h>
 
 #define WIDTH 780
 #define HEIGHT 520
 #define PANEL 260  /* The day's events, on the right. */
 #define HEADER 56
-#define EVENTS_FILE "/home/.calendar"
+#define EVENTS_FILE vx_home_folder(".calendar")
 #define MAX_EVENTS 512
 
 struct event {

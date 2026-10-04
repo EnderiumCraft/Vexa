@@ -70,6 +70,8 @@ USER_LDFLAGS := -m elf_x86_64 -nostdlib -z max-page-size=0x1000 -z norelro --has
 STATIC_LDFLAGS := $(USER_LDFLAGS) -static --no-dynamic-linker -T libvexa/program.ld
 DYNAMIC_LDFLAGS := $(USER_LDFLAGS) -pie -dynamic-linker /lib/vexa-ld.so
 STATIC_PROGRAMS := hello-world
+# Programs that run as root whoever starts them (they check who may).
+SETUID_PROGRAMS := vauth sudo accounts install hostname
 
 LIBVEXA_SRCS := $(wildcard libvexa/src/*.c libvexa/src/*.S)
 LIBVEXA_OBJS := $(patsubst libvexa/src/%,$(BUILD)/libvexa/%.o,$(LIBVEXA_SRCS))
@@ -646,7 +648,13 @@ $(INITRAMFS): $(PROGRAM_BINS) $(LIBVEXA_SO) $(VEXA_LD) $(DLTEST_SO) $(ROOTFS_FIL
 	if [ -n "$(LINUX_TREE)" ]; then \
 		mkdir -p $(BUILD)/rootfs/linux && \
 		for dir in $(LINUX_IN_MEMORY); do cp -a $(LINUX_ROOT)/$$dir $(BUILD)/rootfs/linux/; done && \
-		for dir in $(LINUX_ON_CD); do ln -s /cdrom/linux/$$dir $(BUILD)/rootfs/linux/$$dir; done; fi
+		for dir in $(LINUX_ON_CD); do ln -s /cdrom/linux/$$dir $(BUILD)/rootfs/linux/$$dir; done && \
+		for file in passwd group shadow; do ln -sf /etc/$$file $(BUILD)/rootfs/linux/etc/$$file; done; fi
+	# Accounts: the password hashes are root's alone, and these programs
+	# run as root (set-user-id) to check passwords, change accounts and
+	# install Vexa for the administrators who start them.
+	chmod 0600 $(BUILD)/rootfs/etc/shadow
+	chmod 4755 $(addprefix $(BUILD)/rootfs/bin/,$(SETUID_PROGRAMS))
 	tar --format=ustar --owner=0 --group=0 --numeric-owner --mtime=@0 --sort=name \
 		-cf $@ -C $(BUILD)/rootfs .
 

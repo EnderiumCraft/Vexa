@@ -1122,7 +1122,8 @@ static int get_node(struct fat *fs, struct fat_node *dir, const struct info *in,
     node->vnode.inode = inode_number(dir, in->index);
     node->vnode.size = in->size;
     node->vnode.links = is_dir ? 2 : 1;
-    node->vnode.mode = (is_dir ? 0755 : 0644) & (in->attr & ATTR_READ_ONLY ? ~0222u : ~0u);
+    /* No owners on FAT: everyone may use it, like Linux mounting it for all. */
+    node->vnode.mode = 0777 & (in->attr & ATTR_READ_ONLY ? ~0222u : ~0u);
     node->vnode.modified = in->modified;
     node->vnode.data = fs;
     if (is_dir && fs->kind != EXFAT) {

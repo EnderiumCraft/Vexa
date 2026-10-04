@@ -221,7 +221,7 @@ static char *path_for(const struct personality *personality, const char *path) {
 }
 
 static int open_program(const char *path, struct file **out, const char **reason) {
-    int error = vfs_open(path, strlen(path), VX_OPEN_READ, out);
+    int error = vfs_open(path, strlen(path), VX_OPEN_READ | VFS_OPEN_EXECUTE, out);
     if (error) {
         *reason = vfs_error_name(error);
         return error;
@@ -399,6 +399,29 @@ int process_load(const char *path, char *const *argv, size_t argc, char *const *
                         personality, reason);
 }
 
+/* A program with the set-user-id or set-group-id bit runs as its file's
+ * owner or group (not scripts, as on Linux: the interpreter would be the one
+ * running with those rights). The saved ids follow the effective ones. */
+static void apply_set_ids(const char *path, struct cred *cred) {
+    struct file *file;
+    if (vfs_open(path, strlen(path), VX_OPEN_READ | VFS_OPEN_EXECUTE, &file)) {
+        return;
+    }
+    struct vx_stat stat;
+    vfs_file_stat(file, &stat);
+    char start[2];
+    bool script = vfs_pread(file, start, 2, 0) == 2 && start[0] == '#' && start[1] == '!';
+    vfs_close(file);
+    if (!script && (stat.mode & 04000)) {
+        cred->euid = stat.uid;
+    }
+    if (!script && (stat.mode & 02000)) {
+        cred->egid = stat.gid;
+    }
+    cred->suid = cred->euid;
+    cred->sgid = cred->egid;
+}
+
 /* ---- Starting ---- */
 
 struct process *process_spawn(const struct spawn_request *request, int *error,
@@ -414,6 +437,13 @@ struct process *process_spawn(const struct spawn_request *request, int *error,
     object_init(&process->object, &process_object_type);
     strcpy(cwd, request->cwd ? request->cwd : "/");
     process->umask = request->parent ? request->parent->umask : 022;
+    if (request->parent) {
+        /* The parent's effective ids, as real, effective and saved ids. */
+        struct cred *cred = &process->cred;
+        *cred = request->parent->cred;
+        cred->uid = cred->suid = cred->euid;
+        cred->gid = cred->sgid = cred->egid;
+    }
     process->cwd = cwd;
     if (request->parent && request->parent->terminal) {
         process->terminal = request->parent->terminal;
@@ -434,6 +464,9 @@ struct process *process_spawn(const struct spawn_request *request, int *error,
                           request->envc, request->parent ? request->parent->personality : NULL,
                           &process->address_space, &process->entry,
                           &process->stack_pointer, &process->personality, reason);
+    if (!*error) {
+        apply_set_ids(request->path, &process->cred);
+    }
     process->handles = *error ? NULL : handle_table_create();
     if (!*error && !process->handles) {
         *error = -VX_ENOMEM;
@@ -539,6 +572,7 @@ struct process *process_fork(struct interrupt_frame *frame, int *error) {
     memcpy(child->name, parent->name, sizeof(child->name));
     memcpy(child->signal_actions, parent->signal_actions, sizeof(child->signal_actions));
     child->umask = parent->umask;
+    child->cred = parent->cred;
     child->nice = parent->nice;
     if (parent->terminal) {
         child->terminal = parent->terminal;
@@ -709,6 +743,7 @@ int process_exec(const char *path, char *const *argv, size_t argc, char *const *
     vmm_activate(as);
     vm_put(old);
     set_program(process, path, argv, argc);
+    apply_set_ids(path, &process->cred);
 
     if (process->personality_data && process->personality->free_data) {
         process->personality->free_data(process->personality_data);
@@ -840,6 +875,30 @@ int process_wait_child(struct process *parent, uint32_t id, bool no_hang, int *e
             return error;
         }
     }
+}
+
+const struct cred *cred_current(void) {
+    static const struct cred root = {0};
+    struct process *process = process_current();
+    return process ? &process->cred : &root;
+}
+
+bool cred_in_group(const struct cred *cred, uint32_t gid) {
+    if (cred->egid == gid) {
+        return true;
+    }
+    for (uint32_t i = 0; i < cred->group_count && i < VX_GROUPS_MAX; i++) {
+        if (cred->groups[i] == gid) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool process_may_signal(struct process *target) {
+    const struct cred *me = cred_current(), *them = &target->cred;
+    return me->euid == 0 || me->uid == them->uid || me->euid == them->uid ||
+           me->uid == them->suid || me->euid == them->suid;
 }
 
 struct process *process_current(void) {

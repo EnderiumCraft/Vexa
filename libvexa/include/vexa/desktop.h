@@ -23,6 +23,8 @@ extern "C" {
  */
 
 #define DESKTOP_SOCKET "/run/desktop"
+/* The desktop's exit code when someone logs out: vinit starts it again. */
+#define DESKTOP_EXIT_LOGOUT 3
 /* The clipboard's text (UTF-8), shared by every program and X. */
 #define DESKTOP_CLIPBOARD_FILE "/run/clipboard"
 

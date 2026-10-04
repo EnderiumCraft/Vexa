@@ -5,6 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <vexa/abi.h>
+#include <vexa/cred.h>
 #include <vexa/object.h>
 #include <vexa/sched.h>
 #include <vexa/signal.h>
@@ -68,6 +69,7 @@ struct process {
     char *cwd;               /* Absolute, normalized. */
     struct vnode *terminal;  /* What /dev/tty opens (a referenced pty), or NULL: the console. */
     uint32_t umask;          /* Permission bits new files don't get (kept across exec). */
+    struct cred cred;        /* Its users and groups. */
     int8_t nice;             /* Scheduling priority, -20 to 19; children inherit it. */
     uint64_t pending_signals;
     uint8_t signal_actions[VX_SIGNAL_COUNT]; /* enum signal_action */
@@ -139,6 +141,9 @@ int process_exec(const char *path, char *const *argv, size_t argc, char *const *
 struct address_space *process_address_space(struct process *process);
 
 struct process *process_current(void);
+/* Whether the calling process may signal (or reprioritize) `target`: root,
+ * or the same user. */
+bool process_may_signal(struct process *target);
 /* Returns a reference to the process with this id, or NULL. */
 struct process *process_find(uint32_t id);
 /* Ends the whole process, all its threads (Linux exit_group, vx_exit). */

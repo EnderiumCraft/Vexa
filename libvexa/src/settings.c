@@ -5,8 +5,10 @@
 #include <vexa/files.h>
 #include <vexa/settings.h>
 #include <vexa/syscall.h>
+#include <vexa/users.h>
 
-/* Settings files in /etc (see <vexa/settings.h>). */
+/* Settings files in /etc, and each account's own over them (see
+ * <vexa/settings.h>). */
 
 static bool name_ok(const char *name) {
     return name[0] && name[0] != '.' && !strchr(name, '/') && strlen(name) < 32;
@@ -19,17 +21,24 @@ static void copy_text(char *out, size_t size, const char *in) {
     out[n] = '\0';
 }
 
-int vx_settings_load(struct vx_settings *s, const char *name) {
-    memset(s, 0, sizeof(*s));
-    if (!name_ok(name)) {
-        return -VX_EINVAL;
+/* Someone's own settings: "$HOME/.config/vexa/<name>" (false for root,
+ * whose are /etc's). */
+static bool own_path(char *out, size_t size, const char *name) {
+    struct vx_credentials me = {0};
+    vx_credentials(NULL, &me);
+    if (me.uid == 0) {
+        return false;
     }
-    copy_text(s->name, sizeof(s->name), name);
-    char path[64];
-    snprintf(path, sizeof(path), "/etc/%s", name);
+    char rel[64];
+    snprintf(rel, sizeof(rel), "%s/%s", VX_SETTINGS_OWN_DIR, name);
+    vx_home_path(out, size, rel);
+    return true;
+}
+
+static void read_into(struct vx_settings *s, const char *path) {
     int handle = vx_open(path, VX_OPEN_READ);
     if (handle < 0) {
-        return 0; /* No file yet: nothing set. */
+        return; /* No file yet: nothing set. */
     }
     static char text[16384];
     long n = vx_read(handle, text, sizeof(text) - 1);
@@ -46,6 +55,20 @@ int vx_settings_load(struct vx_settings *s, const char *name) {
         }
         *value++ = '\0';
         vx_settings_set(s, line, value);
+    }
+}
+
+int vx_settings_load(struct vx_settings *s, const char *name) {
+    memset(s, 0, sizeof(*s));
+    if (!name_ok(name)) {
+        return -VX_EINVAL;
+    }
+    copy_text(s->name, sizeof(s->name), name);
+    char path[300];
+    snprintf(path, sizeof(path), "/etc/%s", name);
+    read_into(s, path);
+    if (own_path(path, sizeof(path), name)) {
+        read_into(s, path); /* Theirs win. */
     }
     return 0;
 }
@@ -174,6 +197,16 @@ int vx_settings_save(const struct vx_settings *s) {
         n += (size_t)snprintf(text + n, sizeof(text) - n, "%s=%s\n", s->entries[i].key,
                               s->entries[i].value);
     }
+    char path[300];
+    if (own_path(path, sizeof(path), s->name)) {
+        /* Someone's own: in their home folder (which keeps itself). */
+        char dir[300];
+        vx_home_path(dir, sizeof(dir), ".config");
+        vx_mkdir(dir);
+        vx_home_path(dir, sizeof(dir), VX_SETTINGS_OWN_DIR);
+        vx_mkdir(dir);
+        return write_whole(path, text, n);
+    }
     return vx_settings_write_file(s->name, text, n);
 }
 
@@ -204,24 +237,4 @@ int vx_settings_restore(void) {
     }
     vx_close(handle);
     return restored;
-}
-
-void vx_password_hash(const char *password, char out[17]) {
-    /* FNV-1a, 64 bits, of "vexa:" and the password, stirred a few times. */
-    uint64_t h = 0xcbf29ce484222325ULL;
-    for (int round = 0; round < 64; round++) {
-        for (const char *p = "vexa:"; *p; p++) {
-            h = (h ^ (unsigned char)*p) * 0x100000001b3ULL;
-        }
-        for (const char *p = password; *p; p++) {
-            h = (h ^ (unsigned char)*p) * 0x100000001b3ULL;
-        }
-        h ^= h >> 29;
-    }
-    static const char digits[] = "0123456789abcdef";
-    for (int i = 15; i >= 0; i--) {
-        out[i] = digits[h & 15];
-        h >>= 4;
-    }
-    out[16] = '\0';
 }

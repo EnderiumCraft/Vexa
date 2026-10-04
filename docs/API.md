@@ -85,7 +85,7 @@ Paths are C strings; relative ones start from the current folder.
 | `long vx_read(int handle, void *buffer, size_t size)` | returns how many bytes (0 at the end) |
 | `long vx_write(int handle, const void *buffer, size_t size)` | returns how many bytes |
 | `long vx_seek(int handle, long offset, int whence)` | `VX_SEEK_SET`, `CURRENT`, `END`; returns the new position |
-| `long vx_stat(const char *path, struct vx_stat *stat)` | size, type, links, modified time, mode (follows links) |
+| `long vx_stat(const char *path, struct vx_stat *stat)` | size, type, links, modified time, mode, owner (`uid`) and group (`gid`) (follows links) |
 | `long vx_lstat(const char *path, struct vx_stat *stat)` | the same, for a link itself |
 | `long vx_handle_stat(int handle, struct vx_stat *stat)` | the same, for an open handle |
 | `long vx_read_dir(int handle, struct vx_dir_entry *entries, size_t count)` | the next entries of an open folder (name, type, inode); 0 at the end |
@@ -97,6 +97,17 @@ Paths are C strings; relative ones start from the current folder.
 | `long vx_chdir(const char *path)`, `long vx_getcwd(char *buffer, size_t size)` | the current folder |
 | `long vx_pipe(int handles[2])` | a pipe: `[0]` reads, `[1]` writes |
 | `long vx_resize(int handle, unsigned long size)` | a file's new length (zero-filled) |
+| `long vx_chmod(const char *path, unsigned mode, unsigned flags)`, `vx_handle_chmod(int handle, unsigned mode)` | new permission bits (the owner or root only) |
+| `long vx_chown(const char *path, unsigned uid, unsigned gid, unsigned flags)`, `vx_handle_chown(...)` | a new owner and/or group (`VX_ID_KEEP` leaves one); giving a file away is root's; `VX_AT_NO_FOLLOW` for a link itself |
+| `long vx_access(const char *path, unsigned want)` | 0 if the real user may (`VX_ACCESS_READ`, `WRITE`, `EXECUTE`; with `VX_ACCESS_EFFECTIVE`, the effective user), else `-VX_EACCES` |
+
+Files have an owner, a group and Unix permission bits, which the kernel checks:
+reading, writing and running need the bits for you (owner, group or others), folders
+need execute to go through and write to change; in a sticky folder (`/tmp`, mode
+`01777`) only a file's owner may remove it. Root may do anything (running a file
+still needs an execute bit). A refusal is `-VX_EACCES`; `-VX_EPERM` is for what only
+the owner or root may do (`vx_chmod`, `vx_chown`, signalling another account's
+processes).
 
 ### Processes
 
@@ -109,7 +120,8 @@ Paths are C strings; relative ones start from the current folder.
 | `long vx_priority(long process_id, int nice, int *now)` | sets a process's nice value (-20 runs first, 19 last; `VX_PRIORITY_GET` just reads it); children inherit it |
 | `long vx_signal(int signal, int action)` | `VX_SIGNAL_DEFAULT` or `VX_SIGNAL_IGNORE` (Vexa programs can't catch signals) |
 | `long vx_set_foreground(long group)` | which process group the terminal's Ctrl-C goes to |
-| `long vx_process_list(struct vx_process_info *entries, size_t count)` | the processes (id, parent, group, state, memory, name) |
+| `long vx_process_list(struct vx_process_info *entries, size_t count)` | the processes (id, parent, group, state, memory, name, user) |
+| `long vx_credentials(const struct vx_credentials *set, struct vx_credentials *now)` | who this process is: real, effective and saved user and group ids and the other groups; changes them (`VX_ID_KEEP` fields stay; without root, only to ids it has already). A program with the set-user-id bit runs as its file's owner |
 
 ```c
 const char *argv[] = {"/bin/ls", "-l", "/tmp"};
@@ -413,7 +425,28 @@ vx_desktop_reload(); /* The desktop, and every program, read them again. */
 | `int vx_settings_write_file(const char *name, const char *text, size_t length)` | a whole file in `/etc` (and on disk) |
 | `bool vx_settings_disk(char *out, size_t size)` | the disk that keeps settings, if any |
 | `int vx_settings_restore(void)` | copies them back to `/etc` (vinit does it at boot) |
-| `void vx_password_hash(const char *password, char out[17])` | the lock screen password's hash, as `lock_password` keeps it |
+
+Saving as someone other than root writes their own copy, in `.config/vexa` in their
+home folder; loading reads `/etc`'s, then theirs over it.
+
+## `<vexa/users.h>`: accounts
+
+The accounts, from `/etc/passwd`, `/etc/group` and `/etc/shadow` (see the user guide).
+`<pwd.h>` and `<grp.h>` (`getpwnam`, `getpwuid`, `getgrnam`, `getgrgid`) read the same
+files; `getuid`, `setuid`, `chown`, `chmod`, `access`... are there in `<unistd.h>`.
+
+| Function | What it does |
+| --- | --- |
+| `int vx_user_by_name(const char *name, struct vx_user *out)`, `vx_user_by_id(unsigned uid, ...)` | an account: `name`, `uid`, `gid`, `full_name`, `home`, `shell` |
+| `int vx_users(struct vx_user *out, int max)` | people's accounts (user 1000 and up) |
+| `bool vx_user_is_admin(const char *name)` | in the group `admin` (or root) |
+| `int vx_current_user(struct vx_user *out)` | this process's account (its real user) |
+| `const char *vx_home(void)`, `void vx_home_path(char *out, size_t size, const char *name)`, `const char *vx_home_folder(const char *name)` | the home folder (`$HOME`), and paths in it (`vx_home_folder("Documents")`) |
+| `bool vx_password_check(const char *name, const char *password)` | whether it's the account's password (others than root ask `/bin/vauth`) |
+| `bool vx_read_password(const char *prompt, char *out, size_t size)` | reads a password from the terminal without showing it |
+| `void vx_password_make(const char *password, char out[VX_HASH_MAX])`, `bool vx_password_matches(...)` | salted, stretched SHA-256 hashes, as `/etc/shadow` keeps them |
+| `int vx_user_add(...)`, `vx_user_remove`, `vx_user_set_password`, `vx_user_set_admin`, `vx_user_set_full_name` | changing accounts (root only; `accounts` does it for administrators) |
+| `int vx_become_user(const struct vx_user *user)` | root becomes the account (groups, ids, `HOME`, `USER`...) |
 
 ## `<vexa/time.h>`: dates and time zones
 
