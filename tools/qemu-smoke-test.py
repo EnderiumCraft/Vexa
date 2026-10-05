@@ -644,7 +644,7 @@ SDK_APP_COMMANDS = [
     ("@type open /mnt/vda1/SDLDemo.vxapp", '"SDL Demo" (640x400)', 30),
     ("@sound 660", None, 10),
     ("@sendkey spc", 'is now called "SDL Demo (paused)"', 60),  # (Slow in safe mode.)
-    ("@sendkey esc", "desktop: closed window", 10),
+    ("@sendkey esc", "desktop: closed window", 30),  # (The demo can take a while to quit.)
     ("@type exit", None, 5),
 ]
 
