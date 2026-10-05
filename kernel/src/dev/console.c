@@ -107,7 +107,7 @@ void console_clear(void) {
     draw_cursor(true);
 }
 
-void console_init(void) {
+void console_init(bool with_splash) {
     cols = fb_width() / FONT_WIDTH;
     rows = fb_height() / FONT_HEIGHT;
     if (cols > MAX_COLS) {
@@ -117,8 +117,13 @@ void console_init(void) {
         rows = MAX_ROWS;
     }
     ready = cols > 0 && rows > 0;
+    if (with_splash) {
+        console_splash(true); /* Instead of clearing: the screen is drawn once. */
+    }
     console_clear();
 }
+
+void console_splash(bool on);
 
 static void scroll(void) {
     memmove(cells[0], cells[1], sizeof(cells[0]) * (rows - 1));

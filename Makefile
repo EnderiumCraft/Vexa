@@ -285,7 +285,7 @@ PROGRAM_CFLAGS_fetch := -I$(MBEDTLS_PREFIX)/include
 
 # zlib's compression core, built against libvexa, for archive (zip, tar.gz).
 ZLIB_NATIVE_DIR := $(BUILD)/zlib-native/zlib-1.3.dfsg
-ZLIB_NATIVE_PARTS := adler32 crc32 deflate inflate inftrees inffast trees zutil
+ZLIB_NATIVE_PARTS := adler32 compress crc32 deflate inflate inftrees inffast trees zutil
 ZLIB_NATIVE := $(BUILD)/zlib-native/libz.a
 $(ZLIB_NATIVE): $(ZLIB_TARBALL)
 	rm -rf $(BUILD)/zlib-native && mkdir -p $(BUILD)/zlib-native

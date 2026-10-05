@@ -270,7 +270,7 @@ static struct menu_item {
 } menu_items[MAX_MENU_ITEMS];
 static int menu_item_count;
 #define MENU_ITEMS menu_item_count
-#define MENU_WIDTH 220
+#define MENU_WIDTH 250
 #define GROUP_WIDTH 240
 
 /* The menu's groups of apps, by category (Info.conf's "category="), each a

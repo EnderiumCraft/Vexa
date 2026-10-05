@@ -101,7 +101,8 @@ static void console_setup(void) {
         kprintf("[fb] unsupported %u bpp framebuffer; serial console only\n", fb->bpp);
         return;
     }
-    console_init();
+    /* The loading screen, unless the boot text is wanted ("verbose"). */
+    console_init(!cmdline_has("verbose"));
     console_set_color(CONSOLE_COLOR_ACCENT);
     kprintf("Vexa " VEXA_VERSION "\n");
     console_reset_color();
@@ -167,14 +168,10 @@ void kmain(void) {
     if (!LIMINE_BASE_REVISION_SUPPORTED(limine_base_revision)) {
         panic("bootloader does not support Limine base revision 3");
     }
-    console_setup();
     copy_boot_info();
+    console_setup();
     if (*cmdline_get()) {
         kprintf("[boot] command line: %s\n", cmdline_get());
-    }
-    /* The loading screen, unless the boot text is wanted ("verbose"). */
-    if (!cmdline_has("verbose")) {
-        console_splash(true);
     }
 
     idt_init();

@@ -5,7 +5,7 @@
 #include <stdint.h>
 
 /* Text console drawn on the framebuffer. Call after fb_init(). */
-void console_init(void);
+void console_init(bool with_splash);
 void console_putc(char c);
 void console_write(const char *s);
 void console_set_color(uint32_t fg_rgb);
