@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Draws the apps' icons (apps/*.vxapp/Contents/Resources/icon.png).
+"""Draws the icons Vexa's icon set (art/icons, made by make-icons.py) doesn't
+have: Doom's, and the SDK's (the app template's and the SDL demo's).
 
 The PNGs are kept in the repository; run this (it needs Pillow) only to
 change them. Each is drawn at 4 times its size, then made smaller.
@@ -425,21 +426,7 @@ def sdl_app():
     return im
 
 
-# Files' own pictures (Files.vxapp/Contents/Resources): kinds of files, places.
-FILE_ICONS = {
-    "folder": files, "document": document, "text": text_file, "image": image_file,
-    "audio": audio_file, "video": video_file,
-    "program": program, "device": device, "computer": computer, "disk": disk,
-    "trash": trash, "apps": apps_folder, "pictures": pictures_folder,
-}
-
-ICONS = {
-    "Terminal": terminal, "Files": files, "Editor": editor, "Viewer": viewer,
-    "Settings": settings, "About": about, "XTerm": xterm,
-    "Monitor": activity, "Calculator": calculator, "Calendar": calendar,
-    "Notes": notes, "Paint": paint, "Help": help_book, "DeviceManager": device_manager,
-    "Installer": installer, "Doom": doom, "NetSurf": netsurf, "Music": music, "Videos": videos,
-}
+ICONS = {"Doom": doom}
 
 if __name__ == "__main__":
     root = os.path.join(os.path.dirname(__file__), "..", "apps")
@@ -455,9 +442,4 @@ if __name__ == "__main__":
                       (sdl_app, os.path.join(sdk, "examples", "sdl-demo", "Resources", "icon.png"))):
         os.makedirs(os.path.dirname(out), exist_ok=True)
         shadow(draw()).resize((SIZE, SIZE), Image.LANCZOS).save(out, optimize=True)
-        print(out)
-    for name, draw in FILE_ICONS.items():
-        im = shadow(draw()).resize((SIZE, SIZE), Image.LANCZOS)
-        out = os.path.join(root, "Files.vxapp", "Contents", "Resources", name + ".png")
-        im.save(out, optimize=True)
         print(out)

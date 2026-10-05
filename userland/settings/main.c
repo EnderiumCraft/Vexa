@@ -49,7 +49,7 @@ enum section {
 static const struct {
     const char *label, *keywords;
     uint32_t color;
-    char symbol;
+    char symbol;              /* (On the color, if its icon can't be read.) */
 } sections[SECTION_COUNT] = {
     {"Appearance", "theme dark light mode accent color colour look", 0x9b6bff, 'A'},
     {"Wallpaper", "background picture image gradient fill fit tile", 0x3fbf6f, 'W'},
@@ -1924,6 +1924,24 @@ static bool section_matches(int i) {
     return false;
 }
 
+/* Each section's icon, from Vexa's set (/share/icons). */
+static const char *const section_icons[SECTION_COUNT] = {
+    "palette", "pictures", "settings", "calendar", "usb",    "computer", "music-folder",
+    "shield",  "control-panel", "power", "network", "drive", "help",     "users",
+};
+
+static struct vx_image *section_icon(int i) {
+    static struct vx_image *icons[SECTION_COUNT];
+    static bool tried[SECTION_COUNT];
+    if (!tried[i]) {
+        tried[i] = true;
+        char path[96];
+        snprintf(path, sizeof(path), "/share/icons/%s.png", section_icons[i]);
+        icons[i] = vx_image_load(path, VX_IMAGE_ALPHA);
+    }
+    return icons[i];
+}
+
 static void draw_sidebar(void) {
     int h = window->surface.height;
     vx_fill(S(), 0, 0, SIDEBAR, h, vx_theme.sidebar);
@@ -1942,9 +1960,14 @@ static void draw_sidebar(void) {
         if (on) {
             vx_draw_gel(S(), 8, y, SIDEBAR - 16, 30, 8, VX_COLOR_ACCENT);
         }
-        vx_draw_gel(S(), 16, y + 5, 20, 20, 6, sections[i].color);
-        char symbol[2] = {sections[i].symbol, 0};
-        text(26 - vx_text_width(symbol) / 2, y + 7, symbol, 0xffffff);
+        struct vx_image *icon = section_icon(i);
+        if (icon) {
+            vx_blit_alpha(S(), 14, y + 3, 24, 24, &icon->surface);
+        } else {
+            vx_draw_gel(S(), 16, y + 5, 20, 20, 6, sections[i].color);
+            char symbol[2] = {sections[i].symbol, 0};
+            text(26 - vx_text_width(symbol) / 2, y + 7, symbol, 0xffffff);
+        }
         text(46, y + 7, sections[i].label, on ? 0xffffff : VX_COLOR_TEXT);
         struct hit *hit = add_hit(8, y, SIDEBAR - 16, 30, H_SECTION);
         hit->index = i;

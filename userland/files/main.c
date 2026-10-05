@@ -111,6 +111,8 @@ static int back_count, forward_count;
 
 /* Files' own pictures, from its bundle. */
 static struct vx_image *kind_icons[KIND_COUNT], *place_icons[16], *disk_icon;
+/* Folders with icons of their own: home, Pictures, Music. */
+static struct vx_image *home_icon, *pictures_icon, *music_icon;
 
 /* ---- Small helpers ---- */
 
@@ -171,6 +173,9 @@ static void load_resources(void) {
         kind_icons[i] = resource(kinds[i]);
     }
     disk_icon = resource("disk");
+    home_icon = resource("home");
+    pictures_icon = resource("pictures");
+    music_icon = resource("music");
 }
 
 static enum kind kind_of_name(const char *name, uint32_t type) {
@@ -229,7 +234,7 @@ static void find_places(void) {
         const char *label, *path, *icon;
     } fixed[] = {
         {"Vexa", "/", "computer"}, {"Apps", VX_APPS_DIR, "apps"},
-        {"Home", home_folder, "folder"}, {"Desktop", desktop_folder, "folder"},
+        {"Home", home_folder, "home"}, {"Desktop", desktop_folder, "folder"},
         {"Documents", documents_folder, "folder"}, {"Pictures", pictures_folder, "pictures"},
         {"Wallpapers", "/share/pictures", "pictures"}, {"Temporary", "/tmp", "folder"},
         {"Trash", TRASH, "trash"},
@@ -1306,6 +1311,16 @@ static int column_x(int which) { /* 0 name, 1 kind, 2 size, 3 modified */
 static struct vx_image *icon_for(const struct item *item) {
     if (item->icon) {
         return item->icon;
+    }
+    if (item->kind == K_FOLDER && !item->link) { /* Home, Pictures and Music have their own. */
+        char path[800];
+        snprintf(path, sizeof(path), "%s%s%s", cwd, strcmp(cwd, "/") ? "/" : "", item->name);
+        struct vx_image *own = !strcmp(path, home_folder) ? home_icon
+                               : !strcmp(path, pictures_folder) ? pictures_icon
+                               : !strcmp(path, vx_home_folder("Music")) ? music_icon : NULL;
+        if (own) {
+            return own;
+        }
     }
     return kind_icons[item->kind];
 }

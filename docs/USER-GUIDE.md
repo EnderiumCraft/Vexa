@@ -213,6 +213,7 @@ Vexa's file system starts in memory and has these folders:
 | `/home` | each account's home folder: `/home/vexa` on the live CD, with `Desktop` (its files are the desktop's icons), `Documents`, `Pictures` (screenshots go here), `Music`, `Videos` and the Trash (`.Trash`) |
 | `/etc` | settings: `motd`, `desktop.conf`, `hosts`, `resolv.conf`; the accounts: `passwd`, `group`, `shadow` |
 | `/share/pictures` | pictures (the default wallpaper, `glass.png`, and `aurora.png` and `meadow.png`); `glass/` has the default wallpaper in each theme and accent's colors |
+| `/share/icons` | Vexa's icons (glossy, like Aero), 96 by 96, for any program: `folder.png`, `terminal.png`, `network.png`... (made from `art/icons` by `tools/make-icons.py`) |
 | `/share/fonts` | the fonts Vexa's apps draw text with (DejaVu Sans, Sans Bold, Sans Mono) |
 | `/tmp` | scratch space (anyone may put files there; only their owner may remove them) |
 | `/dev` | devices: the console, terminals (`/dev/pts`), `/dev/input`, `/dev/display0`, `/dev/dri/card0` (for Linux programs), `/dev/random` |
