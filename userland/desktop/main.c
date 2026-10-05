@@ -2948,9 +2948,14 @@ static void key_event(int key, int value) {
 
 /* ---- The pointer ---- */
 
+/* Buttons pressed on the desktop's own things (the panel, menus): a window
+ * that appears under the pointer before they're let go doesn't see them. */
+static int desktop_buttons;
+
 static void send_pointer(struct window *w, int wheel) {
     struct desktop_message m = {.type = DESKTOP_POINTER, .window = (uint32_t)w->id,
-                                .a = pointer_x - w->x, .b = pointer_y - w->y, .c = buttons,
+                                .a = pointer_x - w->x, .b = pointer_y - w->y,
+                                .c = buttons & ~desktop_buttons,
                                 .d = wheel};
     send_to(w->client, &m);
 }
@@ -3138,6 +3143,12 @@ static void button_event(int bit, bool down) {
     }
     bool left_down = bit == 1 && down && !(before & 1);
     bool right_down = bit == 2 && down && !(before & 2);
+    if (!down) {
+        desktop_buttons &= ~bit;
+    } else if (pointer_y < PANEL_HEIGHT || menu_open || popup_open || search_open || clock_open ||
+               volume_open) {
+        desktop_buttons |= bit;
+    }
     if (left_down) {
         printf("desktop: left button at %d,%d\n", pointer_x, pointer_y);
     }
