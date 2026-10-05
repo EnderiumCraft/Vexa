@@ -1463,7 +1463,7 @@ static void draw_icons(struct vx_surface *s) {
         if (thumb) {
             int tw = thumb->surface.width, th = thumb->surface.height;
             int tx = x + (cw - tw) / 2, ty = y + 5 + (56 - th) / 2;
-            vx_fill(s, tx - 1, ty - 1, tw + 2, th + 2, 0xe4dcf2);
+            vx_fill(s, tx - 1, ty - 1, tw + 2, th + 2, 0xe6e7ea);
             vx_blit_alpha(s, tx, ty, tw, th, &thumb->surface);
         } else {
             struct vx_image *icon = icon_for(item);

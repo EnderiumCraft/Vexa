@@ -243,7 +243,7 @@ void volume_draw_osd(struct vx_surface *view, int ox, int oy) {
     }
     struct rect r = {(screen.width - OSD_SIZE) / 2 + ox, screen.height - OSD_SIZE - 120 + oy,
                      OSD_SIZE, OSD_SIZE};
-    draw_glass(view, r, 24, 24, vx_theme.dark ? 0x101018 : 0x303040, 150, 40);
+    draw_glass(view, r, 24, 24, vx_theme.dark ? 0x121214 : 0x303040, 150, 40);
     draw_speaker(view, r.x + 52, r.y + 40, 40, 0xffffff, vol.volume, vol.muted);
     /* 16 little steps. */
     int lit = vol.muted ? 0 : ((int)vol.volume * 16 + 50) / 100;

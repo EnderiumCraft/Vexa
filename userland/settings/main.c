@@ -93,7 +93,7 @@ enum hit_kind {
     H_SAVE_NAME, H_POWER, H_KEEP, H_REVERT, H_SEARCH_FIELD, H_TEST_AREA, H_PASSWORD_FIELD,
     H_SET_PASSWORD, H_REMOVE_PASSWORD, H_LOCK_NOW, H_OUTPUT, H_TEST_SOUND, H_OLD_PASSWORD_FIELD,
     H_NEW_LOGIN_FIELD, H_NEW_FULL_FIELD, H_NEW_PASSWORD_FIELD, H_NEW_ADMIN, H_ADD_ACCOUNT,
-    H_REMOVE_ACCOUNT, H_ADMIN_ACCOUNT,
+    H_REMOVE_ACCOUNT, H_ADMIN_ACCOUNT, H_GO_WALLPAPER, H_ADD_PICTURE, H_WALLPAPER_MODE,
 };
 
 struct hit {
@@ -107,9 +107,25 @@ struct hit {
 static struct hit hits[MAX_HITS];
 static int hit_count;
 
+/* The page (right of the sidebar) is drawn on a tall surface of its own and
+ * shown from `scroll` down: long pages scroll with the wheel. */
+#define PAGE_HEIGHT 1600
+static struct vx_surface page;
+static struct vx_surface *target; /* What's drawn on: the page, or the window. */
+static int scroll, page_bottom;   /* (page_bottom: where a long page ends; 0 if it fits.) */
+
 static struct hit *add_hit(int x, int y, int w, int h, enum hit_kind kind) {
+    static struct hit spare;
+    if (target == &page) { /* On the page: where it is in the window (if it shows). */
+        y -= scroll;
+        int bottom = y + h, end = window->surface.height;
+        y = y < 0 ? 0 : y;
+        h = (bottom > end ? end : bottom) - y;
+        if (h <= 0) {
+            return &spare;
+        }
+    }
     if (hit_count == MAX_HITS) {
-        static struct hit spare;
         return &spare;
     }
     struct hit *hit = &hits[hit_count++];
@@ -198,7 +214,7 @@ static void list_toggle(char *list, size_t size, const char *name) {
 /* ---- Drawing helpers ---- */
 
 static struct vx_surface *S(void) {
-    return &window->surface;
+    return target ? target : &window->surface;
 }
 
 static void text(int x, int y, const char *t, uint32_t color) {
@@ -346,93 +362,525 @@ static void open_menu(int x, int y) {
     menu_open = true;
 }
 
+/* ---- Cards, thumbnails (Appearance, Wallpaper) ---- */
+
+#define CONTENT_W (WIDTH - LEFT - 24) /* The page's width, right of the sidebar. */
+
+/* (The display, which the Display page reads: the Wallpaper page shows
+ * pictures as on the screen.) */
+static struct vx_display_info display_info;
+static bool have_display;
+#define CARD_PAD 16
+
+static uint32_t card_color(void) {
+    return vx_theme.dark ? vx_mix(vx_theme.window, 0xffffff, 14) : 0xffffff;
+}
+
+/* A card: a rounded panel grouping a few things, from y down h. */
+static void card(int y, int h) {
+    uint32_t edge = vx_theme.dark ? vx_mix(vx_theme.window, 0xffffff, 28) : 0xd9dde4;
+    vx_fill_rounded(S(), LEFT, y, CONTENT_W, h, 12, edge, 255);
+    vx_fill_rounded(S(), LEFT + 1, y + 1, CONTENT_W - 2, h - 2, 11, card_color(), 255);
+}
+
+/* A card's title (bold) and a line under it saying what it's for (dim). */
+static void card_title(int y, const char *title, const char *about) {
+    vx_text(S(), vx_font(VX_FACE_BOLD, 14), LEFT + CARD_PAD, y, title, VX_COLOR_TEXT,
+            VX_TRANSPARENT);
+    if (about) {
+        vx_draw_text_fit(S(), LEFT + CARD_PAD, y + 22, CONTENT_W - 2 * CARD_PAD, about,
+                         VX_COLOR_DIM, VX_TRANSPARENT);
+    }
+}
+
+/* Takes the corners of (x, y, w, h) off, round (radius r), showing `bg`
+ * there: smooth, a quarter circle at each corner. */
+static void round_corners(struct vx_surface *s, int x, int y, int w, int h, int r, uint32_t bg) {
+    for (int dy = 0; dy < r; dy++) {
+        for (int dx = 0; dx < r; dx++) {
+            /* How much of this pixel is outside the circle (of 4 samples). */
+            int cx = r - dx, cy = r - dy;
+            int out = 0;
+            for (int sub = 0; sub < 4; sub++) { /* (Four samples in the pixel.) */
+                int sx = cx * 4 - (sub & 1) * 2 - 1, sy = cy * 4 - (sub >> 1) * 2 - 1;
+                out += sx * sx + sy * sy > r * r * 16;
+            }
+            if (!out) {
+                continue;
+            }
+            int corners[4][2] = {{x + dx, y + dy},
+                                 {x + w - 1 - dx, y + dy},
+                                 {x + dx, y + h - 1 - dy},
+                                 {x + w - 1 - dx, y + h - 1 - dy}};
+            for (int c = 0; c < 4; c++) {
+                int px = corners[c][0], py = corners[c][1];
+                if (px < 0 || py < 0 || px >= s->width || py >= s->height) {
+                    continue;
+                }
+                uint32_t *p = &s->pixels[(size_t)py * s->stride + px];
+                *p = vx_mix(*p, bg, out * 255 / 4);
+            }
+        }
+    }
+}
+
+/* A tick: two strokes, `size` across, at (x, y). */
+static void tick(struct vx_surface *s, int x, int y, int size, uint32_t color) {
+    int t = size / 6 > 1 ? size / 6 : 2; /* (How thick.) */
+    for (int i = 0; i <= size * 3 / 8; i++) { /* Down, to the bottom of the tick. */
+        vx_fill(s, x + i, y + size / 2 + i - t / 2, t, t, color);
+    }
+    for (int i = 0; i <= size * 5 / 8; i++) { /* Then up, to the right. */
+        vx_fill(s, x + size * 3 / 8 + i, y + size / 2 + size * 3 / 8 - i - t / 2, t, t, color);
+    }
+}
+
+/* What's chosen: a ring of the accent around (x, y, w, h), and a tick in
+ * a disc at its top right. */
+static void chosen_ring(int x, int y, int w, int h, int r) {
+    vx_fill_rounded(S(), x - 4, y - 4, w + 8, h + 8, r + 4, VX_COLOR_ACCENT, 255);
+    vx_fill_rounded(S(), x - 2, y - 2, w + 4, h + 4, r + 2, card_color(), 255);
+}
+
+static void chosen_badge(int x, int y, int w) {
+    int cx = x + w - 12, cy = y + 12;
+    vx_fill_rounded(S(), cx - 11, cy - 11, 22, 22, 11, 0xffffff, 255);
+    vx_draw_gel(S(), cx - 9, cy - 9, 18, 18, 9, VX_COLOR_ACCENT);
+    tick(S(), cx - 5, cy - 6, 11, 0xffffff);
+}
+
+/* A smaller copy of `from` in (x, y, w, h) of `to`: each pixel the average
+ * of a few of the ones it covers (not jagged, like the nearest one). */
+static void blit_average(struct vx_surface *to, int x, int y, int w, int h,
+                         const struct vx_surface *from, int fx, int fy, int fw, int fh) {
+    for (int ty = 0; ty < h; ty++) {
+        int py = y + ty;
+        if (py < 0 || py >= to->height) {
+            continue;
+        }
+        int y0 = fy + ty * fh / h, y1 = fy + (ty + 1) * fh / h;
+        y1 = y1 > y0 ? y1 : y0 + 1;
+        for (int tx = 0; tx < w; tx++) {
+            int px = x + tx;
+            if (px < 0 || px >= to->width) {
+                continue;
+            }
+            int x0 = fx + tx * fw / w, x1 = fx + (tx + 1) * fw / w;
+            x1 = x1 > x0 ? x1 : x0 + 1;
+            /* At most 4 by 4 samples. */
+            int sx = (x1 - x0 + 3) / 4, sy = (y1 - y0 + 3) / 4;
+            unsigned r = 0, g = 0, b = 0, n = 0;
+            for (int yy = y0; yy < y1; yy += sy) {
+                const uint32_t *row = &from->pixels[(size_t)yy * from->stride];
+                for (int xx = x0; xx < x1; xx += sx) {
+                    uint32_t c = row[xx];
+                    r += (c >> 16) & 0xff, g += (c >> 8) & 0xff, b += c & 0xff, n++;
+                }
+            }
+            to->pixels[(size_t)py * to->stride + px] = (r / n) << 16 | (g / n) << 8 | (b / n);
+        }
+    }
+}
+
+/* Thumbnails of pictures, made when Settings has nothing else to do (a big
+ * picture takes a while to read): asked for while drawing, shown when
+ * they're ready. */
+enum thumb_kind {
+    THUMB_FILL,    /* Covering w by h (its middle). */
+    THUMB_FIT,     /* All of it, in w by h. */
+    THUMB_STRETCH, /* To w by h. */
+    THUMB_SCALE,   /* Made w/h of its size (h: the screen's width; w: the preview's). */
+};
+
+#define MAX_THUMBS 40
+static struct thumb {
+    char path[256];
+    enum thumb_kind kind;
+    int w, h;
+    struct vx_image *image;
+    int picture_w, picture_h; /* The picture's own size. */
+    bool tried;
+} thumbs[MAX_THUMBS];
+static int thumb_next; /* (Which to reuse when they're all taken.) */
+
+/* The thumbnail, or NULL until it's made (or if it can't be). */
+static struct thumb *thumb_of(const char *path, enum thumb_kind kind, int w, int h) {
+    for (int i = 0; i < MAX_THUMBS; i++) {
+        struct thumb *t = &thumbs[i];
+        if (t->path[0] && t->kind == kind && t->w == w && t->h == h && !strcmp(t->path, path)) {
+            return t;
+        }
+    }
+    struct thumb *t = NULL;
+    for (int i = 0; i < MAX_THUMBS && !t; i++) {
+        t = thumbs[i].path[0] ? NULL : &thumbs[i];
+    }
+    if (!t) {
+        t = &thumbs[thumb_next];
+        thumb_next = (thumb_next + 1) % MAX_THUMBS;
+        vx_image_free(t->image);
+    }
+    memset(t, 0, sizeof(*t));
+    snprintf(t->path, sizeof(t->path), "%s", path);
+    t->kind = kind;
+    t->w = w;
+    t->h = h;
+    return t;
+}
+
+static bool thumbs_waiting(void) {
+    for (int i = 0; i < MAX_THUMBS; i++) {
+        if (thumbs[i].path[0] && !thumbs[i].tried) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static struct vx_image *new_image(int w, int h) {
+    struct vx_image *image = malloc(sizeof(*image));
+    uint32_t *pixels = image ? malloc((size_t)w * h * 4) : NULL;
+    if (!pixels) {
+        free(image);
+        return NULL;
+    }
+    image->surface = (struct vx_surface){pixels, w, h, w};
+    return image;
+}
+
+/* Makes the next thumbnail asked for (true if there was one). */
+static bool make_next_thumbnail(void) {
+    for (int i = 0; i < MAX_THUMBS; i++) {
+        struct thumb *t = &thumbs[i];
+        if (!t->path[0] || t->tried) {
+            continue;
+        }
+        t->tried = true;
+        struct vx_image *full = vx_image_load(t->path, 0);
+        if (!full) {
+            return true;
+        }
+        const struct vx_surface *f = &full->surface;
+        t->picture_w = f->width;
+        t->picture_h = f->height;
+        int w = t->w, h = t->h, fx = 0, fy = 0, fw = f->width, fh = f->height;
+        if (t->kind == THUMB_FILL) { /* Its middle, in w by h's shape. */
+            if ((long)fw * h > (long)fh * w) {
+                fw = (int)((long)fh * w / h);
+                fx = (f->width - fw) / 2;
+            } else {
+                fh = (int)((long)fw * h / w);
+                fy = (f->height - fh) / 2;
+            }
+        } else if (t->kind == THUMB_FIT) {
+            if ((long)fw * h > (long)fh * w) {
+                h = (int)((long)fh * w / fw);
+            } else {
+                w = (int)((long)fw * h / fh);
+            }
+        } else if (t->kind == THUMB_SCALE) {
+            w = (int)((long)fw * t->w / t->h);
+            h = (int)((long)fh * t->w / t->h);
+        }
+        w = w < 1 ? 1 : w > 2048 ? 2048 : w;
+        h = h < 1 ? 1 : h > 2048 ? 2048 : h;
+        t->image = new_image(w, h);
+        if (t->image) {
+            blit_average(&t->image->surface, 0, 0, w, h, f, fx, fy, fw, fh);
+        }
+        vx_image_free(full);
+        return true;
+    }
+    return false;
+}
+
+/* A picture's name to show: "aurora.png" is "Aurora". */
+static void picture_name(const char *path, char *out, size_t size) {
+    const char *file = strrchr(path, '/');
+    file = file ? file + 1 : path;
+    const char *dot = strrchr(file, '.');
+    int n = dot && dot > file ? (int)(dot - file) : (int)strlen(file);
+    snprintf(out, size, "%.*s", n, file);
+    if (out[0] >= 'a' && out[0] <= 'z') {
+        out[0] = (char)(out[0] - 'a' + 'A');
+    }
+}
+
+/* ---- What the wallpaper is ---- */
+
+static const char *setting_wallpaper(void) {
+    return vx_settings_get(&desk, "wallpaper", "image");
+}
+
+static const char *setting_image(void) {
+    return vx_settings_get(&desk, "wallpaper_image", DESKTOP_DEFAULT_WALLPAPER);
+}
+
+static bool is_default_picture(const char *path) {
+    return !strcmp(path, DESKTOP_DEFAULT_WALLPAPER);
+}
+
+/* The picture the desktop shows for `path` in a theme (the default one is in
+ * the theme's colors). */
+static void shown_picture(const char *path, const struct vx_theme *t, char *out, size_t size) {
+    if (is_default_picture(path)) {
+        vx_theme_wallpaper(t, out, size);
+    } else {
+        snprintf(out, size, "%s", path);
+    }
+}
+
+/* The wallpaper as the desktop would show it, in (x, y, w, h) of `s`: a
+ * picture (filling it, as it fills the screen) or a gradient. */
+static void draw_wallpaper_into(struct vx_surface *s, int x, int y, int w, int h,
+                                const struct vx_theme *t) {
+    const char *wallpaper = setting_wallpaper();
+    if (!strcmp(wallpaper, "image")) {
+        char path[256];
+        shown_picture(setting_image(), t, path, sizeof(path));
+        struct thumb *th = thumb_of(path, THUMB_FILL, w, h);
+        if (th->image) {
+            vx_blit(s, x, y, &th->image->surface, 0, 0, w, h);
+            return;
+        }
+        /* Until it's read: the accent, deep (like the default picture). */
+        for (int row = 0; row < h; row++) {
+            vx_fill(s, x, y + row, w, 1,
+                    vx_mix(vx_mix(t->accent, 0, t->dark ? 150 : 70),
+                           vx_mix(t->accent, 0, t->dark ? 230 : 200), row * 255 / (h - 1)));
+        }
+        return;
+    }
+    const struct desktop_wallpaper *g = &desktop_wallpapers[0];
+    for (int i = 0; i < DESKTOP_WALLPAPER_COUNT; i++) {
+        if (!strcmp(desktop_wallpapers[i].name, wallpaper)) {
+            g = &desktop_wallpapers[i];
+        }
+    }
+    for (int row = 0; row < h; row++) {
+        vx_fill(s, x, y + row, w, 1, vx_mix(g->top, g->bottom, row * 255 / (h - 1)));
+    }
+}
+
 /* ---- Appearance ---- */
 
-static void draw_preview(int x, int y, const char *theme, bool on) {
-    struct vx_theme t;
-    vx_theme_make(&t, theme, vx_settings_get(&desk, "accent", "blue"));
-    vx_fill_rounded(S(), x - 4, y - 4, 148, 98, 8, on ? VX_COLOR_ACCENT : VX_COLOR_LINE, 255);
-    /* A little desktop: the default wallpaper's colors (the accent's, deeper
-     * in the dark), a window with a glass title bar (its three balls) and a
-     * button. */
-    uint32_t sky = vx_mix(t.accent, 0, t.dark ? 150 : 70), deep = vx_mix(t.accent, 0, t.dark ? 230 : 200);
-    for (int row = 0; row < 90; row++) {
-        vx_fill(S(), x, y + row, 140, 1, vx_mix(sky, deep, row * 255 / 89));
-    }
-    vx_fill(S(), x, y, 140, 8, vx_mix(t.panel, sky, 90));
-    uint32_t bar = t.dark ? vx_mix(t.accent, 0x101018, 105) : vx_mix(t.accent, 0xffffff, 105);
-    vx_fill_rounded(S(), x + 14, y + 16, 112, 22, 5, bar, 255);
-    for (int row = 0; row < 7; row++) {
-        vx_fill(S(), x + 16, y + 17 + row, 108, 1, vx_mix(bar, 0xffffff, 120 - row * 12));
+#define PREVIEW_W 168
+#define PREVIEW_H 105
+
+/* A little desktop in a theme: the wallpaper, the panel, and a window (its
+ * glass title bar and three balls, a sidebar, text and a button). */
+static void draw_little_desktop(struct vx_surface *s, const struct vx_theme *t) {
+    int w = s->width, h = s->height;
+    draw_wallpaper_into(s, 0, 0, w, h, t);
+    vx_fill_rounded(s, 0, 0, w, 9, 0, t->panel, 215);
+    vx_fill_rounded(s, 3, 2, 14, 5, 2, t->accent, 255);
+    vx_fill(s, w - 22, 4, 18, 2, t->text);
+    /* The window: its shadow, title bar, sidebar and content. */
+    int wx = 20, wy = 21, ww = w - 40, wh = h - 32;
+    vx_fill_rounded(s, wx - 2, wy, ww + 4, wh + 4, 7, 0x000000, 70);
+    vx_fill_rounded(s, wx, wy, ww, wh, 6, t->window, 255);
+    uint32_t bar = t->title_focused;
+    vx_fill_rounded(s, wx, wy, ww, 14, 6, bar, 255);
+    vx_fill(s, wx, wy + 8, ww, 6, bar);
+    for (int row = 0; row < 6; row++) {
+        vx_fill(s, wx + 4, wy + 1 + row, ww - 8, 1, vx_mix(bar, 0xffffff, 110 - row * 16));
     }
     static const uint32_t balls[3] = {0xfebc2e, 0x2ac845, 0xff5f57};
     for (int i = 0; i < 3; i++) {
-        vx_draw_gel(S(), x + 92 + i * 10, y + 19, 8, 8, 4, balls[i]);
+        vx_draw_gel(s, wx + ww - 30 + i * 9, wy + 4, 7, 7, 3, balls[i]);
     }
-    vx_fill(S(), x + 14, y + 30, 112, 50, t.window);
-    vx_fill(S(), x + 20, y + 38, 60, 6, t.text);
-    vx_fill(S(), x + 20, y + 50, 90, 4, t.dim);
-    vx_fill(S(), x + 20, y + 58, 80, 4, t.dim);
-    vx_draw_gel(S(), x + 84, y + 65, 36, 12, 6, t.accent);
+    vx_fill(s, wx, wy + 14, 30, wh - 14, t->sidebar);
+    vx_fill_rounded(s, wx + 3, wy + 18, 24, 6, 3, t->accent, 255);
+    vx_fill(s, wx + 5, wy + 29, 18, 3, t->dim);
+    vx_fill(s, wx + 5, wy + 36, 14, 3, t->dim);
+    vx_fill(s, wx + 38, wy + 20, 54, 5, t->text);
+    vx_fill(s, wx + 38, wy + 30, ww - 50, 3, t->dim);
+    vx_fill(s, wx + 38, wy + 37, ww - 60, 3, t->dim);
+    vx_draw_gel(s, wx + ww - 38, wy + wh - 15, 30, 10, 5, t->accent);
+    vx_fill_rounded(s, wx + ww - 74, wy + wh - 15, 30, 10, 5, t->button, 255);
+}
+
+static void draw_theme_choice(int x, int y, const char *value, const char *title,
+                              const char *about, bool on) {
+    static uint32_t pixels[2][PREVIEW_W * PREVIEW_H];
+    struct vx_surface little[2] = {{pixels[0], PREVIEW_W, PREVIEW_H, PREVIEW_W},
+                                   {pixels[1], PREVIEW_W, PREVIEW_H, PREVIEW_W}};
+    const char *accent = vx_settings_get(&desk, "accent", "blue");
+    struct vx_theme light, dark;
+    vx_theme_make(&light, "light", accent);
+    vx_theme_make(&dark, "dark", accent);
+    bool is_auto = !strcmp(value, "auto");
+    draw_little_desktop(&little[0], !strcmp(value, "dark") ? &dark : &light);
+    if (is_auto) { /* Half of each: light at the left, dark at the right, cut aslant. */
+        draw_little_desktop(&little[1], &dark);
+        for (int row = 0; row < PREVIEW_H; row++) {
+            int cut = PREVIEW_W / 2 + (PREVIEW_H / 2 - row) * 2 / 5;
+            memcpy(&pixels[0][row * PREVIEW_W + cut], &pixels[1][row * PREVIEW_W + cut],
+                   (size_t)(PREVIEW_W - cut) * 4);
+        }
+    }
+    /* Chosen: a ring of the accent. If not, a thin edge (light ones stand out). */
+    uint32_t edge = vx_theme.dark ? vx_mix(card_color(), 0xffffff, 40) : 0xc9ced8;
+    if (on) {
+        chosen_ring(x, y, PREVIEW_W, PREVIEW_H, 10);
+    } else {
+        vx_fill_rounded(S(), x - 1, y - 1, PREVIEW_W + 2, PREVIEW_H + 2, 11, edge, 255);
+    }
+    vx_blit(S(), x, y, &little[0], 0, 0, PREVIEW_W, PREVIEW_H);
+    round_corners(S(), x, y, PREVIEW_W, PREVIEW_H, 10, on ? card_color() : edge);
+    if (on) {
+        chosen_badge(x, y, PREVIEW_W);
+    }
+    int tw = vx_text_width(title);
+    vx_text(S(), vx_font(on ? VX_FACE_BOLD : VX_FACE_SANS, 13), x + (PREVIEW_W - tw) / 2,
+            y + PREVIEW_H + 10, title, VX_COLOR_TEXT, VX_TRANSPARENT);
+    int aw = vx_text_width(about);
+    vx_draw_text_fit(S(), x + (aw < PREVIEW_W ? (PREVIEW_W - aw) / 2 : 0), y + PREVIEW_H + 28,
+                     PREVIEW_W, about, VX_COLOR_DIM, VX_TRANSPARENT);
+    struct hit *h = add_hit(x - 4, y - 4, PREVIEW_W + 8, PREVIEW_H + 52, H_SEGMENT);
+    h->key = "theme";
+    h->value = value;
+}
+
+/* A sample of the controls, in the colors chosen (not working: to look at). */
+static void draw_sample(int x, int y) {
+    vx_draw_button(S(), x, y, 82, 26, "Cancel", false);
+    vx_draw_button_flags(S(), x + 90, y, 82, 26, "OK", VX_BUTTON_HOT);
+    vx_draw_gel(S(), x + 192, y + 3, 40, 20, 10, VX_COLOR_ACCENT); /* A switch, on. */
+    knob(x + 213, y + 4, 18, 18);
+    track(x + 248, y + 3, 40, 20, VX_COLOR_BUTTON_HOT); /* ...and off. */
+    knob(x + 249, y + 4, 18, 18);
+    vx_draw_check(S(), x + 306, y + 5, true);
+    text(x + 328, y + 5, "Checked", VX_COLOR_TEXT);
+    vx_draw_check(S(), x + 410, y + 5, false);
+    text(x + 432, y + 5, "Not", VX_COLOR_TEXT);
+    y += 40;
+    track(x, y + 8, 172, 6, VX_COLOR_BUTTON_HOT); /* A slider. */
+    vx_draw_gel(S(), x, y + 8, 108, 6, 3, VX_COLOR_ACCENT);
+    knob(x + 100, y + 3, 16, 16);
+    vx_draw_progress(S(), x + 192, y + 5, 150, 12, 62, 100);
+    vx_draw_field(S(), x + 362, y - 2, 176, "Some text", false);
+    y += 34;
+    uint32_t list = vx_theme.view;
+    vx_fill_rounded(S(), x, y, 538, 58, 6, VX_COLOR_LINE, 255);
+    vx_fill_rounded(S(), x + 1, y + 1, 536, 56, 5, list, 255);
+    vx_draw_selection(S(), x + 4, y + 4, 530, 24);
+    text(x + 14, y + 8, "A chosen row", 0xffffff);
+    text(x + 14, y + 34, "Another row", VX_COLOR_TEXT);
+    text(x + 440, y + 34, "12 KB", VX_COLOR_DIM);
 }
 
 static void draw_appearance(void) {
-    int y = 64;
-    heading("Look", y);
-    y += 32;
+    int y = 60;
     const char *theme = vx_settings_get(&desk, "theme", "light");
-    static const char *const themes[] = {"dark", "light"};
-    for (int i = 0; i < 2; i++) {
-        int x = LEFT + i * 180;
-        draw_preview(x, y, themes[i], !strcmp(theme, themes[i]));
-        text(x + 50, y + 100, i ? "Light" : "Dark", VX_COLOR_TEXT);
-        struct hit *h = add_hit(x - 3, y - 3, 146, 120, H_SEGMENT);
-        h->key = "theme";
-        h->value = themes[i];
+    /* The theme: light, dark, or each when it suits (dark at night). */
+    card(y, 230);
+    card_title(y + 14, "Theme", "How windows, the panel and menus look. Apps change at once.");
+    static const char *const values[] = {"light", "dark", "auto"};
+    static const char *const titles[] = {"Light", "Dark", "Automatic"};
+    char night[48];
+    snprintf(night, sizeof(night), "Dark from %d pm to %d am", VX_THEME_NIGHT_STARTS - 12,
+             VX_THEME_DAY_STARTS);
+    const char *abouts[] = {"Bright, for daytime", "Easy on the eyes", night};
+    int gap = (CONTENT_W - 2 * CARD_PAD - 3 * PREVIEW_W) / 2;
+    for (int i = 0; i < 3; i++) {
+        draw_theme_choice(LEFT + CARD_PAD + i * (PREVIEW_W + gap), y + 62, values[i], titles[i],
+                          abouts[i], !strcmp(theme, values[i]));
     }
-    y += 140;
-    heading("Accent color", y);
-    y += 32;
+    y += 230 + 14;
+
+    /* The accent: a color for what's chosen, buttons and the glass. */
+    card(y, 126);
     const char *accent = vx_settings_get(&desk, "accent", "blue");
+    int chosen = 1;
     for (int i = 0; i < vx_accent_count; i++) {
-        int x = LEFT + i * 62;
-        bool on = !strcmp(accent, vx_accents[i].name);
+        chosen = !strcmp(accent, vx_accents[i].name) ? i : chosen;
+    }
+    char about[96];
+    snprintf(about, sizeof(about), "%s: for selections, buttons, switches and title bars.",
+             vx_accents[chosen].label);
+    card_title(y + 14, "Accent color", about);
+    int step = (CONTENT_W - 2 * CARD_PAD) / vx_accent_count;
+    for (int i = 0; i < vx_accent_count; i++) {
+        int cx = LEFT + CARD_PAD + i * step + step / 2, cy = y + 74;
+        bool on = i == chosen;
         if (on) {
-            vx_fill_rounded(S(), x - 3, y - 3, 38, 38, 19, VX_COLOR_ACCENT, 120);
+            vx_fill_rounded(S(), cx - 22, cy - 22, 44, 44, 22, vx_accents[i].color, 255);
+            vx_fill_rounded(S(), cx - 20, cy - 20, 40, 40, 20, card_color(), 255);
         }
-        vx_draw_gel(S(), x, y, 32, 32, 16, vx_accents[i].color);
-        vx_draw_text_fit(S(), x - 10, y + 40, 56, vx_accents[i].label,
-                         on ? VX_COLOR_TEXT : VX_COLOR_DIM, VX_TRANSPARENT);
-        struct hit *h = add_hit(x - 3, y - 3, 38, 60, H_ACCENT);
+        vx_draw_gel(S(), cx - 16, cy - 16, 32, 32, 16, vx_accents[i].color);
+        if (on) {
+            tick(S(), cx - 7, cy - 8, 14, 0xffffff);
+        }
+        int lw = vx_text_width(vx_accents[i].label);
+        vx_draw_text_fit(S(), cx - (lw < step ? lw / 2 : step / 2), cy + 26, step,
+                         vx_accents[i].label, on ? VX_COLOR_TEXT : VX_COLOR_DIM, VX_TRANSPARENT);
+        struct hit *h = add_hit(cx - step / 2, cy - 24, step, 64, H_ACCENT);
         h->index = i;
     }
-    y += 72;
-    note(y, "Vexa's apps, the desktop's panel, menus and title bars follow these at once.");
-    note(y + 20, "The terminal stays dark; its cursor takes the accent color.");
+    y += 126 + 14;
+
+    /* How it looks: a few controls, in these colors. */
+    card(y, 198);
+    card_title(y + 14, "Preview", "Vexa's apps draw their controls like this.");
+    draw_sample(LEFT + CARD_PAD, y + 60);
+    y += 198 + 14;
+
+    /* The wallpaper (it's on its own page): what it is, and a way there. */
+    card(y, 76);
+    static uint32_t pixels[96 * 60];
+    struct vx_surface small = {pixels, 96, 60, 96};
+    draw_wallpaper_into(&small, 0, 0, 96, 60, &vx_theme);
+    vx_blit(S(), LEFT + CARD_PAD, y + 8, &small, 0, 0, 96, 60);
+    round_corners(S(), LEFT + CARD_PAD, y + 8, 96, 60, 6, card_color());
+    char name[64];
+    const char *wallpaper = setting_wallpaper();
+    if (!strcmp(wallpaper, "image")) {
+        picture_name(setting_image(), name, sizeof(name));
+    } else {
+        snprintf(name, sizeof(name), "%s", "Gradient");
+        for (int i = 0; i < DESKTOP_WALLPAPER_COUNT; i++) {
+            if (!strcmp(desktop_wallpapers[i].name, wallpaper)) {
+                snprintf(name, sizeof(name), "%s", desktop_wallpapers[i].label);
+            }
+        }
+    }
+    int tx = LEFT + CARD_PAD + 112;
+    vx_text(S(), vx_font(VX_FACE_BOLD, 13), tx, y + 18, "Wallpaper", VX_COLOR_TEXT, VX_TRANSPARENT);
+    char line[96];
+    snprintf(line, sizeof(line), "%s%s", name,
+             !strcmp(wallpaper, "image") && is_default_picture(setting_image())
+                 ? " - in your theme's colors" : "");
+    text(tx, y + 40, line, VX_COLOR_DIM);
+    int bx = LEFT + CONTENT_W - CARD_PAD - 110;
+    vx_draw_button(S(), bx, y + 24, 110, 28, "Change...", false);
+    add_hit(bx, y + 24, 110, 28, H_GO_WALLPAPER);
+    y += 76;
+    page_bottom = y + 24;
 }
 
 /* ---- Wallpaper ---- */
 
-#define MAX_PICTURES 12
+/* Pictures: Vexa's (in /share/pictures), then the person's own (in their
+ * Pictures folder). */
+#define MAX_PICTURES 24
 static struct picture {
     char path[256];
     char name[64];
-    struct vx_image *thumb;
-    bool tried;
-    char shown[96]; /* The default picture: which colors' its thumbnail is of. */
+    bool mine;
 } pictures[MAX_PICTURES];
 static int picture_count;
 
-static void find_pictures(void) {
-    picture_count = 0;
-    int handle = vx_open(PICTURES, VX_OPEN_READ);
+static void find_in(const char *folder, bool mine) {
+    int handle = vx_open(folder, VX_OPEN_READ);
     if (handle < 0) {
         return;
     }
     struct vx_dir_entry entries[16];
     long n;
+    int limit = mine ? MAX_PICTURES : 12;
     while ((n = vx_read_dir(handle, entries, 16)) > 0) {
-        for (long i = 0; i < n && picture_count < MAX_PICTURES; i++) {
+        for (long i = 0; i < n && picture_count < limit; i++) {
             const char *dot = strrchr(entries[i].name, '.');
             if (entries[i].type != VX_TYPE_FILE || !dot ||
                 (strcmp(dot, ".png") && strcmp(dot, ".bmp") && strcmp(dot, ".ppm"))) {
@@ -440,113 +888,268 @@ static void find_pictures(void) {
             }
             struct picture *p = &pictures[picture_count++];
             memset(p, 0, sizeof(*p));
-            snprintf(p->path, sizeof(p->path), "%s/%s", PICTURES, entries[i].name);
-            snprintf(p->name, sizeof(p->name), "%.*s", (int)(dot - entries[i].name), entries[i].name);
+            snprintf(p->path, sizeof(p->path), "%s/%s", folder, entries[i].name);
+            picture_name(p->path, p->name, sizeof(p->name));
+            p->mine = mine;
         }
     }
     vx_close(handle);
 }
 
-/* A picture's thumbnail (made when Settings has nothing else to do). */
-static bool make_next_thumbnail(void) {
-    for (int i = 0; i < picture_count; i++) {
-        struct picture *p = &pictures[i];
-        if (p->tried) {
-            continue;
+static void find_pictures(void) {
+    picture_count = 0;
+    find_in(PICTURES, false);
+    /* The default first. */
+    for (int i = 1; i < picture_count; i++) {
+        if (is_default_picture(pictures[i].path)) {
+            struct picture p = pictures[0];
+            pictures[0] = pictures[i];
+            pictures[i] = p;
         }
-        p->tried = true;
-        struct vx_image *full = NULL;
-        if (!strcmp(p->path, DESKTOP_DEFAULT_WALLPAPER)) { /* In the theme's colors. */
-            vx_theme_wallpaper(&vx_theme, p->shown, sizeof(p->shown));
-            full = vx_image_load(p->shown, 0);
-        }
-        if (!full) {
-            full = vx_image_load(p->path, 0);
-        }
-        if (full) {
-            struct vx_image *thumb = malloc(sizeof(*thumb));
-            uint32_t *pixels = thumb ? malloc(112 * 70 * 4) : NULL;
-            if (pixels) {
-                thumb->surface = (struct vx_surface){pixels, 112, 70, 112};
-                /* Filling the thumbnail, as the wallpaper fills the screen. */
-                int iw = full->surface.width, ih = full->surface.height;
-                int w = 112, h = ih * 112 / iw;
-                if (h < 70) {
-                    h = 70;
-                    w = iw * 70 / ih;
-                }
-                vx_blit_scaled(&thumb->surface, (112 - w) / 2, (70 - h) / 2, w, h, &full->surface);
-                p->thumb = thumb;
-            } else {
-                free(thumb);
-            }
-            vx_image_free(full);
-        }
-        return true;
     }
-    return false;
+    find_in(vx_home_folder("Pictures"), true);
 }
 
+#define TILE_W 176
+#define TILE_H 110
+
+/* A picture to choose: its thumbnail, rounded, and its name. */
+static void draw_picture_tile(int x, int y, const struct picture *p, int index, bool on) {
+    if (on) {
+        chosen_ring(x, y, TILE_W, TILE_H, 10);
+    }
+    char path[256];
+    shown_picture(p->path, &vx_theme, path, sizeof(path));
+    struct thumb *t = thumb_of(path, THUMB_FILL, TILE_W, TILE_H);
+    if (t->image) {
+        vx_blit(S(), x, y, &t->image->surface, 0, 0, TILE_W, TILE_H);
+    } else {
+        vx_fill(S(), x, y, TILE_W, TILE_H, VX_COLOR_BUTTON);
+        const char *what = t->tried ? "Can't be read" : "Loading...";
+        text(x + (TILE_W - vx_text_width(what)) / 2, y + TILE_H / 2 - 8, what, VX_COLOR_DIM);
+    }
+    round_corners(S(), x, y, TILE_W, TILE_H, 10, card_color());
+    if (on) {
+        chosen_badge(x, y, TILE_W);
+    }
+    vx_draw_text_fit(S(), x, y + TILE_H + 8, TILE_W, p->name, on ? VX_COLOR_TEXT : VX_COLOR_DIM,
+                     VX_TRANSPARENT);
+    if (is_default_picture(p->path)) {
+        vx_draw_text_fit(S(), x, y + TILE_H + 26, TILE_W, "Changes with your colors",
+                         VX_COLOR_DIM, VX_TRANSPARENT);
+    }
+    struct hit *h = add_hit(x - 4, y - 4, TILE_W + 8, TILE_H + 30, H_PICTURE);
+    h->index = index;
+}
+
+/* The tile that adds a picture from anywhere (the Open dialog). */
+static void draw_add_tile(int x, int y) {
+    uint32_t edge = vx_theme.dark ? vx_mix(card_color(), 0xffffff, 40) : 0xc9ced8;
+    vx_fill_rounded(S(), x, y, TILE_W, TILE_H, 10, edge, 255);
+    vx_fill_rounded(S(), x + 2, y + 2, TILE_W - 4, TILE_H - 4, 9,
+                    vx_mix(card_color(), VX_COLOR_ACCENT, 18), 255);
+    int cx = x + TILE_W / 2, cy = y + TILE_H / 2 - 10;
+    vx_draw_gel(S(), cx - 16, cy - 16, 32, 32, 16, VX_COLOR_ACCENT);
+    vx_fill(S(), cx - 8, cy - 1, 16, 3, 0xffffff);
+    vx_fill(S(), cx - 1, cy - 8, 3, 16, 0xffffff);
+    const char *t = "Choose a Picture...";
+    text(cx - vx_text_width(t) / 2, cy + 24, t, VX_COLOR_TEXT);
+    add_hit(x, y, TILE_W, TILE_H, H_ADD_PICTURE);
+}
+
+/* The screen's size (pictures are shown as on it). */
+static void screen_size(int *w, int *h) {
+    int scale = vx_settings_int(&desk, "display_scale", 1);
+    scale = scale < 1 ? 1 : scale;
+    *w = have_display && display_info.width ? (int)display_info.width / scale : 1280;
+    *h = have_display && display_info.height ? (int)display_info.height / scale : 800;
+}
+
+#define SCREEN_W 272
+
+/* The screen, small: the wallpaper as it's placed (fill, fit, center,
+ * tile, stretch), the panel across its top. */
+static void draw_screen_preview(int x, int y, int sh) {
+    int sw = SCREEN_W, w, h;
+    screen_size(&w, &h);
+    /* The monitor: a dark bezel, and its stand. */
+    vx_fill_rounded(S(), x + sw / 2 - 30, y + sh + 12, 60, 6, 3, VX_COLOR_DIM, 255);
+    vx_fill(S(), x + sw / 2 - 10, y + sh + 6, 20, 7, vx_mix(VX_COLOR_DIM, 0, 40));
+    vx_fill_rounded(S(), x - 6, y - 6, sw + 12, sh + 12, 10, 0x1a1a1c, 255);
+    struct vx_surface *s = S();
+    const char *mode = vx_settings_get(&desk, "wallpaper_mode", "fill");
+    if (strcmp(setting_wallpaper(), "image") || !strcmp(mode, "fill")) {
+        draw_wallpaper_into(s, x, y, sw, sh, &vx_theme);
+    } else {
+        for (int row = 0; row < sh; row++) { /* Behind a picture that doesn't cover it. */
+            vx_fill(s, x, y + row, sw, 1, vx_mix(0x202028, 0x08080c, row * 255 / (sh - 1)));
+        }
+        char path[256];
+        shown_picture(setting_image(), &vx_theme, path, sizeof(path));
+        enum thumb_kind kind = !strcmp(mode, "fit") ? THUMB_FIT
+                               : !strcmp(mode, "stretch") ? THUMB_STRETCH : THUMB_SCALE;
+        struct thumb *t = kind == THUMB_SCALE ? thumb_of(path, kind, sw, w)
+                                              : thumb_of(path, kind, sw, sh);
+        if (t->image) {
+            const struct vx_surface *im = &t->image->surface;
+            int iw = im->width, ih = im->height;
+            int ox = (sw - iw) / 2, oy = (sh - ih) / 2, step_x = sw, step_y = sh;
+            if (!strcmp(mode, "tile")) {
+                ox = oy = 0;
+                step_x = iw;
+                step_y = ih;
+            }
+            for (int ty = oy; ty < sh; ty += step_y) {
+                for (int tx = ox; tx < sw; tx += step_x) {
+                    /* (Only what's inside the screen.) */
+                    int fx = tx < 0 ? -tx : 0, fy = ty < 0 ? -ty : 0;
+                    int cw = (tx + iw > sw ? sw - tx : iw) - fx;
+                    int ch = (ty + ih > sh ? sh - ty : ih) - fy;
+                    if (cw > 0 && ch > 0) {
+                        vx_blit(s, x + tx + fx, y + ty + fy, im, fx, fy, cw, ch);
+                    }
+                    if (strcmp(mode, "tile")) {
+                        break;
+                    }
+                }
+                if (strcmp(mode, "tile")) {
+                    break;
+                }
+            }
+        }
+    }
+    vx_fill_rounded(s, x, y, sw, 7, 0, vx_theme.panel, 215); /* The panel. */
+    vx_fill_rounded(s, x + 3, y + 1, 12, 5, 2, VX_COLOR_ACCENT, 255);
+    round_corners(s, x, y, sw, sh, 4, 0x1a1a1c);
+}
+
+static const struct option wallpaper_modes[] = {
+    {"fill", "Fill the screen"}, {"fit", "Fit to the screen"}, {"center", "Center"},
+    {"tile", "Tile"},            {"stretch", "Stretch"},
+};
+#define WALLPAPER_MODE_COUNT 5
+
 static void draw_wallpaper(void) {
-    int y = 64;
-    const char *wallpaper = vx_settings_get(&desk, "wallpaper", "image");
-    const char *image = vx_settings_get(&desk, "wallpaper_image", DESKTOP_DEFAULT_WALLPAPER);
-    heading("Pictures", y);
-    y += 30;
-    /* The default picture follows the colors: when they change, its thumbnail too. */
-    char now[96];
-    vx_theme_wallpaper(&vx_theme, now, sizeof(now));
-    for (int i = 0; i < picture_count; i++) {
-        if (pictures[i].thumb && pictures[i].shown[0] && strcmp(pictures[i].shown, now)) {
-            vx_image_free(pictures[i].thumb);
-            pictures[i].thumb = NULL;
-            pictures[i].tried = false;
-        }
-    }
-    for (int i = 0; i < picture_count; i++) {
-        int x = LEFT + (i % 4) * 128, py = y + (i / 4) * 98;
-        bool on = !strcmp(wallpaper, "image") && !strcmp(image, pictures[i].path);
-        vx_fill_rounded(S(), x - 3, py - 3, 118, 76, 6, on ? VX_COLOR_ACCENT : VX_COLOR_LINE, 255);
-        if (pictures[i].thumb) {
-            vx_blit(S(), x, py, &pictures[i].thumb->surface, 0, 0, 112, 70);
+    int y = 60, w, h;
+    screen_size(&w, &h);
+    int sh = SCREEN_W * h / w;
+    const char *wallpaper = setting_wallpaper();
+    bool picture = !strcmp(wallpaper, "image");
+
+    /* What it is now: the screen, small, and how a picture is placed. */
+    int top = sh + 58 > 200 ? sh + 58 : 200;
+    card(y, top);
+    draw_screen_preview(LEFT + CARD_PAD + 6, y + 22, sh);
+    int rx = LEFT + CARD_PAD + SCREEN_W + 36, rw = LEFT + CONTENT_W - CARD_PAD - rx;
+    char name[64], about[96];
+    if (picture) {
+        picture_name(setting_image(), name, sizeof(name));
+        if (is_default_picture(setting_image())) {
+            snprintf(about, sizeof(about), "Vexa's picture, in your theme's colors");
         } else {
-            vx_fill(S(), x, py, 112, 70, VX_COLOR_BUTTON);
-            text(x + 20, py + 27, "Loading...", VX_COLOR_DIM);
+            char path[256];
+            shown_picture(setting_image(), &vx_theme, path, sizeof(path));
+            struct thumb *t = thumb_of(path, THUMB_FILL, TILE_W, TILE_H);
+            if (t->picture_w) {
+                snprintf(about, sizeof(about), "A picture, %d x %d", t->picture_w, t->picture_h);
+            } else {
+                snprintf(about, sizeof(about), "A picture");
+            }
         }
-        vx_draw_text_fit(S(), x, py + 76, 112, pictures[i].name, on ? VX_COLOR_TEXT : VX_COLOR_DIM,
-                         VX_TRANSPARENT);
-        struct hit *h = add_hit(x - 3, py - 3, 118, 96, H_PICTURE);
-        h->index = i;
+    } else {
+        snprintf(name, sizeof(name), "Gradient");
+        for (int i = 0; i < DESKTOP_WALLPAPER_COUNT; i++) {
+            if (!strcmp(desktop_wallpapers[i].name, wallpaper)) {
+                snprintf(name, sizeof(name), "%s", desktop_wallpapers[i].label);
+            }
+        }
+        snprintf(about, sizeof(about), "A color, darker at the bottom");
     }
-    y += ((picture_count + 3) / 4) * 98 + 4;
-    heading("Gradients", y);
-    y += 30;
+    vx_text(S(), vx_font(VX_FACE_BOLD, 18), rx, y + 20, name, VX_COLOR_TEXT, VX_TRANSPARENT);
+    vx_draw_text_fit(S(), rx, y + 46, rw, about, VX_COLOR_DIM, VX_TRANSPARENT);
+    text(rx, y + 82, "Position", picture ? VX_COLOR_TEXT : VX_COLOR_DIM);
+    const char *mode = vx_settings_get(&desk, "wallpaper_mode", "fill");
+    const char *mode_title = wallpaper_modes[0].title;
+    for (int i = 0; i < WALLPAPER_MODE_COUNT; i++) {
+        mode_title = !strcmp(mode, wallpaper_modes[i].value) ? wallpaper_modes[i].title
+                                                             : mode_title;
+    }
+    char shown[48];
+    snprintf(shown, sizeof(shown), "%s  v", mode_title);
+    vx_draw_button_flags(S(), rx, y + 102, rw, 28, shown, picture ? 0 : VX_BUTTON_DISABLED);
+    if (picture) {
+        add_hit(rx, y + 102, rw, 28, H_WALLPAPER_MODE);
+    }
+    vx_draw_button(S(), rx, y + 142, rw, 28, "Choose a Picture...", false);
+    add_hit(rx, y + 142, rw, 28, H_ADD_PICTURE);
+    y += top + 14;
+
+    /* Vexa's pictures. */
+    int gap = (CONTENT_W - 2 * CARD_PAD - 3 * TILE_W) / 2;
+    int vexa = 0, mine = 0;
+    for (int i = 0; i < picture_count; i++) {
+        vexa += !pictures[i].mine;
+        mine += pictures[i].mine;
+    }
+    int row_h = TILE_H + 50;
+    int vexa_h = 58 + ((vexa + 2) / 3) * row_h;
+    card(y, vexa_h);
+    card_title(y + 14, "Vexa Pictures", NULL);
+    for (int i = 0, n = 0; i < picture_count; i++) {
+        if (pictures[i].mine) {
+            continue;
+        }
+        bool on = picture && !strcmp(setting_image(), pictures[i].path);
+        draw_picture_tile(LEFT + CARD_PAD + (n % 3) * (TILE_W + gap), y + 50 + (n / 3) * row_h,
+                          &pictures[i], i, on);
+        n++;
+    }
+    y += vexa_h + 14;
+
+    /* The person's own pictures (their Pictures folder), and others from
+     * anywhere. */
+    int mine_h = 64 + ((mine + 1 + 2) / 3) * row_h - 24;
+    card(y, mine_h);
+    card_title(y + 14, "Your Pictures", "From the Pictures folder in your home (PNG, BMP or PPM).");
+    int n = 0;
+    for (int i = 0; i < picture_count; i++) {
+        if (!pictures[i].mine) {
+            continue;
+        }
+        bool on = picture && !strcmp(setting_image(), pictures[i].path);
+        draw_picture_tile(LEFT + CARD_PAD + (n % 3) * (TILE_W + gap), y + 64 + (n / 3) * row_h,
+                          &pictures[i], i, on);
+        n++;
+    }
+    draw_add_tile(LEFT + CARD_PAD + (n % 3) * (TILE_W + gap), y + 64 + (n / 3) * row_h);
+    y += mine_h + 14;
+
+    /* Colors: gradients. */
+    int per_row = 5, cw = (CONTENT_W - 2 * CARD_PAD - (per_row - 1) * 14) / per_row, ch = 64;
+    int colors_h = 58 + ((DESKTOP_WALLPAPER_COUNT + per_row - 1) / per_row) * (ch + 40);
+    card(y, colors_h);
+    card_title(y + 14, "Colors", NULL);
     for (int i = 0; i < DESKTOP_WALLPAPER_COUNT; i++) {
-        int x = LEFT + i * 96;
+        int x = LEFT + CARD_PAD + (i % per_row) * (cw + 14), gy = y + 50 + (i / per_row) * (ch + 40);
         bool on = !strcmp(wallpaper, desktop_wallpapers[i].name);
-        vx_fill(S(), x - 3, y - 3, 86, 56, on ? VX_COLOR_ACCENT : VX_COLOR_LINE);
-        for (int row = 0; row < 50; row++) {
-            vx_fill(S(), x, y + row, 80, 1,
-                    vx_mix(desktop_wallpapers[i].top, desktop_wallpapers[i].bottom, row * 255 / 49));
+        if (on) {
+            chosen_ring(x, gy, cw, ch, 10);
         }
-        text(x, y + 56, desktop_wallpapers[i].label, on ? VX_COLOR_TEXT : VX_COLOR_DIM);
-        struct hit *h = add_hit(x - 3, y - 3, 86, 76, H_GRADIENT);
-        h->index = i;
+        for (int row = 0; row < ch; row++) {
+            vx_fill(S(), x, gy + row, cw, 1,
+                    vx_mix(desktop_wallpapers[i].top, desktop_wallpapers[i].bottom, row * 255 / (ch - 1)));
+        }
+        round_corners(S(), x, gy, cw, ch, 10, card_color());
+        if (on) {
+            tick(S(), x + cw / 2 - 8, gy + ch / 2 - 9, 16, 0xffffff);
+        }
+        vx_draw_text_fit(S(), x, gy + ch + 8, cw, desktop_wallpapers[i].label,
+                         on ? VX_COLOR_TEXT : VX_COLOR_DIM, VX_TRANSPARENT);
+        struct hit *hit = add_hit(x - 4, gy - 4, cw + 8, ch + 30, H_GRADIENT);
+        hit->index = i;
     }
-    y += 84;
-    static const struct option modes[] = {
-        {"fill", "Fill"}, {"fit", "Fit"}, {"center", "Center"}, {"tile", "Tile"}, {"stretch", "Stretch"},
-    };
-    segments(y, "A picture", "wallpaper_mode", modes, 5, "fill");
-    y += ROW + 4;
-    label(y, "Another picture");
-    int fw = window->surface.width - CONTROL - 24 - 70;
-    vx_draw_field(S(), CONTROL, y + 1, fw, field == FIELD_PICTURE ? picture_path : image,
-                  field == FIELD_PICTURE);
-    add_hit(CONTROL, y + 1, fw, 24, H_PICTURE_FIELD);
-    vx_draw_button(S(), CONTROL + fw + 8, y + 1, 62, 24, "Use", false);
-    add_hit(CONTROL + fw + 8, y + 1, 62, 24, H_USE_PICTURE);
-    note(y + 32, "A PNG, BMP or PPM file; type its path and press Enter.");
+    y += colors_h;
+    page_bottom = y + 24;
 }
 
 /* ---- Desktop & Panel ---- */
@@ -1353,10 +1956,24 @@ static void draw_sidebar(void) {
 }
 
 static void draw(void) {
-    struct vx_surface *s = S();
+    struct vx_surface *s = &window->surface;
     hit_count = 0;
-    vx_fill(s, 0, 0, s->width, s->height, VX_COLOR_WINDOW);
+    target = NULL;
     draw_sidebar();
+    /* The page, on its own surface (made once), then the part of it showing. */
+    if (!page.pixels || page.width != s->width) {
+        free(page.pixels);
+        page = (struct vx_surface){malloc((size_t)s->width * PAGE_HEIGHT * 4), s->width,
+                                   PAGE_HEIGHT, s->width};
+    }
+    if (!page.pixels) {
+        page.width = 0;
+        return;
+    }
+    target = &page;
+    page_bottom = 0;
+    int shown = scroll + s->height < PAGE_HEIGHT ? scroll + s->height : PAGE_HEIGHT;
+    vx_fill(&page, SIDEBAR, 0, page.width - SIDEBAR, shown, VX_COLOR_WINDOW);
     big_text(LEFT, 14, sections[current].label, 24, VX_COLOR_TEXT);
     switch (current) {
     case S_APPEARANCE: draw_appearance(); break;
@@ -1375,6 +1992,19 @@ static void draw(void) {
     case S_ABOUT: draw_about(); break;
     case SECTION_COUNT: break;
     }
+    target = NULL;
+    int most = page_bottom > s->height ? page_bottom - s->height + 16 : 0;
+    if (scroll > most) { /* (It got shorter.) */
+        scroll = most;
+        draw();
+        return;
+    }
+    vx_blit(s, SIDEBAR, 0, &page, SIDEBAR, scroll, s->width - SIDEBAR, s->height);
+    if (most) { /* A thin bar: where in the page this is. */
+        int total = most + s->height, bar = s->height * s->height / total;
+        int y = (s->height - bar) * scroll / most;
+        vx_fill_rounded(s, s->width - 7, y + 2, 4, bar - 4, 2, VX_COLOR_DIM, 140);
+    }
     if (menu_open) {
         vx_draw_menu(s, menu_x, menu_y, menu, menu_count, menu_hot);
     }
@@ -1386,6 +2016,7 @@ static void draw(void) {
 static void show_section(int i) {
     if (i != (int)current) {
         current = (enum section)i;
+        scroll = 0;
         printf("settings: showing %s\n", sections[i].label);
         fflush(stdout);
     }
@@ -1460,6 +2091,10 @@ static void menu_chosen(int item) {
     if (item < 0) {
         return;
     }
+    if (!strcmp(menu_key, "wallpaper_mode")) {
+        set("wallpaper_mode", wallpaper_modes[menu_values[item]].value);
+        return;
+    }
     if (!strcmp(menu_key, "power")) {
         if (menu_values[item]) {
             printf("settings: %s\n", menu_values[item] == VX_POWER_RESTART ? "restart" : "shut down");
@@ -1502,6 +2137,23 @@ static void click(struct hit *h, int px) {
     }
     case H_ACCENT: set("accent", vx_accents[h->index].name); break;
     case H_PICTURE: use_picture(pictures[h->index].path); break;
+    case H_GO_WALLPAPER: show_section(S_WALLPAPER); break;
+    case H_ADD_PICTURE: {
+        char path[256];
+        if (vx_open_dialog("Choose a Picture", vx_home_folder("Pictures"), path, sizeof(path))) {
+            use_picture(path);
+        }
+        break;
+    }
+    case H_WALLPAPER_MODE:
+        menu_count = 0;
+        for (int i = 0; i < WALLPAPER_MODE_COUNT; i++) {
+            menu[menu_count] = (struct vx_menu_item){wallpaper_modes[i].title, NULL, false};
+            menu_values[menu_count++] = i;
+        }
+        menu_key = "wallpaper_mode";
+        open_menu(h->x, h->y + h->h + 2);
+        break;
     case H_GRADIENT: set("wallpaper", desktop_wallpapers[h->index].name); break;
     case H_PICTURE_FIELD:
         field = FIELD_PICTURE;
@@ -1732,7 +2384,10 @@ static void pointer(const struct vx_gui_event *e, int *held) {
         }
         return;
     }
-    if (e->wheel && current == S_DATE) {
+    if (e->wheel && page_bottom) { /* A long page scrolls. */
+        scroll -= e->wheel * 48;
+        scroll = scroll < 0 ? 0 : scroll;
+    } else if (e->wheel && current == S_DATE) {
         zone_top -= e->wheel * 3;
         zone_top = zone_top < 0 ? 0 : zone_top > vx_zone_count + 1 - ZONE_ROWS
                                           ? vx_zone_count + 1 - ZONE_ROWS : zone_top;
@@ -1759,6 +2414,7 @@ int main(int argc, char **argv) {
     read_me();
     app_count = vx_app_list(apps, MAX_APPS);
     find_pictures();
+    read_display(); /* (The Wallpaper page shows pictures as on the screen.) */
     /* `settings Display` opens that section. */
     for (int i = 0; argc > 1 && i < SECTION_COUNT; i++) {
         if (!strncmp(sections[i].label, argv[1], strlen(argv[1]))) {
@@ -1770,10 +2426,7 @@ int main(int argc, char **argv) {
         draw();
         /* The clock ticks, a display change counts down, and thumbnails are
          * made when nothing else is happening. */
-        bool busy = false; /* (Thumbnails to make.) */
-        for (int i = 0; current == S_WALLPAPER && i < picture_count; i++) {
-            busy = busy || !pictures[i].tried;
-        }
+        bool busy = thumbs_waiting(); /* (Thumbnails to make.) */
         long wait = busy ? 0 : (current == S_DATE || current == S_ABOUT || revert_at ||
                                 current == S_INPUT || current == S_SOUND) ? 500 : -1;
         struct vx_gui_event e;

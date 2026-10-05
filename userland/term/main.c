@@ -33,15 +33,15 @@
 #define MAX_TABS 8
 #define TAB_BAR 28 /* Shown when there's more than one tab. */
 
-#define COLOR_TEXT 0xe4dcf2
-#define COLOR_BACKGROUND 0x160d26
+#define COLOR_TEXT 0xe6e6e8
+#define COLOR_BACKGROUND 0x1a1a1c
 #define COLOR_CURSOR VX_COLOR_ACCENT /* The terminal stays dark; its cursor is the accent. */
-#define COLOR_SELECTION 0x4a3a78
+#define COLOR_SELECTION 0x48484e
 
 /* The console's 16 colours. */
 static const uint32_t palette[16] = {
-    0x160d26, 0xff6b81, 0x7ee787, 0xf2cc60, 0x79a8ff, 0xb07cff, 0x56d4dd, 0xe4dcf2,
-    0x6e6485, 0xff8fa0, 0xa5f0ab, 0xffe08a, 0xa3c3ff, 0xcca6ff, 0x8de8ef, 0xffffff,
+    0x1a1a1c, 0xff6b81, 0x7ee787, 0xf2cc60, 0x79a8ff, 0xb07cff, 0x56d4dd, 0xe6e6e8,
+    0x6e6e74, 0xff8fa0, 0xa5f0ab, 0xffe08a, 0xa3c3ff, 0xcca6ff, 0x8de8ef, 0xffffff,
 };
 
 /* The 256 colours: the 16, a 6x6x6 cube, and 24 greys. */
@@ -605,7 +605,7 @@ static void draw_tab_bar(struct vx_surface *s) {
     /* (The terminal stays dark: a dark toolbar, the current tab a gel of
      * the accent.) */
     for (int row = 0; row < TAB_BAR; row++) {
-        vx_fill(s, 0, row, s->width, 1, vx_mix(0x2a2238, 0x120c1e, row * 255 / (TAB_BAR - 1)));
+        vx_fill(s, 0, row, s->width, 1, vx_mix(0x2c2c2f, 0x151517, row * 255 / (TAB_BAR - 1)));
     }
     vx_fill(s, 0, TAB_BAR - 1, s->width, 1, 0x05030a);
     int w = (s->width - 36) / tab_count;
@@ -664,7 +664,7 @@ static void redraw(void) {
         int bar = area * rows / total;
         bar = bar < 16 ? 16 : bar;
         int y = top + MARGIN + (area - bar) * (t->history_count - t->scroll) / t->history_count;
-        vx_fill(s, s->width - 7, y, 4, bar, 0x6e6485);
+        vx_fill(s, s->width - 7, y, 4, bar, 0x6e6e74);
     }
     if (menu_open) {
         vx_draw_menu(s, menu_x, menu_y, menu_items, MENU_COUNT, menu_hot);

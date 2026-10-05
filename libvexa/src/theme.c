@@ -3,6 +3,7 @@
 #include <vexa/desktop.h>
 #include <vexa/gui.h>
 #include <vexa/settings.h>
+#include <vexa/time.h>
 
 /* The theme (see <vexa/gui.h>). */
 
@@ -32,21 +33,22 @@ void vx_theme_make(struct vx_theme *t, const char *name, const char *accent) {
     t->accent = color;
     t->dark = name && !strcmp(name, "dark");
     if (t->dark) {
-        t->window = 0x1a1030;
-        t->view = 0x120b22;
-        t->text = 0xe4dcf2;
-        t->dim = 0x8a80a3;
-        t->selected = vx_mix(0x120b22, color, 115);
-        t->button = 0x2c1d4a;
-        t->button_hot = 0x3f2a66;
-        t->line = 0x3a2a5c;
-        t->sidebar = 0x140c26;
-        t->stripe = 0x160e29;
-        t->shadow = 0x06030c;
-        t->panel = 0x140c24;
-        t->menu = 0x1c1230;
-        t->title = 0x2c1d4a;
-        t->title_text = 0xe4dcf2;
+        /* Neutral dark greys (no tint), so only the accent has a color. */
+        t->window = 0x252527;
+        t->view = 0x1c1c1e;
+        t->text = 0xe8e8ea;
+        t->dim = 0x8e8e93;
+        t->selected = vx_mix(0x1c1c1e, color, 115);
+        t->button = 0x3a3a3d;
+        t->button_hot = 0x4a4a4e;
+        t->line = 0x3d3d40;
+        t->sidebar = 0x202022;
+        t->stripe = 0x212123;
+        t->shadow = 0x050505;
+        t->panel = 0x1e1e20;
+        t->menu = 0x2b2b2e;
+        t->title = 0x333336;
+        t->title_text = 0xe8e8ea;
     } else {
         /* Cool, quiet greys (like Aqua's), so the glass and the accent stand out. */
         t->window = 0xeef0f4;
@@ -84,9 +86,18 @@ void vx_theme_wallpaper(const struct vx_theme *t, char *out, size_t size) {
     snprintf(out, size, "/share/pictures/glass/%s-%s.png", accent, t->dark ? "dark" : "light");
 }
 
+bool vx_theme_night(void) {
+    struct vx_date now;
+    vx_local_now(&now);
+    return now.hour < VX_THEME_DAY_STARTS || now.hour >= VX_THEME_NIGHT_STARTS;
+}
+
 void vx_theme_load(void) {
     struct vx_settings s;
     vx_settings_load(&s, "desktop.conf");
-    vx_theme_make(&vx_theme, vx_settings_get(&s, "theme", "light"),
-                  vx_settings_get(&s, "accent", "blue"));
+    const char *name = vx_settings_get(&s, "theme", "light");
+    if (!strcmp(name, "auto")) {
+        name = vx_theme_night() ? "dark" : "light";
+    }
+    vx_theme_make(&vx_theme, name, vx_settings_get(&s, "accent", "blue"));
 }

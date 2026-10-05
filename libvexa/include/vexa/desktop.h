@@ -117,6 +117,11 @@ static const struct desktop_wallpaper desktop_wallpapers[] = {
     {"forest", "Forest", 0x1d4a2f, 0x06140c},
     {"sunset", "Sunset", 0x7a2e3b, 0x1a0b16},
     {"graphite", "Graphite", 0x3a3d45, 0x111216},
+    {"midnight", "Midnight", 0x1d2a4a, 0x060912},
+    {"ember", "Ember", 0x8c3b14, 0x1c0a04},
+    {"sand", "Sand", 0xb39b76, 0x4a3b27},
+    {"rose", "Rose", 0xb0607e, 0x2c1220},
+    {"black", "Black", 0x1c1c1e, 0x000000},
 };
 #define DESKTOP_WALLPAPER_COUNT (int)(sizeof(desktop_wallpapers) / sizeof(desktop_wallpapers[0]))
 

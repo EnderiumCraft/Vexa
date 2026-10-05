@@ -1,35 +1,35 @@
 /* Vexa's GTK 3 theme, dark (for Settings' dark theme): the same gloss over
- * Adwaita's dark, with darker gels and header bar. */
+ * Adwaita's dark, with darker gels and header bar, in neutral greys. */
 @import url("resource:///org/gtk/libgtk/theme/Adwaita/gtk-contained-dark.css");
 @import url("vexa.css");
 
 button, headerbar button, spinbutton button, combobox button {
-    background-image: linear-gradient(to bottom, #6a6380 0%, #4a4460 48%, #3a3450 52%, #4e4866 100%);
-    border-color: #15111f;
+    background-image: linear-gradient(to bottom, #6a6a6e 0%, #4a4a4e 48%, #3a3a3d 52%, #4e4e52 100%);
+    border-color: #111112;
     box-shadow: inset 0 1px rgba(255, 255, 255, 0.18);
-    color: #e4dcf2;
+    color: #e8e8ea;
 }
 button:hover {
-    background-image: linear-gradient(to bottom, #7a7390 0%, #575070 48%, #443e5c 52%, #5a5474 100%);
+    background-image: linear-gradient(to bottom, #7a7a7e 0%, #57575b 48%, #444447 52%, #5a5a5e 100%);
 }
 button:disabled {
-    background-color: #2c2640;
-    border-color: #1c1830;
+    background-color: #2c2c2f;
+    border-color: #1c1c1e;
 }
 headerbar, .titlebar:not(headerbar) {
-    background-image: linear-gradient(to bottom, #5a6a90 0%, #34405e 48%, #263050 52%, #3a4668 100%);
-    border-bottom-color: #08070e;
+    background-image: linear-gradient(to bottom, #6a6a6e 0%, #404043 48%, #323235 52%, #434346 100%);
+    border-bottom-color: #080808;
     box-shadow: inset 0 1px rgba(255, 255, 255, 0.2);
 }
 headerbar:backdrop, .titlebar:not(headerbar):backdrop {
-    background-image: linear-gradient(to bottom, #4a4458 0%, #33303e 48%, #2a2836 52%, #36333f 100%);
+    background-image: linear-gradient(to bottom, #4a4a4d 0%, #333336 48%, #2a2a2d 52%, #363639 100%);
 }
 headerbar .title {
     text-shadow: 0 1px rgba(0, 0, 0, 0.6);
 }
 switch {
-    background-image: linear-gradient(to bottom, #25202f, #3a3450);
+    background-image: linear-gradient(to bottom, #232325, #3a3a3d);
 }
 scale trough, progressbar trough {
-    background-image: linear-gradient(to bottom, #1c1828, #34304a);
+    background-image: linear-gradient(to bottom, #1c1c1e, #353538);
 }

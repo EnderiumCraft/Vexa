@@ -114,7 +114,7 @@ void vx_draw_gel(struct vx_surface *s, int x, int y, int width, int height, int 
 
 /* The neutral color of buttons (gel), for the theme. */
 static uint32_t button_color(bool hot) {
-    return hot ? VX_COLOR_ACCENT : vx_theme.dark ? 0x3e3852 : 0xdcdce4;
+    return hot ? VX_COLOR_ACCENT : vx_theme.dark ? 0x46464a : 0xdcdce4;
 }
 
 void vx_draw_outline(struct vx_surface *s, int x, int y, int width, int height, uint32_t color) {
@@ -173,7 +173,7 @@ void vx_draw_button(struct vx_surface *s, int x, int y, int width, int height, c
 }
 
 void vx_draw_toolbar(struct vx_surface *s, int x, int y, int width, int height) {
-    uint32_t top = vx_theme.dark ? 0x3a3450 : 0xf4f5f8, bottom = vx_theme.dark ? 0x221d33 : 0xd6d9e0;
+    uint32_t top = vx_theme.dark ? 0x48484c : 0xf4f5f8, bottom = vx_theme.dark ? 0x2a2a2d : 0xd6d9e0;
     for (int row = 0; row < height - 1; row++) {
         vx_fill(s, x, y + row, width, 1, vx_mix(top, bottom, row * 255 / (height > 2 ? height - 2 : 1)));
     }

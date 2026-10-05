@@ -23,7 +23,7 @@
 #define STATUS 22
 #define SLIDE_MS 3000
 #define MAX_PICTURES 512
-#define BACKGROUND (vx_theme.dark ? 0x0e0818u : 0xe8e6eeu)
+#define BACKGROUND (vx_theme.dark ? 0x111113u : 0xe8e9edu)
 
 static struct vx_window *window;
 static struct vx_image *image;

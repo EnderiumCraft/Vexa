@@ -362,7 +362,7 @@ static void layout(void) {
             break;
         }
         case CODE: {
-            struct line *l = new_line(y, 18, b, vx_theme.dark ? 0x241c38 : 0xeceaf2);
+            struct line *l = new_line(y, 18, b, vx_theme.dark ? 0x2a2a2d : 0xecedf0);
             add_run(l, x0 + 10, k->text, (int)strlen(k->text), 2);
             y += 18;
             if (b + 1 >= block_count || blocks[b + 1].kind != CODE) {
@@ -377,7 +377,7 @@ static void layout(void) {
                 columns_total += column_widths[k->table][c];
             }
             float shrink = columns_total > width ? (float)width / columns_total : 1;
-            struct line *l = new_line(y, 24, b, k->header ? (vx_theme.dark ? 0x2a2140 : 0xe4e0ee) : 0);
+            struct line *l = new_line(y, 24, b, k->header ? (vx_theme.dark ? 0x313134 : 0xe4e6ea) : 0);
             const char *p = k->text + 1;
             int x = x0;
             for (int c = 0; c < MAX_COLUMNS && *p; c++) {

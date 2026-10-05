@@ -285,7 +285,7 @@ tabs of the terminal and the editor. GTK programs (X) get a theme to match, "Vex
 Adwaita with a glossy header bar, title buttons like the desktop's, gel buttons,
 switches, sliders, blue scroll bars and selections (and its dark version with the dark
 theme). It's light by default, with a blue accent; Settings → Appearance has a dark
-theme and other colours.
+theme (neutral greys), an automatic one (dark at night) and other colours.
 
 ![The desktop](desktop-screenshot.png)
 
@@ -674,8 +674,8 @@ at once. `settings Display` opens a section directly.
 
 | Section | What's there |
 | --- | --- |
-| **Appearance** | Light (the default) or Dark, and the accent color (Blue by default; Purple, Teal, Green, Orange, Pink, Red, Graphite): the panel, menus, title bars and Vexa's apps follow, and so does the default wallpaper (glass), deeper in the dark; the terminal stays dark |
-| **Wallpaper** | the pictures in `/share/pictures` (as thumbnails), five gradients, how a picture fits (Fill, Fit, Center, Tile, Stretch), and any other PNG, BMP or PPM file by its path |
+| **Appearance** | the theme, each shown as a little desktop: Light (the default), Dark (neutral greys) or Automatic (dark from 7 pm to 7 am, by the clock); the accent color (Blue by default; Purple, Teal, Green, Orange, Pink, Red, Graphite); a preview of the controls in those colors; and the wallpaper, with a way to change it. The panel, menus, title bars and Vexa's apps follow at once, and so does the default wallpaper (glass), deeper in the dark; the terminal stays dark |
+| **Wallpaper** | the screen, small, with the wallpaper as it's placed; where a picture goes (Fill the screen, Fit to the screen, Center, Tile, Stretch); Vexa's pictures (`/share/pictures`), yours (the Pictures folder in your home) and any other (Choose a Picture... opens the Open dialog); and ten colors (gradients). Long pages scroll with the wheel |
 | **Desktop & Panel** | desktop icons on or off, and which apps have one; the clock (24 or 12 hours, the weekday, the date, seconds); snapping windows to the edges; animations; what a double click on a title bar does (maximize, minimize, nothing); how long notifications stay |
 | **Date & Time** | the time now, and the time zone: a city (54 of them) from a list, with summer time handled by itself (the European, North American, Australian and New Zealand rules) |
 | **Mouse & Keyboard** | pointer speed, double click speed (with a place to try it), natural scrolling, left-handed buttons; the keyboard layout (US, UK, German, French, Spanish, Dvorak), how soon and how fast a held key repeats; the keyboard shortcuts |

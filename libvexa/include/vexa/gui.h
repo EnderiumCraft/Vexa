@@ -181,6 +181,11 @@ void vx_theme_make(struct vx_theme *theme, const char *name, const char *accent)
 /* Reads the theme from /etc/desktop.conf into vx_theme (windows do this
  * themselves when they open, and when it changes). */
 void vx_theme_load(void);
+/* theme=auto is dark at night: from VX_THEME_NIGHT_STARTS (local time, hours)
+ * to VX_THEME_DAY_STARTS. True if it's night now. */
+#define VX_THEME_NIGHT_STARTS 19
+#define VX_THEME_DAY_STARTS 7
+bool vx_theme_night(void);
 /* The default wallpaper (DESKTOP_DEFAULT_WALLPAPER) in a theme's colors:
  * /share/pictures/glass/<accent>-<light|dark>.png. */
 void vx_theme_wallpaper(const struct vx_theme *theme, char *out, size_t size);

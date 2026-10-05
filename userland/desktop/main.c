@@ -69,7 +69,7 @@
 #define COLOR_TITLE (vx_theme.title)
 #define COLOR_TITLE_FOCUSED (vx_theme.title_focused)
 #define COLOR_TITLE_TEXT (vx_theme.title_text)
-#define COLOR_BORDER (vx_theme.dark ? 0x08070e : 0x8c8c9c)
+#define COLOR_BORDER (vx_theme.dark ? 0x080808 : 0x8c8c9c)
 #define COLOR_OUTLINE (vx_theme.accent)
 #define COLOR_MENU (vx_theme.menu)
 #define COLOR_MENU_HOT (vx_theme.selected)
@@ -813,10 +813,10 @@ static void draw_line(struct vx_surface *view, int x0, int y0, int x1, int y1, u
 static uint32_t title_tint(bool on, int *alpha) {
     if (on) { /* The accent, as glass. */
         *alpha = vx_theme.dark ? 150 : 135;
-        return vx_mix(COLOR_OUTLINE, vx_theme.dark ? 0x101018 : 0xffffff, 105);
+        return vx_mix(COLOR_OUTLINE, vx_theme.dark ? 0x121214 : 0xffffff, 105);
     }
     *alpha = vx_theme.dark ? 205 : 215;
-    return vx_theme.dark ? 0x2a2838 : 0xe4e4ea;
+    return vx_theme.dark ? 0x2c2c2f : 0xe4e4ea;
 }
 
 /* Colors by hue (0 to 359), saturation and value (0 to 255). */
@@ -939,7 +939,7 @@ static void draw_title_bar(struct vx_surface *view, struct window *w, int x, int
         if (i == 1 && !w->resizable) {
             continue;
         }
-        uint32_t color = on || lit ? colors[i] : vx_theme.dark ? 0x5e5c6c : 0xc4c4cc;
+        uint32_t color = on || lit ? colors[i] : vx_theme.dark ? 0x5e5e63 : 0xc4c4cc;
         bool under = lit && hot_button == i;
         if (under) {
             color = vx_mix(color, 0xffffff, 40);
@@ -1000,7 +1000,7 @@ static void draw_panel(struct vx_surface *view, int ox, int oy) {
         if (on) {
             vx_draw_gel(view, r.x, r.y, r.width, r.height, 6, COLOR_OUTLINE);
         } else {
-            fill_gel(view, r, 6, vx_theme.dark ? 0x504a66 : 0xffffff, w->minimized ? 40 : 90);
+            fill_gel(view, r, 6, vx_theme.dark ? 0x58585d : 0xffffff, w->minimized ? 40 : 90);
             outline_rounded(view, r, 6, vx_mix(COLOR_PANEL, 0x000000, w->minimized ? 40 : 80));
         }
         uint32_t color = on ? 0xffffff : w->minimized ? COLOR_PANEL_DIM : COLOR_PANEL_TEXT;
@@ -3829,6 +3829,11 @@ int main(int argc, char **argv) {
         long tick = setting_clock_seconds ? vx_time() : vx_time() / 60;
         if (tick != shown_minute) { /* The clock. */
             shown_minute = tick;
+            /* The automatic theme: dark when night falls, light in the morning. */
+            if (!strcmp(vx_settings_get(&config, "theme", "light"), "auto") &&
+                vx_theme.dark != vx_theme_night()) {
+                reload_settings();
+            }
             add_damage(panel_rect());
             if (clock_open) {
                 add_damage(clock_rect());
