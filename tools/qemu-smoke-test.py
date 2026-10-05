@@ -16,6 +16,7 @@ guest to download.
 Exits non-zero if an expected message is missing or the kernel panics.
 """
 import argparse
+import atexit
 import functools
 import hashlib
 import http.server
@@ -1086,6 +1087,7 @@ def main():
     args = parser.parse_args()
 
     tmp = tempfile.mkdtemp(prefix="vexa-test-")
+    atexit.register(shutil.rmtree, tmp, True)  # (Its disk copies are big.)
     log_path = os.path.join(tmp, "serial.log")
     mon_path = os.path.join(tmp, "monitor.sock")
     open(log_path, "w").close()
