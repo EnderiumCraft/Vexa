@@ -1,6 +1,7 @@
 #ifndef VEXA_CONSOLE_H
 #define VEXA_CONSOLE_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 /* Text console drawn on the framebuffer. Call after fb_init(). */
@@ -12,6 +13,8 @@ void console_reset_color(void);
 void console_clear(void);
 /* Draws the whole screen again (after a program had it: see fb_set_hidden). */
 void console_redraw(void);
+/* The loading screen (the boot text shows again when it goes). */
+void console_splash(bool on);
 
 #define CONSOLE_COLOR_TEXT 0xe4dcf2
 #define CONSOLE_COLOR_ACCENT 0xb07cff

@@ -74,6 +74,8 @@ int vx_app_load(const char *bundle, struct vx_app *app) {
             app->desktop = !strcmp(value, "yes");
         } else if (!strcmp(line, "kind")) {
             app->is_linux = !strcmp(value, "linux");
+        } else if (!strcmp(line, "category")) {
+            copy(app->category, sizeof(app->category), value);
         }
     }
     if (!executable[0]) {

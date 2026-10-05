@@ -336,15 +336,15 @@ app.
 
 Before Firefox, the things that make Vexa comfortable to use every day:
 
-- [ ] `pkg`, a package manager: install, update and remove apps (`.vxapp` bundles) and
-      tools from a package index; and a Software app on top of it
-- [ ] Archives in Files: open and make zip and tar.gz files
-- [ ] Files: restore from the Trash to where things were; Open With (a choice of app,
+- [x] `pkg`, a package manager: install, update and remove apps (`.vxapp` bundles) from
+      a package index (checked with SHA-256); and a Software app on top of it (0.31.0)
+- [x] Archives in Files: open and make zip and tar.gz files
+- [x] Files: restore from the Trash to where things were; Open With (a choice of app,
       and making it the default)
-- [ ] The input language in the top bar (pick a layout) and a key to switch layouts
-- [ ] A loading screen while Vexa boots
-- [ ] The Vexa menu groups apps by type (Accessories, Internet, Multimedia, Games,
-      System, Development), from each bundle's category
+- [x] The input language in the top bar (pick a layout) and a key to switch layouts
+- [x] A loading screen while Vexa boots
+- [x] The Vexa menu groups apps by type (Accessories, Games, Graphics, Internet,
+      Multimedia, System; Linux programs), from each bundle's category
 
 **Milestone:** a new app can be found, installed and started without the terminal.
 

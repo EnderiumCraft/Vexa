@@ -178,6 +178,7 @@ void panic(const char *fmt, ...) {
     smp_stop_other_cpus();
     /* Whoever held the output lock is stopped now; take it over. */
     spin_unlock(&output_lock);
+    console_splash(false);
     console_set_color(CONSOLE_COLOR_ERROR);
     kputs("\n*** VEXA KERNEL PANIC ***\n");
     kvprintf(fmt, args);

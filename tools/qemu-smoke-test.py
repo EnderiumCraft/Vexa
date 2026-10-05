@@ -29,6 +29,7 @@ import sys
 import tempfile
 import threading
 import time
+import zipfile
 import zlib
 
 BOOT_TIMEOUT = 60
@@ -88,6 +89,11 @@ TYPED_COMMANDS = ([
     ("ls /bin", "vsh", 10, 2),
     ("cat /etc/motd", "Welcome to Vexa", 10),
     ("ln -s /etc/motd /tmp/motd-link ; cat /tmp/motd-link", "Welcome to Vexa", 10, 2),
+    # Archives: a zip and a tar.gz made, then unpacked again.
+    ("archive create /tmp/t.zip /etc/motd /etc/passwd", "archive: made /tmp/t.zip (2 files)", 20),
+    ("archive extract /tmp/t.zip /tmp/unzipped ; cat /tmp/unzipped/motd", "Welcome to Vexa", 20),
+    ("archive create /tmp/t.tar.gz /etc ; archive list /tmp/t.tar.gz", "etc/motd", 20),
+    ("archive extract /tmp/t.tar.gz ; cat /tmp/t/etc/motd", "Welcome to Vexa", 20),
     ("ls /proc", "meminfo", 10),
     # Native programs use libvexa.so through /lib/vexa-ld.so.
     ("ls /lib", "vexa-ld.so", 10),
@@ -179,6 +185,12 @@ TYPED_COMMANDS = ([
     ("fetch -o /tmp/test-ca.pem @URL@/test-ca.pem", "saved", 30),
     ("fetch @HTTPS@/hello.txt", "certificate isn't trusted", 60),
     ("fetch --ca /tmp/test-ca.pem @HTTPS@/hello.txt", "Hello from the test's web server", 60, 2),
+    # pkg: the test server's index has one package; it installs (checked,
+    # unpacked into /apps), then goes again.
+    ("pkg --source @URL@/index.conf update", "pkg: 1 package", 60),
+    ("pkg --source @URL@/index.conf install greeter", "pkg: installed Greeter 1.0", 60),
+    ("cat /apps/Greeter.vxapp/Contents/Package.conf", "package=greeter", 10),
+    ("pkg --source @URL@/index.conf remove greeter", "pkg: removed Greeter", 30),
     ("fetch --ca /tmp/test-ca.pem -o /tmp/https.bin @HTTPS@/data.bin", "saved 1048576 bytes", 180),
     ("#sound",),
     # Sound through the HD Audio driver: QEMU records what's played, and the
@@ -221,16 +233,18 @@ TYPED_COMMANDS = ([
     ("@mouse_button 0", "desktop: window 1 is now 744x440", 10),
     ("@sendkey ctrl-alt-t", "desktop: window 2", 30),
     ("@type exit", "desktop: closed window 2", 30),
-    # The Vexa menu (top left) starts "About Vexa"; its close button closes it.
+    # The Vexa menu (top left): its System group has "About Vexa" second; the
+    # window's close button closes it.
     ("@mouse_move -299 -187", None, 5),
     ("@mouse_move -299 -187", None, 5),
     ("@mouse_move -299 -193", None, 5),
     ("@mouse_button 1", "desktop: left button at 31,13", 10),
     ("@mouse_button 0", None, 5),
-    ("@mouse_move 0 125", None, 5),
+    ("@mouse_move 0 149", None, 5),
+    ("@mouse_move 269 24", None, 5),
     ("@mouse_button 1", 'desktop: window 3 "About Vexa"', 20),
     ("@mouse_button 0", None, 5),
-    ("@mouse_move 460 -8", None, 5),
+    ("@mouse_move 191 -56", None, 5),
     ("@mouse_button 1", "desktop: asked window 3 to close", 10),
     ("@mouse_button 0", "desktop: closed window 3", 10),
     # Notifications, and the image viewer (PNG) from the terminal, through
@@ -279,10 +293,11 @@ TYPED_COMMANDS = ([
     # (every window changes), light again, a time zone, and 1024x768 (which
     # goes back by itself after 15 seconds), then closed.
     ] + click(40, 150, 31, 13, "desktop: left button at 31,13") + [
-    ("@mouse_move 0 100", None, 3),
+    ("@mouse_move 0 149", None, 3),
+    ("@mouse_move 269 0", None, 3),
     ("@mouse_button 1", None, 3),
     ("@mouse_button 0", 'desktop: window 7 "Settings"', 20),
-    ] + click(31, 113, 576, 190, "desktop: settings reloaded (dark, blue)", 20)
+    ] + click(300, 162, 576, 190, "desktop: settings reloaded (dark, blue)", 20)
       + click(576, 190, 756, 190, "desktop: settings reloaded (light, blue)", 20)
       + click(756, 190, 372, 218, "settings: showing Date & Time")
       + click(372, 218, 706, 392, "settings: time_zone=Denver")
@@ -460,18 +475,18 @@ LINUX_COMMANDS = [
     ("@mouse_move 53 -150", None, 5),
     ("@mouse_button 1", "desktop: asked window 2 to close", 10),
     ("@mouse_button 0", 'desktop: closed window 2 "xterm"', 30),
-    # GTK 3: gtk3-demo from the Vexa menu (below the native apps; at 144,138, with GTK's own title
+    # GTK 3: gtk3-demo from the Vexa menu (its Linux group, after XTerm; at 144,138, with GTK's own title
     # bar); a click on "Change Display" in its list shows that demo, which is
     # its title then.
     ("@mouse_move -357 -43", None, 5),
     ("@mouse_move -358 -44", None, 5),
     ("@mouse_button 1", "desktop: left button at 31,13", 10),
     ("@mouse_button 0", None, 5),
-    ("@mouse_move 0 199", None, 5),
-    ("@mouse_move 0 271", None, 5),
-    ("@mouse_button 1", "desktop: left button at 31,483", 10),
+    ("@mouse_move 0 173", None, 5),
+    ("@mouse_move 269 24", None, 5),
+    ("@mouse_button 1", "desktop: left button at 300,210", 10),
     ("@mouse_button 0", "desktop: window 3", 300),
-    ("@mouse_move 181 -175", None, 10),
+    ("@mouse_move -88 98", None, 10),
     ("@mouse_button 1", "desktop: left button at 212,308", 10),
     ("@mouse_button 0", 'desktop: window 3 is now called "Change Display"', 60),
     # GTK draws its own title bar (the desktop draws none for it); its
@@ -865,6 +880,17 @@ def start_web_server(directory):
     data = b"".join(hashlib.sha256(str(i).encode()).digest() for i in range(32768))
     with open(os.path.join(directory, "data.bin"), "wb") as f:
         f.write(data)
+    # A package for pkg: an app (it runs /bin/hello) zipped, and its index.
+    package = os.path.join(directory, "Greeter.vxapp.zip")
+    with zipfile.ZipFile(package, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("Greeter.vxapp/Contents/Info.conf",
+                   "name=Greeter\nexecutable=/bin/hello\nmenu=30\ncategory=Accessories\n")
+    with open(package, "rb") as f:
+        digest = hashlib.sha256(f.read()).hexdigest()
+    with open(os.path.join(directory, "index.conf"), "w") as f:
+        f.write("[greeter]\nname=Greeter\nversion=1.0\ncategory=Accessories\n"
+                "summary=Says hi\nbundle=Greeter.vxapp\nfile=Greeter.vxapp.zip\n"
+                "size=%d\nsha256=%s\n" % (os.path.getsize(package), digest))
     handler = functools.partial(QuietHandler, directory=directory)
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()

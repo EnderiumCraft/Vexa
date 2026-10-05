@@ -220,7 +220,7 @@ USER_OBJS := $(LIBVEXA_OBJS) \
 
 .PHONY: all openssl curl mesa alsa linux-tarballs kernel programs iso run run-disk run-nographic test test-install test-disks clean distclean \
 	busybox busybox-source doom doom-source netsurf netsurf-source bash coreutils python x11 test-native test-quick native-iso \
-	test-bios test-uefi test-safe test-native-boot test-virgl run-virgl sdk sdk-test
+	test-bios test-uefi test-safe test-native-boot test-virgl run-virgl sdk sdk-test packages
 
 all: iso
 kernel: $(KERNEL)
@@ -282,6 +282,22 @@ $(MBEDTLS_LIBS) &: $(MBEDTLS_TARBALL) tools/build-mbedtls.sh $(shell find libvex
 # Programs that link more than libvexa, and what they compile with.
 PROGRAM_LIBS_fetch := $(MBEDTLS_LIBS) $(shell $(CC) -print-libgcc-file-name)
 PROGRAM_CFLAGS_fetch := -I$(MBEDTLS_PREFIX)/include
+
+# zlib's compression core, built against libvexa, for archive (zip, tar.gz).
+ZLIB_NATIVE_DIR := $(BUILD)/zlib-native/zlib-1.3.dfsg
+ZLIB_NATIVE_PARTS := adler32 crc32 deflate inflate inftrees inffast trees zutil
+ZLIB_NATIVE := $(BUILD)/zlib-native/libz.a
+$(ZLIB_NATIVE): $(ZLIB_TARBALL)
+	rm -rf $(BUILD)/zlib-native && mkdir -p $(BUILD)/zlib-native
+	tar -xJf $(ZLIB_TARBALL) -C $(BUILD)/zlib-native
+	for part in $(ZLIB_NATIVE_PARTS); do \
+		$(CC) $(filter-out -Werror -Wall -Wextra -MMD -MP -Ilibvexa/include -Iabi,$(USER_CFLAGS)) \
+			-I$(abspath libvexa/include) -I$(abspath abi) \
+			-c $(ZLIB_NATIVE_DIR)/$$part.c -o $(ZLIB_NATIVE_DIR)/$$part.o || exit 1; \
+	done
+	ar rcs $@ $(addprefix $(ZLIB_NATIVE_DIR)/,$(addsuffix .o,$(ZLIB_NATIVE_PARTS)))
+PROGRAM_LIBS_archive := $(ZLIB_NATIVE)
+PROGRAM_CFLAGS_archive := -I$(ZLIB_NATIVE_DIR)
 
 # A shared library for posix-test's dlopen checks, in /lib.
 DLTEST_SO := $(BUILD)/lib/libvexa-test.so
@@ -468,6 +484,16 @@ $(SDK_HELLO): $(SDK_DIR)/.complete
 	touch $@
 
 sdk-test: $(SDK_HELLO)
+
+# pkg's packages (for the "packages" release, which pkg and Software read):
+# the SDK's example apps, zipped, with index.conf.
+PACKAGES := $(BUILD)/packages/index.conf
+$(PACKAGES): $(SDK_HELLO) tools/make-packages.py
+	tools/make-packages.py $(BUILD)/packages \
+		"hello:1.0:Accessories:A window that says hello (the SDK's app template):$(SDK_TEST)/hello-app/build/HelloSDK.vxapp" \
+		"sdl-demo:1.0:Games:SDL 2 on Vexa - pictures, a chime, and keys:$(SDK_SDL_DEMO)"
+
+packages: $(PACKAGES)
 
 # cxx-test: a C++ program built with the SDK's vexa-c++ (libc++ on libvexa).
 CXX_TEST := $(BUILD)/cxx-test/cxx-test

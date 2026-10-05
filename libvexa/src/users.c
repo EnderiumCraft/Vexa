@@ -5,6 +5,7 @@
 #include <vexa/files.h>
 #include <vexa/settings.h>
 #include <vexa/syscall.h>
+#include <vexa/hash.h>
 #include <vexa/users.h>
 
 /* Accounts (see <vexa/users.h>). */
@@ -260,12 +261,7 @@ const char *vx_home_folder(const char *name) {
 
 /* ---- SHA-256 (FIPS 180-4) ---- */
 
-struct sha256 {
-    uint32_t state[8];
-    uint64_t length;
-    uint8_t block[64];
-    size_t used;
-};
+#define sha256 vx_sha256 /* <vexa/hash.h>'s, which these are. */
 
 static const uint32_t K[64] = {
     0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4,
@@ -358,6 +354,18 @@ static void sha256_end(struct sha256 *h, uint8_t out[32]) {
         out[i * 4 + 2] = (uint8_t)(h->state[i] >> 8);
         out[i * 4 + 3] = (uint8_t)h->state[i];
     }
+}
+
+void vx_sha256_init(struct vx_sha256 *h) {
+    sha256_init(h);
+}
+
+void vx_sha256_add(struct vx_sha256 *h, const void *data, size_t size) {
+    sha256_add(h, data, size);
+}
+
+void vx_sha256_end(struct vx_sha256 *h, uint8_t digest[32]) {
+    sha256_end(h, digest);
 }
 
 /* ---- Passwords ---- */

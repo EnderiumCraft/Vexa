@@ -111,7 +111,7 @@ jobs:
           touch build/curl-root/usr/bin/curl build/alsa-root/.done build/python-root/.done
 
       - name: Build ISO (with BusyBox, bash, coreutils, Python and X, built from source), and the SDK
-        run: make && make busybox-source && make doom-source && make netsurf-source && make sdk
+        run: make && make busybox-source && make doom-source && make netsurf-source && make sdk && make packages
 
       - name: Read version
         id: version
@@ -126,6 +126,8 @@ jobs:
           sha256sum "vexa-$version.iso" > "vexa-$version.iso.sha256"
           # The SDK, for building native apps (with SDL 2) on another machine.
           cp "build/vexa-sdk-$version.tar.gz" .
+          # pkg's packages (published as the "packages" release).
+          mkdir -p packages && cp build/packages/* packages/
           # BusyBox (GPL-2.0), bash and coreutils (GPL-3.0): every release carries
           # their exact sources; BusyBox's with its configuration.
           cp build/busybox-*-source.tar.gz third_party/bash-*.tar.xz third_party/coreutils-*.tar.xz .
@@ -201,6 +203,7 @@ jobs:
             alsa-*.tar.bz2
             gtk-and-lgpl-sources-*.tar
             vexa-sdk-*.tar.gz
+            packages/*
 
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -245,6 +248,14 @@ jobs:
             --title "Latest build (${VERSION}, ${short_sha})" \
             --notes "$notes" --prerelease --latest=false \
             "vexa-${VERSION}.iso" "vexa-${VERSION}.iso.sha256" busybox-*-source.tar.gz chocolate-doom-*-source.tar.gz bash-*.tar.xz coreutils-*.tar.xz alsa-*.tar.bz2 gtk-and-lgpl-sources-*.tar vexa-sdk-*.tar.gz
+
+      - name: Update the packages (what pkg and the Software app install)
+        run: |
+          gh release delete packages --yes --cleanup-tag 2>/dev/null || true
+          gh release create packages --target "$GITHUB_SHA" \
+            --title "Packages" \
+            --notes "Apps for Vexa's package manager (pkg) and the Software app: index.conf lists them, with each zip's SHA-256. Replaced on every push." \
+            --prerelease --latest=false packages/*
 
       - name: Create versioned release if VEXA_VERSION is new
         run: |

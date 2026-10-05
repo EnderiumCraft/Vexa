@@ -525,6 +525,7 @@ void monitor_thread(void *unused) {
     (void)unused;
     char line[LINE_MAX];
     size_t length = 0;
+    console_splash(false);
 
     kprintf("Type 'help' for a list of commands.\n\n");
     prompt();

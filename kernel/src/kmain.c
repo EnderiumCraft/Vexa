@@ -172,6 +172,10 @@ void kmain(void) {
     if (*cmdline_get()) {
         kprintf("[boot] command line: %s\n", cmdline_get());
     }
+    /* The loading screen, unless the boot text is wanted ("verbose"). */
+    if (!cmdline_has("verbose")) {
+        console_splash(true);
+    }
 
     idt_init();
     cpu_init_bsp();

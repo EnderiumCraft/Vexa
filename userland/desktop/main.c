@@ -26,6 +26,7 @@
  * in look.c, icons.c, switcher.c, search.c, clock.c, shot.c and lock.c
  * (shell.h says what they share).
  */
+#include <ctype.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -245,7 +246,8 @@ struct rect work_area(void) {
 enum menu_action {
     RUN_APP,       /* An app from /apps (see <vexa/app.h>). */
     RUN_LINUX_APP, /* An X program from /linux/usr/share/applications, through xrun. */
-    SEPARATOR, LOCK, LOGOUT, LEAVE, RESTART, POWER_OFF
+    SEPARATOR, LOCK, LOGOUT, LEAVE, RESTART, POWER_OFF,
+    SUBMENU        /* A group of apps (a category), shown beside the menu. */
 };
 
 /* The apps in /apps, and their icons. */
@@ -262,12 +264,27 @@ static struct menu_item {
     const char *keys;
     enum menu_action action;
     int app; /* RUN_APP: which. */
+    int group; /* SUBMENU: which. */
     char args[MAX_ARGS][64]; /* RUN_LINUX_APP: the program and its arguments. */
     int arg_count;
 } menu_items[MAX_MENU_ITEMS];
 static int menu_item_count;
 #define MENU_ITEMS menu_item_count
-#define MENU_WIDTH 300
+#define MENU_WIDTH 220
+#define GROUP_WIDTH 240
+
+/* The menu's groups of apps, by category (Info.conf's "category="), each a
+ * submenu: Linux programs are the last group. */
+static const char *const groups[] = {"Accessories", "Games", "Graphics", "Internet",
+                                     "Multimedia", "System", "Other", "Linux"};
+#define GROUPS 8
+#define GROUP_LINUX 7
+#define GROUP_OTHER 6
+#define MAX_GROUP_ITEMS 16
+static struct menu_item group_items[GROUPS][MAX_GROUP_ITEMS];
+static int group_count[GROUPS];
+static int menu_group = -1; /* The open submenu, or -1. */
+static int group_hot = -1;
 #define MENU_ITEM_HEIGHT 24
 #define MENU_SEPARATOR_HEIGHT 9
 #define MENU_BUTTON_WIDTH 72
@@ -284,9 +301,50 @@ static struct rect menu_rect(void) {
     return (struct rect){4, PANEL_HEIGHT, MENU_WIDTH, height};
 }
 
+/* The top of the menu's item `index`. */
+static int menu_item_top(int index) {
+    int top = menu_rect().y + 4;
+    for (int i = 0; i < index; i++) {
+        top += menu_item_height(i);
+    }
+    return top;
+}
+
+/* The open submenu, beside its item in the menu. */
+static struct rect group_rect(void) {
+    struct rect r = menu_rect();
+    int parent = 0;
+    for (int i = 0; i < MENU_ITEMS; i++) {
+        if (menu_items[i].action == SUBMENU && menu_items[i].group == menu_group) {
+            parent = i;
+        }
+    }
+    int height = 8 + MENU_ITEM_HEIGHT * (menu_group >= 0 ? group_count[menu_group] : 0);
+    int y = menu_item_top(parent) - 4;
+    if (y + height > screen.height - 4) {
+        y = screen.height - 4 - height;
+    }
+    return (struct rect){r.x + r.width - 4, y, GROUP_WIDTH, height};
+}
+
+/* The menu and wherever a submenu can be. */
 static struct rect menu_damage(void) {
     struct rect r = menu_rect();
-    return (struct rect){r.x - SHADOW, r.y, r.width + 2 * SHADOW, r.height + SHADOW + 4};
+    return (struct rect){r.x - SHADOW, r.y, r.width + GROUP_WIDTH + 2 * SHADOW,
+                         screen.height - r.y};
+}
+
+/* The open submenu's item at a point, or -1. */
+static int group_item_at(int x, int y) {
+    if (!menu_open || menu_group < 0) {
+        return -1;
+    }
+    struct rect r = group_rect();
+    if (!inside(r, x, y) || y < r.y + 4) {
+        return -1;
+    }
+    int i = (y - r.y - 4) / MENU_ITEM_HEIGHT;
+    return i < group_count[menu_group] ? i : -1;
 }
 
 /* The menu item at a point, or -1. */
@@ -310,22 +368,34 @@ static void set_menu(bool open) {
     if (menu_open != open) {
         menu_open = open;
         menu_hot = -1;
+        menu_group = -1;
+        group_hot = -1;
         add_damage(menu_damage());
         add_damage(panel_rect());
     }
 }
 
-static struct menu_item *add_menu_item(const char *label, const char *keys,
-                                       enum menu_action action) {
-    if (menu_item_count == MAX_MENU_ITEMS) {
+static struct menu_item *add_item(struct menu_item *list, int *count, int max, const char *label,
+                                  const char *keys, enum menu_action action) {
+    if (*count == max) {
         return NULL;
     }
-    struct menu_item *item = &menu_items[menu_item_count++];
+    struct menu_item *item = &list[(*count)++];
     memset(item, 0, sizeof(*item));
     strncpy(item->label, label, sizeof(item->label) - 1);
     item->keys = keys;
     item->action = action;
     return item;
+}
+
+static struct menu_item *add_menu_item(const char *label, const char *keys,
+                                       enum menu_action action) {
+    return add_item(menu_items, &menu_item_count, MAX_MENU_ITEMS, label, keys, action);
+}
+
+static struct menu_item *add_group_item(int group, const char *label, const char *keys,
+                                        enum menu_action action) {
+    return add_item(group_items[group], &group_count[group], MAX_GROUP_ITEMS, label, keys, action);
 }
 
 /* A Linux program's .desktop file: its name and command, unless it's
@@ -360,7 +430,7 @@ static void add_linux_app(const char *path) {
     if (hidden || !name[0] || !exec[0]) {
         return;
     }
-    struct menu_item *item = add_menu_item(name, "", RUN_LINUX_APP);
+    struct menu_item *item = add_group_item(GROUP_LINUX, name, "", RUN_LINUX_APP);
     if (!item) {
         return;
     }
@@ -375,7 +445,7 @@ static void add_linux_app(const char *path) {
         }
     }
     if (!item->arg_count) {
-        menu_item_count--;
+        group_count[GROUP_LINUX]--;
     }
 }
 
@@ -393,26 +463,36 @@ static void load_apps(void) {
     }
 }
 
-/* The apps in the menu: Vexa's, or the Linux ones. */
-static void add_app_items(bool is_linux) {
-    for (int i = 0; i < app_count; i++) {
-        if (apps[i].menu && apps[i].is_linux == is_linux) {
-            struct menu_item *item = add_menu_item(apps[i].name, apps[i].shortcut, RUN_APP);
-            if (item) {
-                item->app = i;
-            }
+/* An app's group in the menu. */
+static int app_group(const struct vx_app *app) {
+    if (app->is_linux && !app->category[0]) {
+        return GROUP_LINUX;
+    }
+    for (int g = 0; g < GROUP_OTHER; g++) {
+        if (!strcmp(app->category, groups[g])) {
+            return g;
         }
     }
+    return app->is_linux ? GROUP_LINUX : GROUP_OTHER;
 }
 
 static void build_menu(void) {
     load_apps();
     menu_item_count = 0;
-    add_app_items(false);
-    add_menu_item("", "", SEPARATOR);
-    add_app_items(true);
+    memset(group_count, 0, sizeof(group_count));
+    menu_group = group_hot = -1;
+    /* The apps (in their menu order) in their groups. */
+    for (int i = 0; i < app_count; i++) {
+        if (apps[i].menu) {
+            struct menu_item *item = add_group_item(app_group(&apps[i]), apps[i].name,
+                                                    apps[i].shortcut, RUN_APP);
+            if (item) {
+                item->app = i;
+            }
+        }
+    }
     /* Linux programs, by name. */
-    int first = menu_item_count;
+    int first = group_count[GROUP_LINUX];
     int handle = vx_open(APPLICATIONS, VX_OPEN_READ);
     if (handle >= 0) {
         struct vx_dir_entry entries[16];
@@ -421,7 +501,7 @@ static void build_menu(void) {
             for (long i = 0; i < n; i++) {
                 size_t length = strlen(entries[i].name);
                 if (length > 8 && !strcmp(entries[i].name + length - 8, ".desktop") &&
-                    menu_item_count < MAX_MENU_ITEMS - 6) {
+                    group_count[GROUP_LINUX] < MAX_GROUP_ITEMS) {
                     char path[320];
                     snprintf(path, sizeof(path), "%s/%s", APPLICATIONS, entries[i].name);
                     add_linux_app(path);
@@ -430,8 +510,14 @@ static void build_menu(void) {
         }
         vx_close(handle);
     }
-    qsort(menu_items + first, (size_t)(menu_item_count - first), sizeof(menu_items[0]),
-          compare_labels);
+    qsort(group_items[GROUP_LINUX] + first, (size_t)(group_count[GROUP_LINUX] - first),
+          sizeof(menu_items[0]), compare_labels);
+    for (int g = 0; g < GROUPS; g++) {
+        struct menu_item *item = group_count[g] ? add_menu_item(groups[g], "", SUBMENU) : NULL;
+        if (item) {
+            item->group = g;
+        }
+    }
     add_menu_item("", "", SEPARATOR);
     add_menu_item("Lock Screen", "Super+L", LOCK);
     if (session_user.uid != 0) {
@@ -511,8 +597,60 @@ struct rect clock_button_rect(void) {
     return (struct rect){screen.width - width - 4, 2, width, PANEL_HEIGHT - 4};
 }
 
+/* ---- The keyboard layout on the panel ----
+ *
+ * Its button shows the layout ("US"); a click lists them all; Alt+Shift
+ * (pressed together, then let go) goes back to the one before. */
+static const char *const layout_names[][2] = {
+    {"us", "English (US)"}, {"gb", "English (UK)"}, {"de", "German"},
+    {"fr", "French"},       {"es", "Spanish"},      {"dvorak", "Dvorak"},
+};
+#define LAYOUT_NAMES ((int)(sizeof(layout_names) / sizeof(layout_names[0])))
+
+static const char *layout_label(void) {
+    static char label[4];
+    label[0] = (char)toupper((unsigned char)setting_layout[0]);
+    label[1] = (char)toupper((unsigned char)setting_layout[1]);
+    label[2] = '\0';
+    return label;
+}
+
+static struct rect layout_button_rect(void) {
+    struct rect v = volume_button_rect();
+    int width = vx_text_width(layout_label()) + 16;
+    return (struct rect){v.x - width - 2, 2, width, PANEL_HEIGHT - 4};
+}
+
+static void set_layout(const char *name) {
+    if (strcmp(name, setting_layout)) {
+        vx_settings_set(&config, "keyboard_layout_previous", setting_layout);
+        snprintf(setting_layout, sizeof(setting_layout), "%s", name);
+        vx_settings_set(&config, "keyboard_layout", setting_layout);
+        vx_settings_save(&config);
+    }
+    printf("desktop: keyboard layout %s\n", setting_layout);
+    fflush(stdout);
+    add_damage(panel_rect());
+}
+
+/* The layout before this one (or the next in the list). */
+static void switch_layout(void) {
+    char previous[16];
+    snprintf(previous, sizeof(previous), "%s",
+             vx_settings_get(&config, "keyboard_layout_previous", ""));
+    if (previous[0] && strcmp(previous, setting_layout)) {
+        set_layout(previous);
+        return;
+    }
+    int i = 0;
+    while (i < LAYOUT_NAMES && strcmp(layout_names[i][0], setting_layout)) {
+        i++;
+    }
+    set_layout(layout_names[(i + 1) % LAYOUT_NAMES][0]);
+}
+
 static struct rect search_button_rect(void) {
-    struct rect c = volume_button_rect();
+    struct rect c = layout_button_rect();
     return (struct rect){c.x - SEARCH_BUTTON_WIDTH - 2, 2, SEARCH_BUTTON_WIDTH, PANEL_HEIGHT - 4};
 }
 
@@ -883,41 +1021,64 @@ static void draw_panel(struct vx_surface *view, int ox, int oy) {
         draw_orb(view, ox + c.x + c.width - 10, oy + 12, 4, COLOR_OUTLINE);
     }
     volume_draw_button(view, ox, oy);
+    struct rect k = layout_button_rect();
+    vx_draw_text(view, ox + k.x + 8, oy + 5, layout_label(), COLOR_PANEL_TEXT, VX_TRANSPARENT);
+}
+
+/* One item of the menu or a submenu, at `top` in the panel `r`. */
+static void draw_menu_item(struct vx_surface *view, int ox, int oy, struct rect r, int top,
+                           const struct menu_item *item, bool lit) {
+    int h = item->action == SEPARATOR ? MENU_SEPARATOR_HEIGHT : MENU_ITEM_HEIGHT;
+    if (item->action == SEPARATOR) {
+        vx_fill(view, ox + r.x + 8, oy + top + h / 2, r.width - 16, 1, COLOR_PANEL_LINE);
+        return;
+    }
+    if (lit) {
+        vx_draw_gel(view, ox + r.x + 4, oy + top, r.width - 8, h, 6, COLOR_OUTLINE);
+    }
+    int text_x = ox + r.x + 12;
+    if (item->action == RUN_APP && app_icons[item->app]) {
+        vx_blit_alpha(view, text_x, oy + top + 4, 16, 16, &app_icons[item->app]->surface);
+    }
+    if (item->action == RUN_APP || item->action == RUN_LINUX_APP) {
+        text_x += 24;
+    }
+    if (lit) {
+        vx_draw_text(view, text_x, oy + top + 5, item->label, vx_mix(COLOR_OUTLINE, 0x000000, 120),
+                     VX_TRANSPARENT);
+    }
+    vx_draw_text(view, text_x, oy + top + 4, item->label, lit ? 0xffffff : COLOR_PANEL_TEXT,
+                 VX_TRANSPARENT);
+    uint32_t dim = lit ? vx_mix(COLOR_OUTLINE, 0xffffff, 190) : COLOR_PANEL_DIM;
+    if (item->action == SUBMENU) {
+        /* An arrow: the submenu opens to the right. */
+        int ax = ox + r.x + r.width - 18, ay = oy + top + h / 2;
+        for (int i = 0; i < 5; i++) {
+            vx_fill(view, ax + i, ay - 4 + i, 1, 9 - 2 * i, dim);
+        }
+        return;
+    }
+    int keys = vx_text_width(item->keys);
+    vx_draw_text(view, ox + r.x + r.width - keys - 12, oy + top + 4, item->keys, dim,
+                 VX_TRANSPARENT);
 }
 
 static void draw_menu(struct vx_surface *view, int ox, int oy) {
     struct rect r = menu_rect();
-    struct rect shifted = {ox + r.x, oy + r.y, r.width, r.height};
-    draw_glass_popup(view, shifted, 8, 140);
+    draw_glass_popup(view, (struct rect){ox + r.x, oy + r.y, r.width, r.height}, 8, 140);
     int top = r.y + 4;
     for (int i = 0; i < MENU_ITEMS; i++) {
-        int h = menu_item_height(i);
-        if (menu_items[i].action == SEPARATOR) {
-            vx_fill(view, ox + r.x + 8, oy + top + h / 2, r.width - 16, 1, COLOR_PANEL_LINE);
-        } else {
-            if (i == menu_hot) {
-                vx_draw_gel(view, ox + r.x + 4, oy + top, r.width - 8, h, 6, COLOR_OUTLINE);
-            }
-            int text_x = ox + r.x + 12;
-            if (menu_items[i].action == RUN_APP && app_icons[menu_items[i].app]) {
-                vx_blit_alpha(view, text_x, oy + top + 4, 16, 16, &app_icons[menu_items[i].app]->surface);
-            }
-            if (menu_items[i].action == RUN_APP || menu_items[i].action == RUN_LINUX_APP) {
-                text_x += 24;
-            }
-            bool lit = i == menu_hot;
-            if (lit) {
-                vx_draw_text(view, text_x, oy + top + 5, menu_items[i].label,
-                             vx_mix(COLOR_OUTLINE, 0x000000, 120), VX_TRANSPARENT);
-            }
-            vx_draw_text(view, text_x, oy + top + 4, menu_items[i].label,
-                         lit ? 0xffffff : COLOR_PANEL_TEXT, VX_TRANSPARENT);
-            int keys = vx_text_width(menu_items[i].keys);
-            vx_draw_text(view, ox + r.x + r.width - keys - 12, oy + top + 4, menu_items[i].keys,
-                         lit ? vx_mix(COLOR_OUTLINE, 0xffffff, 190) : COLOR_PANEL_DIM,
-                         VX_TRANSPARENT);
+        bool open = menu_items[i].action == SUBMENU && menu_items[i].group == menu_group;
+        draw_menu_item(view, ox, oy, r, top, &menu_items[i], i == menu_hot || open);
+        top += menu_item_height(i);
+    }
+    if (menu_group >= 0) {
+        struct rect g = group_rect();
+        draw_glass_popup(view, (struct rect){ox + g.x, oy + g.y, g.width, g.height}, 8, 140);
+        for (int i = 0; i < group_count[menu_group]; i++) {
+            draw_menu_item(view, ox, oy, g, g.y + 4 + i * MENU_ITEM_HEIGHT,
+                           &group_items[menu_group][i], i == group_hot);
         }
-        top += h;
     }
 }
 
@@ -925,7 +1086,7 @@ static void draw_menu(struct vx_surface *view, int ox, int oy) {
 
 enum popup_action {
     POP_TERMINAL, POP_FILES, POP_NEW_FOLDER, POP_SETTINGS, POP_ABOUT, POP_ICON, POP_RESTART,
-    POP_POWER_OFF, POP_LEAVE, POP_LOGOUT, POP_NONE
+    POP_POWER_OFF, POP_LEAVE, POP_LOGOUT, POP_LAYOUT, POP_NONE
 };
 
 #define MAX_POPUP 10
@@ -1480,6 +1641,9 @@ static void grow_damage_for_glass(void) {
         }
         if (menu_open) {
             grew |= take_glass(menu_rect());
+            if (menu_group >= 0) {
+                grew |= take_glass(group_rect());
+            }
         }
         if (clock_open) {
             grew |= take_glass(clock_rect());
@@ -2251,6 +2415,7 @@ static void run_popup_item(int index) {
     case POP_NEW_FOLDER: icons_new_folder(); break;
     case POP_SETTINGS: run_named("Settings", "Wallpaper"); break;
     case POP_ABOUT: run_named("About", NULL); break;
+    case POP_LAYOUT: set_layout(layout_names[popup_arguments[index]][0]); break;
     case POP_ICON: icons_menu(popup_icon, popup_arguments[index]); break;
     case POP_RESTART:
     case POP_POWER_OFF:
@@ -2394,8 +2559,7 @@ static void check_devices(void) {
     usb_seen_count = current_count;
 }
 
-static void run_menu_item(int index) {
-    struct menu_item *item = &menu_items[index];
+static void run_menu_item(const struct menu_item *item) {
     switch (item->action) {
     case LEAVE: ask(POP_LEAVE, 31, PANEL_HEIGHT + 4); return;
     case LOGOUT: ask(POP_LOGOUT, 31, PANEL_HEIGHT + 4); return;
@@ -2404,7 +2568,7 @@ static void run_menu_item(int index) {
     case LOCK: lock_now(); return;
     case RUN_APP: run_app(item->app); return;
     case RUN_LINUX_APP: break;
-    case SEPARATOR: return;
+    case SEPARATOR: case SUBMENU: return;
     }
     const char *argv[MAX_ARGS + 1] = {"/linux/usr/bin/xrun"};
     for (int i = 0; i < item->arg_count; i++) {
@@ -2668,6 +2832,17 @@ static void key_event(int key, int value) {
         lock_key(key, value, down ? character_of(key) : 0);
         return;
     }
+    /* Alt+Shift: Shift and Alt pressed together with no other key, then let go. */
+    static bool layout_chord;
+    bool is_shift = key == VX_KEY_LEFTSHIFT || key == VX_KEY_RIGHTSHIFT;
+    if (value == 1 && ((is_shift && alt) || (key == VX_KEY_LEFTALT && shift))) {
+        layout_chord = true;
+    } else if (value == 1 && !is_shift && key != VX_KEY_LEFTALT) {
+        layout_chord = false;
+    } else if (value == 0 && layout_chord && (is_shift || key == VX_KEY_LEFTALT)) {
+        layout_chord = false;
+        switch_layout();
+    }
     if (key == 99 && value == 1) { /* PrintScreen */
         screenshot(alt ? SHOT_WINDOW : shift ? SHOT_AREA : SHOT_SCREEN);
         return;
@@ -2861,6 +3036,16 @@ static void panel_click(void) {
         return;
     }
     volume_close();
+    if (inside(layout_button_rect(), pointer_x, pointer_y)) {
+        popup_count = 0;
+        popup_icon = -1;
+        for (int i = 0; i < LAYOUT_NAMES; i++) {
+            popup_add(layout_names[i][1], strcmp(layout_names[i][0], setting_layout) ? NULL : "\u2713",
+                      POP_LAYOUT, i);
+        }
+        place_popup(layout_button_rect().x, PANEL_HEIGHT + 2);
+        return;
+    }
     if (inside(search_button_rect(), pointer_x, pointer_y)) {
         search_show();
         return;
@@ -3022,13 +3207,31 @@ static void button_event(int bit, bool down) {
         return;
     }
     if (left_down && menu_open && pointer_y >= PANEL_HEIGHT) {
-        /* A click on an item runs it; anywhere else it just closes the menu. */
+        /* A click on an item runs it (or opens its submenu); anywhere else it
+         * just closes the menu. */
+        int sub = group_item_at(pointer_x, pointer_y);
+        if (sub >= 0) {
+            struct menu_item chosen = group_items[menu_group][sub];
+            set_menu(false);
+            run_menu_item(&chosen);
+            return;
+        }
+        if (menu_group >= 0 && inside(group_rect(), pointer_x, pointer_y)) {
+            return;
+        }
         int item = menu_item_at(pointer_x, pointer_y);
+        if (item >= 0 && menu_items[item].action == SUBMENU) {
+            menu_group = menu_items[item].group;
+            group_hot = -1;
+            add_damage(menu_damage());
+            return;
+        }
         if (item >= 0 || !inside(menu_rect(), pointer_x, pointer_y)) {
             set_menu(false);
         }
         if (item >= 0) {
-            run_menu_item(item);
+            struct menu_item chosen = menu_items[item];
+            run_menu_item(&chosen);
         }
         return;
     }
@@ -3158,10 +3361,27 @@ static void pointer_moved(int dx, int dy, int wheel) {
             add_damage(outline_damage());
         }
         if (menu_open) {
-            int hot = menu_item_at(pointer_x, pointer_y);
-            if (hot != menu_hot) {
-                menu_hot = hot;
-                add_damage(menu_rect());
+            /* Over the open submenu, its items light up; over the menu, an
+             * item with a submenu opens it, and any other closes it. */
+            if (menu_group >= 0 && inside(group_rect(), pointer_x, pointer_y)) {
+                int hot = group_item_at(pointer_x, pointer_y);
+                if (hot != group_hot) {
+                    group_hot = hot;
+                    add_damage(menu_damage());
+                }
+            } else {
+                int hot = menu_item_at(pointer_x, pointer_y);
+                if (hot != menu_hot) {
+                    menu_hot = hot;
+                    if (hot >= 0) {
+                        int group = menu_items[hot].action == SUBMENU ? menu_items[hot].group : -1;
+                        if (group != menu_group) {
+                            menu_group = group;
+                            group_hot = -1;
+                        }
+                    }
+                    add_damage(menu_damage());
+                }
             }
         }
         if (popup_open) {

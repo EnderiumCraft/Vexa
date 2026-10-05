@@ -16,6 +16,7 @@ success and a **negative `VX_E*` error** on failure; `vx_strerror(error)` descri
 - [`<vexa/app.h>`: app bundles](#vexaapph-app-bundles)
 - [`<vexa/files.h>`: whole files and folders](#vexafilesh-whole-files-and-folders)
 - [`<vexa/settings.h>`: settings files](#vexasettingsh-settings-files)
+- [`<vexa/hash.h>`: SHA-256](#vexahashh-sha-256)
 - [`<vexa/time.h>`: dates and time zones](#vexatimeh-dates-and-time-zones)
 - [`<vexa/font.h>`: the bitmap font](#vexafonth-the-bitmap-font)
 - [`<vexa/desktop.h>`: the desktop protocol](#vexadesktoph-the-desktop-protocol)
@@ -379,7 +380,8 @@ bool disabled; }`; an item with no label is a line between groups.
 
 An app is a folder `Name.vxapp` in `/apps` (see the developer guide for its
 `Contents/Info.conf`). `struct vx_app` has the bundle's path, `name`, `executable` and
-`icon` (full paths), `opens`, `shortcut`, `menu`, `desktop` and `is_linux`.
+`icon` (full paths), `opens`, `shortcut`, `menu`, `desktop`, `is_linux` and `category`
+(its group in the Vexa menu: Accessories, Games, Graphics, Internet, Multimedia, System).
 
 | Function | What it does |
 | --- | --- |
@@ -447,6 +449,14 @@ files; `getuid`, `setuid`, `chown`, `chmod`, `access`... are there in `<unistd.h
 | `void vx_password_make(const char *password, char out[VX_HASH_MAX])`, `bool vx_password_matches(...)` | salted, stretched SHA-256 hashes, as `/etc/shadow` keeps them |
 | `int vx_user_add(...)`, `vx_user_remove`, `vx_user_set_password`, `vx_user_set_admin`, `vx_user_set_full_name` | changing accounts (root only; `accounts` does it for administrators) |
 | `int vx_become_user(const struct vx_user *user)` | root becomes the account (groups, ids, `HOME`, `USER`...) |
+
+## `<vexa/hash.h>`: SHA-256
+
+| Function | What it does |
+| --- | --- |
+| `void vx_sha256_init(struct vx_sha256 *h)` | starts a hash |
+| `void vx_sha256_add(struct vx_sha256 *h, const void *data, size_t size)` | adds data to it (as often as needed) |
+| `void vx_sha256_end(struct vx_sha256 *h, uint8_t digest[32])` | the digest |
 
 ## `<vexa/time.h>`: dates and time zones
 

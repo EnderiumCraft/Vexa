@@ -27,6 +27,8 @@ extern "C" {
  *     menu=2                  its place in the desktop's menu (none: not there)
  *     desktop=yes             an icon on the desktop
  *     kind=linux              a Linux program (listed with them in the menu)
+ *     category=Accessories    its group in the menu: Accessories, Games, Graphics,
+ *                             Internet, Multimedia or System (else Other)
  *
  * Programs meant for the command line stay in /bin; the apps' programs
  * are linked there too (/bin/files is /apps/Files.vxapp/Contents/Vexa/files).
@@ -45,6 +47,7 @@ struct vx_app {
     int menu;             /* 0: not in the menu. */
     bool desktop;
     bool is_linux;
+    char category[24];    /* "" if it names none. */
 };
 
 /* True if `path` names a bundle (it ends in ".vxapp"). */

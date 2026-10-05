@@ -23,6 +23,7 @@
  * an app: the desktop notices it. What Files does is also printed (its
  * output is the desktop's log when the desktop started it).
  */
+#include <ctype.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -638,17 +639,21 @@ static void started(int process, const char *what) {
     }
 }
 
-static void run(const char *program, const char *argument) {
-    const char *argv[] = {program, argument};
+static long run_argv(const char **argv, int argc) {
     unsigned long envc = 0;
     while (environ[envc]) {
         envc++;
     }
     struct vx_spawn spawn = {
-        .argv = argv, .argc = argument ? 2 : 1, .envp = (const char *const *)environ,
+        .argv = argv, .argc = (unsigned long)argc, .envp = (const char *const *)environ,
         .envc = envc, .handles = {0, 1, 2}, .flags = VX_SPAWN_NEW_GROUP,
     };
-    started(vx_spawn(program, &spawn), program);
+    return vx_spawn(argv[0], &spawn);
+}
+
+static void run(const char *program, const char *argument) {
+    const char *argv[] = {program, argument};
+    started(run_argv(argv, argument ? 2 : 1), program);
 }
 
 static void open_item(struct item *item) {
@@ -844,6 +849,11 @@ static bool in_trash(void) {
     return !strcmp(cwd, TRASH);
 }
 
+/* Where a thing in the Trash came from: its path, in .info/<its name>. */
+static void trash_info_path(char *out, size_t size, const char *name) {
+    snprintf(out, size, "%s/.info/%s", TRASH, name);
+}
+
 static void trash_selection(void) {
     static char paths[MAX_CLIP][512];
     int n = selected_paths(paths, MAX_CLIP), first = cursor;
@@ -857,6 +867,15 @@ static void trash_selection(void) {
             snprintf(text, sizeof(text), "Can't move %s to the Trash: %s", paths[i], vx_strerror(error));
         } else {
             snprintf(text, sizeof(text), "moved %s to the Trash", paths[i]);
+            char info[600];
+            snprintf(info, sizeof(info), "%s/.info", TRASH);
+            vx_mkdir(info);
+            trash_info_path(info, sizeof(info), name);
+            FILE *f = fopen(info, "w");
+            if (f) {
+                fputs(paths[i], f);
+                fclose(f);
+            }
         }
         say(text);
     }
@@ -866,11 +885,54 @@ static void trash_selection(void) {
     }
 }
 
+/* Put Back: things in the Trash go back where they were (under another name
+ * if that's taken; to the home folder if where is unknown). */
+static void restore_selection(void) {
+    static char paths[MAX_CLIP][512];
+    int n = selected_paths(paths, MAX_CLIP);
+    for (int i = 0; i < n; i++) {
+        const char *name = base_name(paths[i]);
+        char info[600], from[512] = "", folder[512], to[800], unique[256], text[1400];
+        trash_info_path(info, sizeof(info), name);
+        FILE *f = fopen(info, "r");
+        if (f) {
+            if (!fgets(from, sizeof(from), f)) {
+                from[0] = '\0';
+            }
+            fclose(f);
+        }
+        char *slash = strrchr(from, '/');
+        if (slash && slash != from) {
+            *slash = '\0';
+            snprintf(folder, sizeof(folder), "%s", from);
+            name = slash + 1;
+        } else {
+            snprintf(folder, sizeof(folder), "%s", vx_home());
+        }
+        vx_unique_name(folder, name, unique, sizeof(unique));
+        vx_join_path(to, sizeof(to), folder, unique);
+        long error = vx_move(paths[i], to);
+        if (error) {
+            snprintf(text, sizeof(text), "Can't put back %s: %s", base_name(paths[i]), vx_strerror(error));
+        } else {
+            vx_remove(info);
+            snprintf(text, sizeof(text), "put back %s", to);
+        }
+        say(text);
+    }
+    load();
+}
+
 static void delete_selection(void) {
     static char paths[MAX_CLIP][512];
     int n = selected_paths(paths, MAX_CLIP);
     for (int i = 0; i < n; i++) {
         char text[700];
+        if (in_trash()) {
+            char info[600];
+            trash_info_path(info, sizeof(info), base_name(paths[i]));
+            vx_remove(info);
+        }
         long error = vx_remove_tree(paths[i]);
         snprintf(text, sizeof(text), error ? "Can't delete %s: %s" : "deleted %s%s", paths[i],
                  error ? vx_strerror(error) : "");
@@ -1638,19 +1700,72 @@ static void draw_preview(struct vx_surface *s) {
 enum action {
     ACT_OPEN, ACT_SHOW_CONTENTS, ACT_OPEN_IN_EDITOR, ACT_QUICK_LOOK, ACT_INFO, ACT_RENAME,
     ACT_DUPLICATE, ACT_ALIAS, ACT_COPY, ACT_CUT, ACT_PASTE, ACT_TRASH, ACT_DELETE,
-    ACT_NEW_FOLDER, ACT_NEW_FILE, ACT_TERMINAL, ACT_EMPTY_TRASH, ACT_SHOW_HIDDEN, ACT_NONE
+    ACT_NEW_FOLDER, ACT_NEW_FILE, ACT_TERMINAL, ACT_EMPTY_TRASH, ACT_SHOW_HIDDEN, ACT_RESTORE,
+    ACT_OPEN_WITH, ACT_ALWAYS_OPEN_WITH, ACT_WITH_APP, ACT_EXTRACT, ACT_COMPRESS, ACT_NONE
 };
 
-#define MAX_MENU 20
+#define MAX_MENU 24
 static struct vx_menu_item menu[MAX_MENU];
 static enum action menu_actions[MAX_MENU];
 static int menu_count, menu_x, menu_y, menu_hot = -1;
+static int menu_hit;                      /* The item act() was chosen by. */
+static struct vx_app menu_apps[MAX_MENU]; /* ACT_WITH_APP: the app of each item. */
+static bool menu_always;                  /* ...and it becomes the default. */
 
 static void add(const char *label, const char *keys, enum action action, bool disabled) {
     if (menu_count < MAX_MENU) {
         menu[menu_count] = (struct vx_menu_item){label, keys, disabled};
         menu_actions[menu_count++] = action;
     }
+}
+
+/* ---- Archives: archive (the command) does the work ---- */
+
+static bool is_archive(const char *name) {
+    static const char *const endings[] = {".zip", ".tar.gz", ".tgz", ".tar", ".gz"};
+    size_t n = strlen(name);
+    for (size_t i = 0; i < sizeof(endings) / sizeof(endings[0]); i++) {
+        size_t e = strlen(endings[i]);
+        if (n > e && !strcasecmp(name + n - e, endings[i])) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* Extract Here: into a folder named after the archive, next to it. */
+static void extract_selection(void) {
+    struct item *item = at(cursor);
+    if (!item) {
+        return;
+    }
+    char path[800], text[900];
+    item_path(path, sizeof(path), item);
+    const char *argv[] = {"/bin/archive", "extract", path};
+    snprintf(text, sizeof(text), "extracting %s", item->name);
+    say(text);
+    started(run_argv(argv, 3), "archive");
+}
+
+/* Compress: the selection into a zip here, named after it (one thing) or
+ * "Archive.zip". */
+static void compress_selection(void) {
+    static char paths[MAX_CLIP][512];
+    int n = selected_paths(paths, MAX_CLIP);
+    if (!n) {
+        return;
+    }
+    char base[300], name[300], out[800], text[900];
+    snprintf(base, sizeof(base), "%s.zip", n == 1 ? base_name(paths[0]) : "Archive");
+    vx_unique_name(cwd, base, name, sizeof(name));
+    vx_join_path(out, sizeof(out), cwd, name);
+    const char *argv[MAX_CLIP + 3] = {"/bin/archive", "create", out};
+    for (int i = 0; i < n; i++) {
+        argv[3 + i] = paths[i];
+    }
+    snprintf(text, sizeof(text), "compressing into %s", name);
+    say(text);
+    started(run_argv(argv, n + 3), "archive");
 }
 
 static void open_menu(int x, int y) {
@@ -1663,7 +1778,14 @@ static void open_menu(int x, int y) {
         if (count == 1 && item && item->app) {
             add("Show Package Contents", NULL, ACT_SHOW_CONTENTS, false);
         } else if (count == 1 && item && item->kind != K_FOLDER) {
-            add("Open in Text Editor", NULL, ACT_OPEN_IN_EDITOR, false);
+            add("Open With", NULL, ACT_OPEN_WITH, false);
+            add("Always Open With", NULL, ACT_ALWAYS_OPEN_WITH, false);
+        }
+        if (count == 1 && item && is_archive(item->name)) {
+            add("Extract Here", NULL, ACT_EXTRACT, false);
+        }
+        if (!in_trash()) {
+            add("Compress", NULL, ACT_COMPRESS, false);
         }
         add("Quick Look", "Space", ACT_QUICK_LOOK, count != 1);
         add(NULL, NULL, ACT_NONE, false);
@@ -1677,6 +1799,7 @@ static void open_menu(int x, int y) {
         add("Paste", "Ctrl+V", ACT_PASTE, !paste_ok);
         add(NULL, NULL, ACT_NONE, false);
         if (in_trash()) {
+            add("Put Back", NULL, ACT_RESTORE, false);
             add("Delete Immediately", "Delete", ACT_DELETE, false);
         } else {
             add("Move to Trash", "Delete", ACT_TRASH, false);
@@ -1707,6 +1830,87 @@ static void open_menu(int x, int y) {
     fflush(stdout);
 }
 
+/* The file's extension, in lowercase ("" if none). */
+static void extension_of(const char *name, char *out, size_t size) {
+    const char *dot = strrchr(name, '.');
+    out[0] = '\0';
+    if (dot && dot != name && strlen(dot + 1) < size) {
+        size_t i = 0;
+        for (; dot[1 + i]; i++) {
+            out[i] = (char)tolower((unsigned char)dot[1 + i]);
+        }
+        out[i] = '\0';
+    }
+}
+
+static bool has_word(const char *list, const char *word) {
+    size_t n = strlen(word);
+    for (const char *p = list; (p = strstr(p, word)); p += n) {
+        if ((p == list || p[-1] == ' ') && (p[n] == ' ' || p[n] == '\0')) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* Open With: the apps for this kind of file (then those that open
+ * anything); Always Open With makes the one chosen its default. */
+static void open_apps_menu(bool always) {
+    struct item *item = at(cursor);
+    static struct vx_app list[64];
+    int count = vx_app_list(list, 64);
+    char extension[32];
+    extension_of(item ? item->name : "", extension, sizeof(extension));
+    menu_count = 0;
+    menu_always = always;
+    add(always ? "Always open with:" : "Open with:", NULL, ACT_NONE, true);
+    for (int pass = 0; pass < 2; pass++) {
+        for (int i = 0; i < count && menu_count < MAX_MENU; i++) {
+            bool fits = pass == 0 ? extension[0] && has_word(list[i].opens, extension)
+                                  : has_word(list[i].opens, "*") &&
+                                        !(extension[0] && has_word(list[i].opens, extension));
+            if (fits && !list[i].is_linux) {
+                menu_apps[menu_count] = list[i];
+                add(menu_apps[menu_count].name, NULL, ACT_WITH_APP, false);
+            }
+        }
+    }
+    int w, h;
+    vx_menu_size(menu, menu_count, &w, &h);
+    menu_x = menu_x + w > window->surface.width - 4 ? window->surface.width - w - 4 : menu_x;
+    menu_y = menu_y + h > window->surface.height - 4 ? window->surface.height - h - 4 : menu_y;
+    menu_x = menu_x < 0 ? 0 : menu_x;
+    menu_y = menu_y < 0 ? 0 : menu_y;
+    menu_hot = -1;
+    mode = MENU;
+}
+
+static void open_with_app(struct item *item, const struct vx_app *app) {
+    char path[800], text[1000];
+    item_path(path, sizeof(path), item);
+    char extension[32];
+    extension_of(item->name, extension, sizeof(extension));
+    if (menu_always && extension[0]) {
+        /* The bundle's name ("Viewer" for /apps/Viewer.vxapp), as Settings
+         * keeps it. */
+        char stem[64];
+        snprintf(stem, sizeof(stem), "%s", base_name(app->bundle));
+        char *dot = strstr(stem, ".vxapp");
+        if (dot) {
+            *dot = '\0';
+        }
+        struct vx_settings chosen;
+        vx_settings_load(&chosen, VX_APP_DEFAULTS);
+        vx_settings_set(&chosen, extension, stem);
+        vx_settings_save(&chosen);
+        snprintf(text, sizeof(text), ".%s files open with %s now", extension, app->name);
+        say(text);
+    }
+    snprintf(text, sizeof(text), "opened %s with %s", item->name, app->name);
+    say(text);
+    started(vx_app_open(app, path), app->name);
+}
+
 static void toggle_hidden(void) {
     show_hidden = !show_hidden;
     load();
@@ -1729,6 +1933,16 @@ static void act(enum action action) {
             open_with(item, "Editor");
         }
         break;
+    case ACT_OPEN_WITH: open_apps_menu(false); break;
+    case ACT_ALWAYS_OPEN_WITH: open_apps_menu(true); break;
+    case ACT_WITH_APP:
+        if (item) {
+            open_with_app(item, &menu_apps[menu_hit]);
+        }
+        break;
+    case ACT_RESTORE: restore_selection(); break;
+    case ACT_EXTRACT: extract_selection(); break;
+    case ACT_COMPRESS: compress_selection(); break;
     case ACT_QUICK_LOOK: quick_look(); break;
     case ACT_INFO: show_info(); break;
     case ACT_RENAME: start_rename(); break;
@@ -2105,6 +2319,7 @@ static void pointer(const struct vx_gui_event *e, int *held) {
             int hit = menu_hot;
             mode = NORMAL;
             if (hit >= 0) {
+                menu_hit = hit;
                 act(menu_actions[hit]);
             }
         }

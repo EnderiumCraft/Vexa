@@ -56,7 +56,10 @@ static int64_t zero_read(struct vnode *v, void *b, size_t s, uint64_t o) {
     return (int64_t)s;
 }
 
+void console_splash(bool on); /* <vexa/console.h>, whose console_write is another. */
+
 static int64_t console_read(struct file *file, void *b, size_t s) {
+    console_splash(false); /* Someone at the console: the boot text, not the loading screen. */
     return tty_read(console_tty, b, s, file->object.flags & OBJECT_NONBLOCK);
 }
 

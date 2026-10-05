@@ -3,6 +3,7 @@
 #include <vexa/fb.h>
 #include <vexa/font.h>
 #include <vexa/string.h>
+#include <vexa/version.h>
 
 /*
  * Text console on the framebuffer. Understands the common ANSI/VT100 escape
@@ -37,6 +38,9 @@ static uint32_t current_fg = CONSOLE_COLOR_TEXT;
 static uint32_t current_bg = CONSOLE_COLOR_BACKGROUND;
 static bool bold;
 static bool ready;
+/* The loading screen: while it shows, text is kept but not drawn. */
+static bool splash;
+static uint32_t splash_lines;
 
 enum { STATE_NORMAL, STATE_ESCAPE, STATE_CSI } state;
 static int params[MAX_PARAMS];
@@ -44,6 +48,9 @@ static int param_count;
 static bool private_sequence;
 
 static void draw_cell(uint32_t x, uint32_t y) {
+    if (splash) {
+        return;
+    }
     struct cell *cell = &cells[y][x];
     char c = cell->c;
     if (c < FONT_FIRST_CHAR || c >= FONT_FIRST_CHAR + FONT_GLYPH_COUNT) {
@@ -54,6 +61,9 @@ static void draw_cell(uint32_t x, uint32_t y) {
 }
 
 static void draw_cursor(bool visible) {
+    if (splash) {
+        return;
+    }
     if (visible) {
         fb_fill_rect(cursor_x * FONT_WIDTH, cursor_y * FONT_HEIGHT + FONT_HEIGHT - 3,
                      FONT_WIDTH, 2, CONSOLE_COLOR_ACCENT);
@@ -71,6 +81,7 @@ void console_redraw(void) {
     if (!ready) {
         return;
     }
+    splash = false;
     fb_fill_rect(0, 0, fb_width(), fb_height(), CONSOLE_COLOR_BACKGROUND);
     for (uint32_t y = 0; y < rows; y++) {
         for (uint32_t x = 0; x < cols; x++) {
@@ -89,7 +100,9 @@ void console_clear(void) {
             cells[y][x] = (struct cell){.c = 0, .fg = current_fg, .bg = CONSOLE_COLOR_BACKGROUND};
         }
     }
-    fb_fill_rect(0, 0, fb_width(), fb_height(), CONSOLE_COLOR_BACKGROUND);
+    if (!splash) {
+        fb_fill_rect(0, 0, fb_width(), fb_height(), CONSOLE_COLOR_BACKGROUND);
+    }
     cursor_x = cursor_y = 0;
     draw_cursor(true);
 }
@@ -119,7 +132,13 @@ static void scroll(void) {
     }
 }
 
+static void draw_splash_bar(void);
+
 static void newline(void) {
+    if (splash) {
+        splash_lines++;
+        draw_splash_bar();
+    }
     cursor_x = 0;
     if (++cursor_y == rows) {
         scroll();
@@ -329,4 +348,69 @@ void console_set_color(uint32_t fg_rgb) {
 
 void console_reset_color(void) {
     current_fg = CONSOLE_COLOR_TEXT;
+}
+
+/* ---- The loading screen ----
+ *
+ * The name, big, over a dark gradient, the version, and a bar that fills as
+ * boot goes on (with each kernel message, closer to full but never there). */
+
+#define SPLASH_SCALE 8
+#define BAR_WIDTH 280
+#define BAR_HEIGHT 6
+
+static void draw_big_text(const char *text, uint64_t x, uint64_t y, uint32_t scale, uint32_t rgb) {
+    for (; *text; text++, x += FONT_WIDTH * scale) {
+        const uint8_t *glyph = font_glyphs[*text - FONT_FIRST_CHAR];
+        for (uint32_t row = 0; row < FONT_HEIGHT; row++) {
+            for (uint32_t column = 0; column < FONT_WIDTH; column++) {
+                if (glyph[row] & (0x80 >> column)) {
+                    fb_fill_rect(x + column * scale, y + row * scale, scale, scale, rgb);
+                }
+            }
+        }
+    }
+}
+
+static uint64_t bar_x(void) {
+    return (fb_width() - BAR_WIDTH) / 2;
+}
+
+static uint64_t bar_y(void) {
+    return fb_height() / 2 + FONT_HEIGHT * SPLASH_SCALE / 2 + 48;
+}
+
+static void draw_splash_bar(void) {
+    uint64_t filled = (uint64_t)BAR_WIDTH * splash_lines / (splash_lines + 60);
+    fb_fill_rect(bar_x(), bar_y(), filled, BAR_HEIGHT, CONSOLE_COLOR_ACCENT);
+}
+
+void console_splash(bool on) {
+    if (!ready || on == splash) {
+        return;
+    }
+    splash = on;
+    if (!on) {
+        console_redraw();
+        return;
+    }
+    uint64_t width = fb_width(), height = fb_height();
+    /* Dark purple, a little lighter in the middle. */
+    for (uint64_t y = 0; y < height; y += 4) {
+        uint64_t d = y > height / 2 ? y - height / 2 : height / 2 - y;
+        uint32_t lift = (uint32_t)(24 - 24 * d / (height / 2 + 1));
+        uint32_t rgb = ((0x16 + lift / 2) << 16) | ((0x0d + lift / 3) << 8) | (0x26 + lift);
+        fb_fill_rect(0, y, width, 4, rgb);
+    }
+    const char *name = "Vexa";
+    uint64_t name_width = 4 * FONT_WIDTH * SPLASH_SCALE;
+    uint64_t name_y = height / 2 - FONT_HEIGHT * SPLASH_SCALE / 2 - 24;
+    draw_big_text(name, (width - name_width) / 2 + 4, name_y + 4, SPLASH_SCALE, 0x0b0614);
+    draw_big_text(name, (width - name_width) / 2, name_y, SPLASH_SCALE, 0xffffff);
+    const char *version = VEXA_VERSION;
+    uint64_t version_width = strlen(version) * FONT_WIDTH * 2;
+    draw_big_text(version, (width - version_width) / 2, name_y + FONT_HEIGHT * SPLASH_SCALE + 8, 2,
+                  CONSOLE_COLOR_DIM);
+    fb_fill_rect(bar_x(), bar_y(), BAR_WIDTH, BAR_HEIGHT, 0x2c2142);
+    draw_splash_bar();
 }

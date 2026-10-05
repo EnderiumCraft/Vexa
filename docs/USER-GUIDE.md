@@ -55,7 +55,11 @@ The kernel options behind safe mode (`acpi=off`, `noapic`), `nosmp` (use only th
 first CPU core) and `noaml` (keep ACPI's tables, but don't run their code: older USB
 controllers and some IDE ones are then polled), can also be written into `limine.conf`.
 
-While it starts, the kernel prints what it finds (memory, CPUs, disks, the network).
+While it starts, Vexa shows a **loading screen**: its name, the version and a bar that
+fills as it goes. The boot text behind it (what the kernel finds: memory, CPUs, disks,
+the network) comes back when something goes wrong, at the console, and in safe mode and
+the kernel monitor; the kernel option `verbose` shows it from the start.
+The kernel prints what it finds (memory, CPUs, disks, the network).
 Then `vinit`, the first program, starts the desktop. Started from the CD, the desktop
 opens the **Installer** first, alone in the middle of the wallpaper (no panel, no
 icons): install Vexa on a disk from there, or close it to try Vexa from the CD, and the
@@ -160,6 +164,7 @@ Vexa's own programs are in `/bin` (`ls /bin` lists them).
 | `hostname [name]` | the computer's name; sets it with a name |
 | `eject usb0` | takes a disk's (or USB stick's) file systems out of `/mnt`, so it can be unplugged or installed on |
 | `df` | the mounted file systems, and how full they are |
+| `archive list\|extract\|create` | zip and tar.gz files: `archive extract photos.zip` (into `photos`), `archive create out.zip a.txt folder` (or `out.tar.gz`) |
 | `devices [-l] [kind]` | the devices Vexa found, as a tree, with their drivers; `-l` adds ids, places and details; a kind or bus shows only those: `devices usb`, `devices disk`, `devices keyboard` |
 | `shutdown`, `shutdown -r` | turns the machine off (ACPI), or restarts it |
 | `clear` | clears the screen |
@@ -171,6 +176,7 @@ Vexa's own programs are in `/bin` (`ls /bin` lists them).
 | --- | --- |
 | `net` | network interfaces, their addresses and traffic |
 | `fetch [-o file] http://host/path` | downloads a web page (HTTP) and shows it, or saves it with `-o` |
+| `pkg update\|list\|search\|info\|install\|remove\|upgrade` | the package manager: apps from the package index (see Software, below); `pkg install sdl-demo`, `pkg remove sdl-demo` |
 
 ### Graphics and input
 
@@ -285,10 +291,16 @@ theme and other colours.
 
 **The panel** along the top has:
 
-- the **Vexa menu** (top left): the apps, then the Linux programs, then Lock Screen,
-  Log Out (with your name), Restart..., Shut Down... and Back to the console...; each
-  shows its keyboard shortcut
+- the **Vexa menu** (top left): the apps in groups by type (Accessories, Games,
+  Graphics, Internet, Multimedia, System, and Linux for the Linux programs), each
+  opening beside the menu when the pointer is over it; then Lock Screen, Log Out (with
+  your name), Restart..., Shut Down... and Back to the console...; each shows its
+  keyboard shortcut. An app's group is the `category=` line in its bundle's
+  `Info.conf` (apps that name none are under Other)
 - a **button for each window**: a click shows it (or minimizes it, if it's in front)
+- the **keyboard layout** ("US", "DE", ...): a click lists the layouts (English US and
+  UK, German, French, Spanish, Dvorak) to pick one; **Alt+Shift** (pressed together, then
+  let go) switches back to the one used before
 - the **magnifier**: search (below)
 - the **clock**: a click opens the **calendar** (the arrows go to other months; the
   month's name comes back to this one) and the **notifications** seen lately, newest
@@ -561,6 +573,17 @@ back to the library. Other formats can be turned into MPEG-1 on another computer
 `ffmpeg -i in.mp4 -c:v mpeg1video -q:v 4 -c:a mp2 out.mpg`. `videos --play film.mpg`
 plays one without a window.
 
+### Software
+
+Apps to install, from Vexa's package index (the **packages** release on GitHub; another
+index can be set in `/etc/pkg.conf`, as `source=`): the sidebar has **All Apps**, the
+groups of the Vexa menu, **Installed** and **Updates**. **Install** downloads an app,
+checks it against the index (SHA-256) and puts it in `/apps`, where it joins the menu;
+then **Open** starts it, **Remove** takes it away again, and **Update** installs a newer
+version. **Refresh** reads the index again. Only apps installed this way can be removed
+(the ones Vexa comes with stay). Installing needs an account that may change `/apps`
+(an administrator). The `pkg` command does the same from the terminal.
+
 ### Help
 
 This guide, set out to read: the contents on the left, search at the top (type, then
@@ -625,10 +648,14 @@ keyboard:
 | New Text Document | (menu) | an empty "untitled.txt", named right away |
 | Move to Trash | Delete | moves it to the Trash (`.Trash` in your home folder) |
 | Delete Immediately | Delete, in the Trash | removes it for good (asks first) |
+| Extract Here | (menu, on a .zip, .tar.gz, .tgz, .tar or .gz file) | unpacks it into a folder next to it, named after it |
+| Compress | (menu) | packs the selection into a .zip here (named after it, or Archive.zip) |
+| Put Back | (menu, in the Trash) | moves it back to the folder it came from (under another name if that one is taken) |
 | Empty Trash | (menu, in the Trash) | removes everything in the Trash (asks first) |
 | Get Info | Ctrl+I | kind, size (a folder's files counted), where, when modified, where an alias points, an app's program and file types, the app a file opens with |
 | Show Package Contents | (menu, on an app) | opens the bundle as a folder |
-| Open in Text Editor | (menu, on a file) | opens any file as text |
+| Open With | (menu, on a file) | opens it with an app you choose: the apps for that kind of file first, then those that open anything (Text Editor) |
+| Always Open With | (menu, on a file) | the same, and that app opens files of this kind from now on (as in Settings, Default Apps) |
 | Open in Terminal | (menu, on nothing) | a terminal in this folder |
 | Show Hidden Files | Ctrl+H | shows (or hides) names starting with a dot |
 | List, Icons | Ctrl+1, Ctrl+2 | the two views |
