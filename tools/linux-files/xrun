@@ -40,8 +40,9 @@ if [ ! -S "$bus" ]; then
     done
 fi
 export DBUS_SESSION_BUS_ADDRESS="unix:path=$bus"
-# GTK programs in Vexa's theme, dark if Settings chose the dark one.
-if grep -q '^theme=dark' /etc/desktop.conf 2>/dev/null; then
+# GTK programs in Vexa's theme, dark if the desktop shows the dark one (the
+# automatic theme is dark at night).
+if [ "$(cat /run/theme 2>/dev/null)" = dark ] || grep -q '^theme=dark' /etc/desktop.conf 2>/dev/null; then
     export GTK_THEME=Vexa:dark
 fi
 # No accessibility services (at-spi's registry) to start: GTK needn't look for them.

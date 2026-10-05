@@ -674,6 +674,13 @@ static uint32_t mix(uint32_t a, uint32_t b, int num, int den) {
 static void read_config(void) {
     vx_settings_load(&config, "desktop.conf");
     vx_theme_load();
+    /* The theme showing (the automatic one is light or dark by the time),
+     * for Linux programs: xrun picks GTK's theme by it. */
+    FILE *shown = fopen("/run/theme", "w");
+    if (shown) {
+        fputs(vx_theme.dark ? "dark\n" : "light\n", shown);
+        fclose(shown);
+    }
 #define TEXT_SETTING(var, key, fallback) \
     snprintf(var, sizeof(var), "%s", vx_settings_get(&config, key, fallback))
     TEXT_SETTING(setting_wallpaper, "wallpaper", "image");
