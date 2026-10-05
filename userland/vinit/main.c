@@ -17,6 +17,7 @@
 #include <string.h>
 #include <vexa/app.h>
 #include <vexa/desktop.h>
+#include <vexa/hash.h>
 #include <vexa/settings.h>
 #include <vexa/syscall.h>
 #include <vexa/users.h>
@@ -52,6 +53,30 @@ static int cmdline_has(const char *word) {
 }
 
 /* Each account's home folder, with the usual folders in it: theirs. */
+/* The machine's ID for Linux programs (D-Bus wants one), made once: from the
+ * time and the uptime, hashed. (Programs run as people can't write /etc.) */
+static void make_machine_id(void) {
+    static const char path[] = "/linux/etc/machine-id";
+    FILE *f = fopen(path, "r");
+    if (f) {
+        fclose(f);
+        return;
+    }
+    struct vx_sha256 h;
+    long seed[2] = {vx_time(), vx_uptime()};
+    uint8_t digest[32];
+    vx_sha256_init(&h);
+    vx_sha256_add(&h, seed, sizeof(seed));
+    vx_sha256_end(&h, digest);
+    if ((f = fopen(path, "w"))) {
+        for (int i = 0; i < 16; i++) {
+            fprintf(f, "%02x", digest[i]);
+        }
+        fputc('\n', f);
+        fclose(f);
+    }
+}
+
 static void make_homes(void) {
     vx_mkdir("/home");
     struct vx_user users[VX_USERS_MAX];
@@ -179,6 +204,7 @@ int main(int argc, char **argv, char **envp) {
         }
     }
     make_homes();
+    make_machine_id();
     /* Apps are installed by copying them into /apps: administrators may. */
     vx_chown(VX_APPS_DIR, VX_ID_KEEP, VX_GROUP_ADMIN, 0);
     vx_chmod(VX_APPS_DIR, 0775, 0);

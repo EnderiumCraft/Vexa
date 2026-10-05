@@ -23,6 +23,11 @@ if [ ! -S "$socket" ]; then
     DISPLAY="$display" xclipboard </dev/null >/dev/null 2>&1 &
 fi
 export DISPLAY="$display"
+# A Linux shell for X programs (xterm runs $SHELL): an account's own is Vexa's
+# vsh, which Linux programs' command lines (2>&1, $(...)) don't suit.
+case "$SHELL" in
+    */vsh | "") export SHELL=/bin/bash ;;
+esac
 # A D-Bus session bus for the X programs (one, kept running like the server).
 # libdbus wants the machine's ID: made once, in Vexa's /etc.
 bus=/tmp/.dbus-session
