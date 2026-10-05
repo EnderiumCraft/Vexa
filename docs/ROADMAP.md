@@ -326,12 +326,29 @@ native track in 0.12.0; in 0.13.0, X and `xterm` run in a window on it.
       (`/dev/audio0`) drivers, in the SDK, with a demo (0.26.0)
 - [x] `fork`-free process creation for ports (`posix_spawn`), `dup`, and `dlopen` for
       shared libraries beyond libvexa
-- [ ] OpenGL for native programs (Mesa's llvmpipe, built against libvexa)
+- [x] OpenGL for native programs (Mesa's softpipe through OSMesa, built against libvexa;
+      virgl on virtio-gpu)
 
 **Milestone:** an SDL program written for Linux builds with the SDK and runs as a Vexa
 app.
 
-## Phase 10: Firefox
+## Phase 10: A more usable system
+
+Before Firefox, the things that make Vexa comfortable to use every day:
+
+- [ ] `pkg`, a package manager: install, update and remove apps (`.vxapp` bundles) and
+      tools from a package index; and a Software app on top of it
+- [ ] Archives in Files: open and make zip and tar.gz files
+- [ ] Files: restore from the Trash to where things were; Open With (a choice of app,
+      and making it the default)
+- [ ] The input language in the top bar (pick a layout) and a key to switch layouts
+- [ ] A loading screen while Vexa boots
+- [ ] The Vexa menu groups apps by type (Accessories, Internet, Multimedia, Games,
+      System, Development), from each bundle's category
+
+**Milestone:** a new app can be found, installed and started without the terminal.
+
+## Phase 11: Firefox
 
 - [ ] Launch with the content sandbox disabled (`MOZ_DISABLE_CONTENT_SANDBOX=1`),
       because seccomp-bpf and user namespaces can come much later
