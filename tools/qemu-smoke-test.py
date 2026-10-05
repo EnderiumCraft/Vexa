@@ -567,7 +567,8 @@ LINUX_COMMANDS = [
     ("aplay /tmp/tone.wav && echo aplay-finished", "aplay-finished", 60),
     ("@sound 600", None, 10),
     # OpenGL without X: Mesa's llvmpipe (shaders compiled by LLVM) into memory.
-    ("gl-test", "gl-test: passed", 180),
+    # (Its own marker: the X section's gl-test printed "gl-test: passed" already.)
+    ("gl-test && echo gl-test-finished", "gl-test-finished", 180),
     ("#shell",),
 ]
 
