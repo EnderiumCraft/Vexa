@@ -177,6 +177,8 @@ extern const struct vx_accent vx_accents[];
 extern const int vx_accent_count;
 
 /* Makes the theme from a theme name ("dark", "light") and an accent name. */
+/* The accent without a setting ("accent=" in desktop.conf). */
+#define VX_ACCENT_DEFAULT "teal"
 void vx_theme_make(struct vx_theme *theme, const char *name, const char *accent);
 /* Reads the theme from /etc/desktop.conf into vx_theme (windows do this
  * themselves when they open, and when it changes). */

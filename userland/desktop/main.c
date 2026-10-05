@@ -2218,7 +2218,7 @@ static void reload_settings(void) {
     }
     damage_all();
     printf("desktop: settings reloaded (%s, %s)\n", vx_theme.dark ? "dark" : "light",
-           vx_settings_get(&config, "accent", "blue"));
+           vx_settings_get(&config, "accent", VX_ACCENT_DEFAULT));
 }
 
 static void client_message(int client) {

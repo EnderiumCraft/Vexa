@@ -2,8 +2,8 @@
 """Draws the default wallpaper: glossy ribbons of light flowing over a deep
 color, a glow behind them (in the spirit of Aqua and Aero). One for every
 color scheme, rootfs/share/pictures/glass/<accent>-<light|dark>.png (the
-accent's hue; deeper and dimmer for the dark theme), and glass.png, the blue
-light one, for Settings' pictures. Needs Pillow."""
+accent's hue; deeper and dimmer for the dark theme), and glass.png, the teal
+light one (the default colors), for Settings' pictures. Needs Pillow."""
 import colorsys
 import math
 import os
@@ -134,5 +134,5 @@ for name, accent in ACCENTS:
         image = wallpaper(accent, dark)
         image.save("rootfs/share/pictures/glass/%s-%s.png" % (name, "dark" if dark else "light"),
                    optimize=True)
-        if name == "blue" and not dark:
+        if name == "teal" and not dark:  # (The default colors.)
             image.save("rootfs/share/pictures/glass.png", optimize=True)

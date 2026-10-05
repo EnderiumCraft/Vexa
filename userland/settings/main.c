@@ -705,7 +705,7 @@ static void draw_theme_choice(int x, int y, const char *value, const char *title
     static uint32_t pixels[2][PREVIEW_W * PREVIEW_H];
     struct vx_surface little[2] = {{pixels[0], PREVIEW_W, PREVIEW_H, PREVIEW_W},
                                    {pixels[1], PREVIEW_W, PREVIEW_H, PREVIEW_W}};
-    const char *accent = vx_settings_get(&desk, "accent", "blue");
+    const char *accent = vx_settings_get(&desk, "accent", VX_ACCENT_DEFAULT);
     struct vx_theme light, dark;
     vx_theme_make(&light, "light", accent);
     vx_theme_make(&dark, "dark", accent);
@@ -791,8 +791,8 @@ static void draw_appearance(void) {
 
     /* The accent: a color for what's chosen, buttons and the glass. */
     card(y, 126);
-    const char *accent = vx_settings_get(&desk, "accent", "blue");
-    int chosen = 1;
+    const char *accent = vx_settings_get(&desk, "accent", VX_ACCENT_DEFAULT);
+    int chosen = 2; /* (Teal, VX_ACCENT_DEFAULT.) */
     for (int i = 0; i < vx_accent_count; i++) {
         chosen = !strcmp(accent, vx_accents[i].name) ? i : chosen;
     }

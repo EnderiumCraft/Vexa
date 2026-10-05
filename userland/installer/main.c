@@ -45,7 +45,8 @@ static struct disk disks[MAX_DISKS];
 static int disk_count, chosen = -1;
 static bool with_linux = true;
 static bool booted_from_cd;
-static struct vx_image *disk_icon, *folder_icon, *program_icon, *computer_icon;
+/* From Vexa's icons (/share/icons). */
+static struct vx_image *disk_icon, *folder_icon, *program_icon, *computer_icon, *disc_icon;
 
 /* The account: full name, account name, password (twice); which is typed in. */
 enum { F_FULL, F_NAME, F_PASSWORD, F_AGAIN, FIELD_COUNT };
@@ -240,18 +241,23 @@ static void cross(struct vx_surface *s, int x, int y, int size, int t, uint32_t 
     }
 }
 
-/* Vexa's mark: a glossy rounded square with a V in it. */
-static void logo(struct vx_surface *s, int x, int y, int size) {
-    vx_fill_rounded(s, x + 2, y + 4, size, size, size / 4, 0x000000, 50); /* Shadow. */
-    vx_draw_gel(s, x, y, size, size, size / 4, VX_COLOR_ACCENT);
-    const struct vx_font *f = bold(size * 6 / 10);
-    centered(s, f, x + size / 2, y + (size - vx_font_height(f)) / 2, "V", 0xffffff);
-}
-
 static void icon(struct vx_surface *s, const struct vx_image *image, int x, int y, int size) {
     if (image) {
         vx_blit_alpha(s, x, y, size, size, &image->surface);
     }
+}
+
+/* The Installer's mark: the CD (or, if it can't be read, a glossy rounded
+ * square with a V in it). */
+static void logo(struct vx_surface *s, int x, int y, int size) {
+    if (disc_icon) {
+        icon(s, disc_icon, x - 4, y - 4, size + 8);
+        return;
+    }
+    vx_fill_rounded(s, x + 2, y + 4, size, size, size / 4, 0x000000, 50); /* Shadow. */
+    vx_draw_gel(s, x, y, size, size, size / 4, VX_COLOR_ACCENT);
+    const struct vx_font *f = bold(size * 6 / 10);
+    centered(s, f, x + size / 2, y + (size - vx_font_height(f)) / 2, "V", 0xffffff);
 }
 
 /* A button: the primary one a gel of `color`, the others plain. */
@@ -364,8 +370,7 @@ static void draw_sidebar(struct vx_surface *s) {
 
 static void feature(struct vx_surface *s, int y, const struct vx_image *image, const char *title,
                     const char *line) {
-    vx_fill_rounded(s, CONTENT, y, 44, 44, 12, vx_mix(VX_COLOR_VIEW, VX_COLOR_ACCENT, 30), 255);
-    icon(s, image, CONTENT + 6, y + 6, 32);
+    icon(s, image, CONTENT - 2, y - 4, 50);
     text(s, bold(14), CONTENT + 60, y + 3, title, VX_COLOR_TEXT);
     text(s, sans(13), CONTENT + 60, y + 23, line, VX_COLOR_DIM);
 }
@@ -571,9 +576,16 @@ static int overall_percent(void) {
 static void draw_installing(struct vx_surface *s) {
     if (page == DONE) {
         int cx = CONTENT + CONTENT_W / 2, cy = 170;
-        circle(s, cx, cy, 58, vx_mix(0x3fbf6f, VX_COLOR_WINDOW, 150));
-        circle(s, cx, cy, 50, 0x3fbf6f);
-        tick(s, cx - 34, cy - 34, 68, 6, 0xffffff);
+        if (computer_icon) { /* The computer, with a green tick. */
+            icon(s, computer_icon, cx - 64, cy - 64, 128);
+            circle(s, cx + 44, cy + 38, 25, 0xffffff);
+            circle(s, cx + 44, cy + 38, 22, 0x3fbf6f);
+            tick(s, cx + 29, cy + 23, 30, 4, 0xffffff);
+        } else {
+            circle(s, cx, cy, 58, vx_mix(0x3fbf6f, VX_COLOR_WINDOW, 150));
+            circle(s, cx, cy, 50, 0x3fbf6f);
+            tick(s, cx - 34, cy - 34, 68, 6, 0xffffff);
+        }
         centered(s, bold(24), cx, cy + 80, "Vexa is installed", VX_COLOR_TEXT);
         centered_paragraph(s, sans(14), cx, cy + 120, CONTENT_W - 80, 20,
                   "Take the CD (or USB stick) out and restart: the computer starts Vexa from the "
@@ -904,7 +916,7 @@ static bool key(const struct vx_gui_event *e) {
 
 static struct vx_image *resource(const char *name) {
     char path[128];
-    snprintf(path, sizeof(path), "/apps/Files.vxapp/Contents/Resources/%s.png", name);
+    snprintf(path, sizeof(path), "/share/icons/%s.png", name);
     return vx_image_load(path, VX_IMAGE_ALPHA);
 }
 
@@ -914,10 +926,11 @@ int main(void) {
         fprintf(stderr, "installer: no desktop to open a window on\n");
         return 1;
     }
-    disk_icon = resource("disk");
-    folder_icon = resource("folder");
-    program_icon = resource("program");
+    disk_icon = resource("drive");
+    folder_icon = resource("user-folder");
+    program_icon = resource("terminal");
     computer_icon = resource("computer");
+    disc_icon = resource("disc");
     find_disks();
     printf("installer: %d disk%s\n", disk_count, disk_count == 1 ? "" : "s");
     fflush(stdout);

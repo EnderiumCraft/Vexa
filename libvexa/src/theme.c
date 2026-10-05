@@ -24,7 +24,7 @@ uint32_t vx_mix(uint32_t a, uint32_t b, int amount) {
 }
 
 void vx_theme_make(struct vx_theme *t, const char *name, const char *accent) {
-    uint32_t color = vx_accents[1].color; /* Blue, unless another is named. */
+    uint32_t color = vx_accents[2].color; /* Teal (VX_ACCENT_DEFAULT), unless another is named. */
     for (int i = 0; i < vx_accent_count; i++) {
         if (accent && !strcmp(accent, vx_accents[i].name)) {
             color = vx_accents[i].color;
@@ -70,14 +70,14 @@ void vx_theme_make(struct vx_theme *t, const char *name, const char *accent) {
     t->title_focused = t->selected;
 }
 
-/* (Until vx_theme_load: the default, light with blue.) */
+/* (Until vx_theme_load: the default, light with teal.) */
 struct vx_theme vx_theme = {
-    false, 0xeef0f4, 0xffffff, 0x1a1d24, 0x6b7080, 0x4c8dff, 0xbfd6ff, 0xe2e5eb, 0xd5dae3,
-    0xc4c9d3, 0xe6e9ef, 0xf5f7fa, 0x9aa0ab, 0xe9ecf2, 0xf8f9fc, 0xe0e3ea, 0xbfd6ff, 0x1a1d24,
+    false, 0xeef0f4, 0xffffff, 0x1a1d24, 0x6b7080, 0x2ec4b6, 0xb5eae5, 0xe2e5eb, 0xd5dae3,
+    0xc4c9d3, 0xe6e9ef, 0xf5f7fa, 0x9aa0ab, 0xe9ecf2, 0xf8f9fc, 0xe0e3ea, 0xb5eae5, 0x1a1d24,
 };
 
 void vx_theme_wallpaper(const struct vx_theme *t, char *out, size_t size) {
-    const char *accent = "blue";
+    const char *accent = VX_ACCENT_DEFAULT;
     for (int i = 0; i < vx_accent_count; i++) {
         if (t->accent == vx_accents[i].color) {
             accent = vx_accents[i].name;
@@ -99,5 +99,5 @@ void vx_theme_load(void) {
     if (!strcmp(name, "auto")) {
         name = vx_theme_night() ? "dark" : "light";
     }
-    vx_theme_make(&vx_theme, name, vx_settings_get(&s, "accent", "blue"));
+    vx_theme_make(&vx_theme, name, vx_settings_get(&s, "accent", VX_ACCENT_DEFAULT));
 }

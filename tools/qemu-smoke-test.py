@@ -299,8 +299,8 @@ TYPED_COMMANDS = ([
     ("@mouse_move 269 0", None, 3),
     ("@mouse_button 1", None, 3),
     ("@mouse_button 0", 'desktop: window 7 "Settings"', 20),
-    ] + click(300, 162, 807, 223, "desktop: settings reloaded (dark, blue)", 20)
-      + click(807, 223, 606, 223, "desktop: settings reloaded (light, blue)", 20)
+    ] + click(300, 162, 807, 223, "desktop: settings reloaded (dark, teal)", 20)
+      + click(807, 223, 606, 223, "desktop: settings reloaded (light, teal)", 20)
       + click(606, 223, 372, 218, "settings: showing Date & Time")
       + click(372, 218, 706, 392, "settings: time_zone=Denver")
       + click(706, 392, 372, 286, "settings: showing Display")

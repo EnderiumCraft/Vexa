@@ -1,7 +1,7 @@
 /* The glossy parts, over Adwaita (light unless gtk-dark.css set these). */
-@define-color vexa_accent #4c8dff;
-@define-color vexa_accent_light #a9cbff;
-@define-color vexa_accent_deep #2f74ea;
+@define-color vexa_accent #2ec4b6;
+@define-color vexa_accent_light #5dd9c9;
+@define-color vexa_accent_deep #339b90;
 @define-color theme_selected_bg_color @vexa_accent;
 @define-color theme_selected_fg_color #ffffff;
 
@@ -19,7 +19,7 @@ button:hover {
 button:active, button:checked, button.suggested-action, button.default:focus,
 headerbar button:checked, .linked > button:checked, stackswitcher > button:checked,
 .linked > button:active, headerbar .linked > button:checked {
-    background-image: linear-gradient(to bottom, @vexa_accent_light 0%, #7fb1ff 48%, @vexa_accent 52%, #93c1ff 100%);
+    background-image: linear-gradient(to bottom, @vexa_accent_light 0%, #44d3c2 48%, @vexa_accent 52%, #50d6c1 100%);
     border-color: @vexa_accent_deep;
     color: #ffffff;
     text-shadow: 0 1px rgba(0, 40, 120, 0.5);
@@ -42,7 +42,7 @@ button.flat, button.flat:hover:not(:active) {
 
 /* The header bar (GTK's own title bars): glossy, like glass in the light. */
 headerbar, .titlebar:not(headerbar) {
-    background-image: linear-gradient(to bottom, #f4f8ff 0%, #d5e4fb 48%, #c0d6f8 52%, #dce9fc 100%);
+    background-image: linear-gradient(to bottom, #f6fdfc 0%, #dcf4f1 48%, #c4ece7 52%, #e2f6f3 100%);
     border-bottom: 1px solid #8c8c9c;
     box-shadow: inset 0 1px rgba(255, 255, 255, 0.9);
     min-height: 34px;
@@ -77,7 +77,7 @@ headerbar button.titlebutton.close {
     background-image: linear-gradient(to bottom, #ffa19c 0%, #ff6e66 48%, #ff554c 52%, #ff8881 100%);
 }
 headerbar button.titlebutton.maximize {
-    background-image: linear-gradient(to bottom, #9cc0ff 0%, #669eff 48%, #4c8dff 52%, #81afff 100%);
+    background-image: linear-gradient(to bottom, #55d7cb 0%, #35d0c1 48%, #2ec4b6 52%, #45d3c6 100%);
 }
 headerbar button.titlebutton.minimize {
     background-image: linear-gradient(to bottom, #ba9cff 0%, #9466ff 48%, #824cff 52%, #a781ff 100%);
@@ -100,7 +100,7 @@ entry:focus {
 /* What's selected: a glossy bar of the accent. */
 row:selected, treeview.view:selected, iconview:selected, flowboxchild:selected,
 menuitem:hover, modelbutton.flat:hover, list row:selected:focus {
-    background-image: linear-gradient(to bottom, #8fbcff 0%, #5d9aff 48%, @vexa_accent 52%, #7fb3ff 100%);
+    background-image: linear-gradient(to bottom, #4ed5c3 0%, #30cebd 48%, @vexa_accent 52%, #44d3c0 100%);
     color: #ffffff;
 }
 
@@ -110,7 +110,7 @@ switch {
     background-image: linear-gradient(to bottom, #c9ced8, #e2e5eb);
 }
 switch:checked {
-    background-image: linear-gradient(to bottom, @vexa_accent_light 0%, #7fb1ff 48%, @vexa_accent 52%, #93c1ff 100%);
+    background-image: linear-gradient(to bottom, @vexa_accent_light 0%, #44d3c2 48%, @vexa_accent 52%, #50d6c1 100%);
 }
 switch slider {
     border-radius: 50%;
@@ -118,7 +118,7 @@ switch slider {
     border: 1px solid #8f95a0;
 }
 check:checked, radio:checked {
-    background-image: linear-gradient(to bottom, @vexa_accent_light 0%, #7fb1ff 48%, @vexa_accent 52%, #93c1ff 100%);
+    background-image: linear-gradient(to bottom, @vexa_accent_light 0%, #44d3c2 48%, @vexa_accent 52%, #50d6c1 100%);
     border-color: @vexa_accent_deep;
     color: #ffffff;
 }
@@ -130,7 +130,7 @@ scale trough, progressbar trough {
 }
 scale highlight, progressbar progress {
     border-radius: 6px;
-    background-image: linear-gradient(to bottom, @vexa_accent_light 0%, #7fb1ff 48%, @vexa_accent 52%, #93c1ff 100%);
+    background-image: linear-gradient(to bottom, @vexa_accent_light 0%, #44d3c2 48%, @vexa_accent 52%, #50d6c1 100%);
     border: 1px solid @vexa_accent_deep;
 }
 scale slider {
@@ -144,16 +144,16 @@ scrollbar slider {
     min-width: 8px;
     min-height: 8px;
     border-radius: 6px;
-    background-image: linear-gradient(to right, #8fbcff 0%, #5d9aff 48%, @vexa_accent 52%, #7fb3ff 100%);
+    background-image: linear-gradient(to right, #4ed5c3 0%, #30cebd 48%, @vexa_accent 52%, #44d3c0 100%);
     border: 1px solid @vexa_accent_deep;
 }
 scrollbar.horizontal slider {
-    background-image: linear-gradient(to bottom, #8fbcff 0%, #5d9aff 48%, @vexa_accent 52%, #7fb3ff 100%);
+    background-image: linear-gradient(to bottom, #4ed5c3 0%, #30cebd 48%, @vexa_accent 52%, #44d3c0 100%);
 }
 
 /* Tabs: the chosen one a gel of the accent. */
 notebook > header tab:checked {
-    background-image: linear-gradient(to bottom, @vexa_accent_light 0%, #7fb1ff 48%, @vexa_accent 52%, #93c1ff 100%);
+    background-image: linear-gradient(to bottom, @vexa_accent_light 0%, #44d3c2 48%, @vexa_accent 52%, #50d6c1 100%);
     border-radius: 8px;
     color: #ffffff;
 }

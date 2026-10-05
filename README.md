@@ -50,7 +50,7 @@ runs X programs such as `xterm` in windows of their own on it. The kernel:
 - boots straight to its desktop (from the CD: the Installer first), with a glossy look
   in the spirit of Aqua and Aero: glass title bars and panel that blur what's behind
   them, glossy rounded window buttons in the accent's colors, gel-like buttons, switches and menus in
-  Vexa's apps, light by default with a blue accent (a dark theme in neutral greys, an
+  Vexa's apps, light by default with a teal accent (a dark theme in neutral greys, an
   automatic one that's dark at night, and other accents in Settings)
 - has a graphical desktop: a compositor that draws programs' windows (shared buffers)
   on the screen, with soft shadows, round corners and animations, a panel (the Vexa
