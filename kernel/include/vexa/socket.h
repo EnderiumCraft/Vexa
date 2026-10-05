@@ -106,6 +106,7 @@ int inet_create(struct socket *socket);
 int unix_create(struct socket *socket);
 int unix_create_pair(struct socket *a, struct socket *b);
 /* The process at the other end of a local socket (0 if unknown). */
-uint32_t unix_peer_process(struct socket *socket);
+/* The connected peer's process, and its user and group ids (SO_PEERCRED). */
+uint32_t unix_peer_process(struct socket *socket, uint32_t *uid, uint32_t *gid);
 
 #endif

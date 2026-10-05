@@ -1,4 +1,5 @@
 #include <vexa/abi.h>
+#include <vexa/cred.h>
 #include <vexa/mm.h>
 #include <vexa/process.h>
 #include <vexa/socket.h>
@@ -42,6 +43,7 @@ struct endpoint {
     enum unix_state state;
     struct endpoint *peer; /* Connected peer, or a datagram socket's default destination. */
     uint32_t owner;        /* The process that made it (for SO_PEERCRED). */
+    uint32_t uid, gid;     /* ...and whose it was (its effective ids). */
 
     struct chunk *head, *tail;
     size_t queued;
@@ -87,6 +89,8 @@ static struct endpoint *endpoint_new(struct socket *socket, int type) {
     e->socket = socket;
     e->type = type;
     e->owner = current_process_id();
+    e->uid = cred_current()->euid;
+    e->gid = cred_current()->egid;
     e->next = endpoints;
     endpoints = e;
     return e;
@@ -350,6 +354,8 @@ static int unix_connect(struct socket *socket, const struct vx_socket_address *a
     memcpy(server->name, target->name, target->name_length);
     server->name_length = target->name_length;
     server->owner = target->owner;
+    server->uid = target->uid;
+    server->gid = target->gid;
     connect_pair(e, server);
     server->listener_of = target;
     if (target->accept_tail) {
@@ -887,10 +893,12 @@ int unix_create_pair(struct socket *a, struct socket *b) {
     return 0;
 }
 
-uint32_t unix_peer_process(struct socket *socket) {
+uint32_t unix_peer_process(struct socket *socket, uint32_t *uid, uint32_t *gid) {
     mutex_lock(&unix_lock);
     struct endpoint *peer = endpoint_of(socket)->peer;
     uint32_t id = peer ? peer->owner : 0;
+    *uid = peer ? peer->uid : 0;
+    *gid = peer ? peer->gid : 0;
     mutex_unlock(&unix_lock);
     return id;
 }

@@ -845,7 +845,8 @@ int64_t linux_sys_getsockopt(struct interrupt_frame *f, uint64_t fd, uint64_t le
             if (socket->family != VX_AF_UNIX) {
                 error = -LE_ENOPROTOOPT;
             }
-            out.credentials.pid = (int32_t)unix_peer_process(socket);
+            out.credentials.pid = (int32_t)unix_peer_process(socket, &out.credentials.uid,
+                                                             &out.credentials.gid);
             size = sizeof(out.credentials);
             break;
         default:
