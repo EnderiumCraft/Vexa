@@ -719,9 +719,18 @@ static void make_wallpaper(void) {
     /* A picture, as the wallpaper mode says: covering the screen (fill),
      * all of it on the screen (fit), as it is (center), repeated (tile), or
      * stretched to the screen's shape... */
-    struct vx_image *image = !strcmp(setting_wallpaper, "image") && setting_image[0]
-                                 ? vx_image_load(setting_image, 0)
-                                 : NULL;
+    struct vx_image *image = NULL;
+    if (!strcmp(setting_wallpaper, "image") && setting_image[0]) {
+        /* The default picture: the one in the theme's colors. */
+        if (!strcmp(setting_image, DESKTOP_DEFAULT_WALLPAPER)) {
+            char path[96];
+            vx_theme_wallpaper(&vx_theme, path, sizeof(path));
+            image = vx_image_load(path, 0);
+        }
+        if (!image) {
+            image = vx_image_load(setting_image, 0);
+        }
+    }
     if (image) {
         const char *mode = setting_wallpaper_mode;
         int iw = image->surface.width, ih = image->surface.height;
@@ -2162,17 +2171,21 @@ static bool apply_display(void);
 static void fit_windows(void);
 static void apply_key_repeat(void);
 
+/* What the wallpaper is made from (the default picture's colors too). */
+static void wallpaper_key(char *out, size_t size) {
+    bool scheme = !strcmp(setting_image, DESKTOP_DEFAULT_WALLPAPER);
+    snprintf(out, size, "%s|%s|%s|%d|%x", setting_wallpaper, setting_image, setting_wallpaper_mode,
+             scheme && vx_theme.dark, scheme ? vx_theme.accent : 0);
+}
+
 /* Settings changed (or someone logged in): reads them again and applies them. */
 static void reload_settings(void) {
     /* The wallpaper is made again only if it changed (a big picture
      * takes a while to read). */
-    char before[600];
-    snprintf(before, sizeof(before), "%s|%s|%s", setting_wallpaper, setting_image,
-             setting_wallpaper_mode);
+    char before[600], after[600];
+    wallpaper_key(before, sizeof(before));
     read_config();
-    char after[600];
-    snprintf(after, sizeof(after), "%s|%s|%s", setting_wallpaper, setting_image,
-             setting_wallpaper_mode);
+    wallpaper_key(after, sizeof(after));
     bool resized = apply_display();
     if (resized) {
         /* Something on the screen at once: reading a big picture takes a while. */

@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include <string.h>
 #include <vexa/desktop.h>
 #include <vexa/gui.h>
@@ -72,6 +73,16 @@ struct vx_theme vx_theme = {
     false, 0xeef0f4, 0xffffff, 0x1a1d24, 0x6b7080, 0x4c8dff, 0xbfd6ff, 0xe2e5eb, 0xd5dae3,
     0xc4c9d3, 0xe6e9ef, 0xf5f7fa, 0x9aa0ab, 0xe9ecf2, 0xf8f9fc, 0xe0e3ea, 0xbfd6ff, 0x1a1d24,
 };
+
+void vx_theme_wallpaper(const struct vx_theme *t, char *out, size_t size) {
+    const char *accent = "blue";
+    for (int i = 0; i < vx_accent_count; i++) {
+        if (t->accent == vx_accents[i].color) {
+            accent = vx_accents[i].name;
+        }
+    }
+    snprintf(out, size, "/share/pictures/glass/%s-%s.png", accent, t->dark ? "dark" : "light");
+}
 
 void vx_theme_load(void) {
     struct vx_settings s;

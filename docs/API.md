@@ -482,7 +482,9 @@ The messages between programs and the desktop over `/run/desktop` (`DESKTOP_SOCK
 `<vexa/gui.h>` wraps them, and the developer guide describes them. It also has the
 settings file's name (`DESKTOP_CONFIG`, `/etc/desktop.conf`), the default wallpaper
 (`DESKTOP_DEFAULT_WALLPAPER`) and the gradients Settings offers
-(`desktop_wallpapers[]`).
+(`desktop_wallpapers[]`). The default wallpaper stands for the one in the theme's
+colors, which the desktop shows: `vx_theme_wallpaper()` (`<vexa/gui.h>`) gives its
+path, `/share/pictures/glass/<accent>-<light|dark>.png` (made by `tools/make-glass.py`).
 
 ## Constants and structures
 

@@ -102,7 +102,8 @@ struct desktop_message {
 #define DESKTOP_CONFIG "/etc/desktop.conf"
 
 /* The wallpaper without a DESKTOP_CONFIG: this picture (or, if it can't be
- * read, the first gradient). */
+ * read, the first gradient). It stands for the default wallpaper in the
+ * theme's colors, which the desktop shows (see vx_theme_wallpaper()). */
 #define DESKTOP_DEFAULT_WALLPAPER "/share/pictures/glass.png"
 
 struct desktop_wallpaper {

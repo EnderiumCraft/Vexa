@@ -63,7 +63,8 @@ runs X programs such as `xterm` in windows of their own on it. The kernel:
   and its own apps: a terminal with tabs, Files, a text editor with tabs, undo and
   syntax colouring, an image viewer (PNG, BMP, PPM), Settings, Activity Monitor, a
   calculator, a calendar, Notes, Paint, Music (MP3, Ogg, FLAC, WAV), Videos (MPEG-1) and Help, sharing Open and Save dialogs and
-  one clipboard (with X programs too); the default wallpaper is `/share/pictures/glass.png`
+  one clipboard (with X programs too); the default wallpaper (`/share/pictures/glass.png`) comes in the colors of
+  every theme and accent, and changes with them
 - draws text smooth with TrueType fonts (DejaVu, through stb_truetype) in UTF-8, so
   Vexa's apps show and type any language's letters, with whole keyboard layouts
   (German, French, Spanish, UK, Dvorak: AltGr and accent keys)

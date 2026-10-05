@@ -181,6 +181,9 @@ void vx_theme_make(struct vx_theme *theme, const char *name, const char *accent)
 /* Reads the theme from /etc/desktop.conf into vx_theme (windows do this
  * themselves when they open, and when it changes). */
 void vx_theme_load(void);
+/* The default wallpaper (DESKTOP_DEFAULT_WALLPAPER) in a theme's colors:
+ * /share/pictures/glass/<accent>-<light|dark>.png. */
+void vx_theme_wallpaper(const struct vx_theme *theme, char *out, size_t size);
 
 #define VX_COLOR_WINDOW (vx_theme.window)
 #define VX_COLOR_VIEW (vx_theme.view)

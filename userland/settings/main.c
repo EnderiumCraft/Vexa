@@ -352,12 +352,14 @@ static void draw_preview(int x, int y, const char *theme, bool on) {
     struct vx_theme t;
     vx_theme_make(&t, theme, vx_settings_get(&desk, "accent", "blue"));
     vx_fill_rounded(S(), x - 4, y - 4, 148, 98, 8, on ? VX_COLOR_ACCENT : VX_COLOR_LINE, 255);
-    /* A little desktop: the wallpaper's blue, a window with a glass title bar
-     * (its three balls) and a button. */
+    /* A little desktop: the default wallpaper's colors (the accent's, deeper
+     * in the dark), a window with a glass title bar (its three balls) and a
+     * button. */
+    uint32_t sky = vx_mix(t.accent, 0, t.dark ? 150 : 70), deep = vx_mix(t.accent, 0, t.dark ? 230 : 200);
     for (int row = 0; row < 90; row++) {
-        vx_fill(S(), x, y + row, 140, 1, vx_mix(0x2a64c4, 0x0a1e5a, row * 255 / 89));
+        vx_fill(S(), x, y + row, 140, 1, vx_mix(sky, deep, row * 255 / 89));
     }
-    vx_fill(S(), x, y, 140, 8, vx_mix(t.panel, 0x2a64c4, 90));
+    vx_fill(S(), x, y, 140, 8, vx_mix(t.panel, sky, 90));
     uint32_t bar = t.dark ? vx_mix(t.accent, 0x101018, 105) : vx_mix(t.accent, 0xffffff, 105);
     vx_fill_rounded(S(), x + 14, y + 16, 112, 22, 5, bar, 255);
     for (int row = 0; row < 7; row++) {
@@ -417,6 +419,7 @@ static struct picture {
     char name[64];
     struct vx_image *thumb;
     bool tried;
+    char shown[96]; /* The default picture: which colors' its thumbnail is of. */
 } pictures[MAX_PICTURES];
 static int picture_count;
 
@@ -452,7 +455,14 @@ static bool make_next_thumbnail(void) {
             continue;
         }
         p->tried = true;
-        struct vx_image *full = vx_image_load(p->path, 0);
+        struct vx_image *full = NULL;
+        if (!strcmp(p->path, DESKTOP_DEFAULT_WALLPAPER)) { /* In the theme's colors. */
+            vx_theme_wallpaper(&vx_theme, p->shown, sizeof(p->shown));
+            full = vx_image_load(p->shown, 0);
+        }
+        if (!full) {
+            full = vx_image_load(p->path, 0);
+        }
         if (full) {
             struct vx_image *thumb = malloc(sizeof(*thumb));
             uint32_t *pixels = thumb ? malloc(112 * 70 * 4) : NULL;
@@ -483,6 +493,16 @@ static void draw_wallpaper(void) {
     const char *image = vx_settings_get(&desk, "wallpaper_image", DESKTOP_DEFAULT_WALLPAPER);
     heading("Pictures", y);
     y += 30;
+    /* The default picture follows the colors: when they change, its thumbnail too. */
+    char now[96];
+    vx_theme_wallpaper(&vx_theme, now, sizeof(now));
+    for (int i = 0; i < picture_count; i++) {
+        if (pictures[i].thumb && pictures[i].shown[0] && strcmp(pictures[i].shown, now)) {
+            vx_image_free(pictures[i].thumb);
+            pictures[i].thumb = NULL;
+            pictures[i].tried = false;
+        }
+    }
     for (int i = 0; i < picture_count; i++) {
         int x = LEFT + (i % 4) * 128, py = y + (i / 4) * 98;
         bool on = !strcmp(wallpaper, "image") && !strcmp(image, pictures[i].path);
@@ -1750,7 +1770,10 @@ int main(int argc, char **argv) {
         draw();
         /* The clock ticks, a display change counts down, and thumbnails are
          * made when nothing else is happening. */
-        bool busy = current == S_WALLPAPER && picture_count && !pictures[picture_count - 1].tried;
+        bool busy = false; /* (Thumbnails to make.) */
+        for (int i = 0; current == S_WALLPAPER && i < picture_count; i++) {
+            busy = busy || !pictures[i].tried;
+        }
         long wait = busy ? 0 : (current == S_DATE || current == S_ABOUT || revert_at ||
                                 current == S_INPUT || current == S_SOUND) ? 500 : -1;
         struct vx_gui_event e;

@@ -212,7 +212,7 @@ Vexa's file system starts in memory and has these folders:
 | `/apps` | the desktop's apps, as `.vxapp` bundles |
 | `/home` | each account's home folder: `/home/vexa` on the live CD, with `Desktop` (its files are the desktop's icons), `Documents`, `Pictures` (screenshots go here), `Music`, `Videos` and the Trash (`.Trash`) |
 | `/etc` | settings: `motd`, `desktop.conf`, `hosts`, `resolv.conf`; the accounts: `passwd`, `group`, `shadow` |
-| `/share/pictures` | pictures (the default wallpaper, `glass.png`, and `aurora.png` and `meadow.png`) |
+| `/share/pictures` | pictures (the default wallpaper, `glass.png`, and `aurora.png` and `meadow.png`); `glass/` has the default wallpaper in each theme and accent's colors |
 | `/share/fonts` | the fonts Vexa's apps draw text with (DejaVu Sans, Sans Bold, Sans Mono) |
 | `/tmp` | scratch space (anyone may put files there; only their owner may remove them) |
 | `/dev` | devices: the console, terminals (`/dev/pts`), `/dev/input`, `/dev/display0`, `/dev/dri/card0` (for Linux programs), `/dev/random` |
@@ -674,7 +674,7 @@ at once. `settings Display` opens a section directly.
 
 | Section | What's there |
 | --- | --- |
-| **Appearance** | Light (the default) or Dark, and the accent color (Blue by default; Purple, Teal, Green, Orange, Pink, Red, Graphite): the panel, menus, title bars and Vexa's apps follow; the terminal stays dark |
+| **Appearance** | Light (the default) or Dark, and the accent color (Blue by default; Purple, Teal, Green, Orange, Pink, Red, Graphite): the panel, menus, title bars and Vexa's apps follow, and so does the default wallpaper (glass), deeper in the dark; the terminal stays dark |
 | **Wallpaper** | the pictures in `/share/pictures` (as thumbnails), five gradients, how a picture fits (Fill, Fit, Center, Tile, Stretch), and any other PNG, BMP or PPM file by its path |
 | **Desktop & Panel** | desktop icons on or off, and which apps have one; the clock (24 or 12 hours, the weekday, the date, seconds); snapping windows to the edges; animations; what a double click on a title bar does (maximize, minimize, nothing); how long notifications stay |
 | **Date & Time** | the time now, and the time zone: a city (54 of them) from a list, with summer time handled by itself (the European, North American, Australian and New Zealand rules) |
