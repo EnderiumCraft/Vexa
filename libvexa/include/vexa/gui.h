@@ -111,6 +111,14 @@ void vx_window_set_title(struct vx_window *window, const char *title);
  * so again, false, when they're saved or given up; a closed window needs
  * nothing said. */
 void vx_window_set_modified(struct vx_window *window, bool modified);
+/* The screen's size (what windows can fill): true, or false if the desktop
+ * doesn't answer. */
+bool vx_screen_size(int *width, int *height);
+/* Moves the window so that its content's top left corner is at (x, y) on the
+ * screen (never above the panel). */
+void vx_window_move(struct vx_window *window, int x, int y);
+/* Puts the window in the middle of the screen (below the panel). */
+void vx_window_center(struct vx_window *window);
 /* The pointer's shape over the window (until it's set again). */
 enum { VX_CURSOR_ARROW, VX_CURSOR_TEXT, VX_CURSOR_HAND, VX_CURSOR_WAIT, VX_CURSOR_CROSS,
        VX_CURSOR_MOVE, VX_CURSOR_COUNT };
@@ -324,6 +332,12 @@ void vx_clipboard_set(const char *text, size_t length);
 /* Its text, in a new string to free() (empty if there's none); NULL if
  * memory runs out. */
 char *vx_clipboard_get(void);
+
+/* Breaks `text` into at most `max` lines (of 160 bytes) of at most `width`
+ * pixels in `font` (NULL: the usual one), at word ends (a newline ends a line;
+ * a word too long for one is cut). Returns how many lines. */
+int vx_text_wrap(char lines[][160], int max, const char *text, int width,
+                 const struct vx_font *font);
 
 /* A question in a window of its own, until it's answered (the app's other
  * windows wait; what they're sent is dropped, as for the dialogs below).

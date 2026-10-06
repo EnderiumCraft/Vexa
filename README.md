@@ -114,7 +114,8 @@ runs X programs such as `xterm` in windows of their own on it. The kernel:
 - has a file system tree with a root in memory (unpacked from an initramfs), `/dev`,
   and disks mounted under `/mnt`
 - installs itself on a disk (the Installer app, or `install`) and starts from it, with
-  BIOS or UEFI firmware, keeping what you change
+  BIOS or UEFI firmware, keeping what you change; the first login then opens a Welcome:
+  the look, keyboard and time zone, the network, and a short tour
 - drives USB: xHCI controllers (USB 1 to 3) and the older EHCI, UHCI and OHCI ones,
   hubs, keyboards, mice and tablets, and
   USB sticks and disks (mounted at `/mnt/usb0`), plugged in and out while it runs

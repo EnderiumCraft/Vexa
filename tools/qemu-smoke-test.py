@@ -677,10 +677,12 @@ UNSAVED_COMMANDS = [
     ("@sendkey ctrl-alt-q", "unsaved changes in Text Editor", 15),
     ("@sendkey esc", None, 3),
     ("@sendkey alt-f4", '"Save Changes"', 15),
-    ("@sendkey esc", 'answered "Cancel"', 15),
+    ("@sendkey esc", 'Save Changes"\r\n', 15),  # (The dialog closed.)
     ("@sendkey alt-f4", None, 4),
-    ("@sendkey d", 'answered "Don\'t Save"', 15),
-    ("@type echo editor-closed-$((20+22))", "editor-closed-42", 20),
+    ("@sendkey d", None, 4),
+    # The editor ended (so the terminal is its shell's again): a Cancel that
+    # had closed it anyway would have sent that Alt+F4 to the terminal.
+    ("@type echo editor-closed-$((20+22)) > /dev/console", "editor-closed-42", 20),
     ("@type exit", None, 5),
 ]
 

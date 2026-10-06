@@ -6,11 +6,14 @@
 
 /* ---- Round, glossy shapes ---- */
 
+/* `a` (0 to 256) of src over dst, red and blue together, green on its own.
+ * (Each lane's weighted sum fits its 16 bits, so nothing carries into the
+ * next one: unlike adding a masked difference, which borrows when src is
+ * darker than dst and leaves a red cast.) */
 static inline uint32_t blend(uint32_t dst, uint32_t src, unsigned a) {
-    uint32_t rb = dst & 0xff00ff, g = dst & 0x00ff00;
-    rb += (((src & 0xff00ff) - rb) * a >> 8) & 0xff00ff;
-    g += (((src & 0x00ff00) - g) * a >> 8) & 0x00ff00;
-    return (rb & 0xff00ff) | (g & 0x00ff00);
+    uint32_t rb = (((dst & 0xff00ff) * (256 - a) + (src & 0xff00ff) * a) >> 8) & 0xff00ff;
+    uint32_t g = (((dst & 0x00ff00) * (256 - a) + (src & 0x00ff00) * a) >> 8) & 0x00ff00;
+    return rb | g;
 }
 
 /* `alpha` of `color` over a row of pixels, clipped to the surface. */

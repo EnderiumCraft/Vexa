@@ -84,7 +84,8 @@ settings, installed apps. **Everything on that disk is erased.**
   disk, choose whether the Linux programs (bash, Python, X, GTK...: about 190 MB) come
   along, make your account (your name, an account name and a password, typed twice:
   the installed Vexa's administrator), confirm, and wait; then take the CD out and
-  restart. The installed Vexa starts with the login screen.
+  restart. The installed Vexa starts with the login screen, and the first time you
+  log in, [the Welcome](#welcome) takes you through setting it up.
 - At the shell: `install --list` lists the disks it can use, and `install vda` installs
   on one (`--no-linux` leaves the Linux programs out; `--yes` doesn't ask first;
   `--user NAME --full "Full Name" --password-stdin` makes the account, with the
@@ -373,6 +374,7 @@ in `.vxapp`, kept in `/apps`. Files shows each one as a single app with its icon
 | Files | `Files.vxapp` | the file manager |
 | Text Editor | `Editor.vxapp` | a text editor; opens any file |
 | Image Viewer | `Viewer.vxapp` | shows PNG, BMP and PPM pictures |
+| Welcome | `Welcome.vxapp` | the first-run tour: look, keyboard and time zone, network, the basics |
 | Settings | `Settings.vxapp` | System Settings: the look, wallpaper, clock, mouse and keyboard, display, lock screen... |
 | About Vexa | `About.vxapp` | the version, and how the system is doing |
 | Activity Monitor | `Monitor.vxapp` | the processes, CPU and memory; Quit and Force Quit |
@@ -465,6 +467,29 @@ minute. Select a process and **Quit** asks it to stop (SIGTERM; Delete does the 
 Puts Vexa on a disk (see [Installing Vexa on a disk](#installing-vexa-on-a-disk)): the
 disks, the Linux programs or not, a last warning that the disk will be erased, and the
 install's steps as it goes. It only installs when Vexa was started from the CD.
+
+### Welcome
+
+The first-run experience. The first time an account logs in on an installed Vexa, a
+card opens over the wallpaper with six pages that slide in (Enter or the arrow keys
+move on, **Back** goes back, **Skip for now** leaves it):
+
+1. **Welcome**: a greeting by name.
+2. **Make it yours**: Light, Dark or Automatic (each shown as a little desktop), and
+   the accent color. They apply at once, the Welcome itself included.
+3. **Keyboard and time**: the keyboard layout (with a box to try it) and the time zone
+   (search for a city; the wheel scrolls the list), shown with the time there.
+4. **Connect to the network**: whether a wired card has an address and a router, and
+   whether Vexa can reach the internet (**Check Again**); the computer's name. Wi-Fi
+   isn't supported yet.
+5. **Find your way around**: search (Ctrl+Space), the Vexa menu, window keys,
+   screenshots, locking and the layout key, and a button to open Settings.
+6. **You're all set**: what you chose, **Get Apps** (Software), **Settings** and
+   **Start Using Vexa**.
+
+It's shown once per account (whichever way it ends); **Welcome** in the Vexa menu
+(System), `welcome` in a terminal and **Show Welcome** in Settings, About bring it
+back. The live CD doesn't show it.
 
 ### Device Manager
 

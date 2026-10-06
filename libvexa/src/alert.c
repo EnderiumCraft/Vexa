@@ -32,11 +32,8 @@ struct alert_state {
     int heading_count;
 };
 
-/* Breaks `text` into at most `max` lines (of 160 bytes) of at most `width`
- * pixels, in `font` (NULL: the usual one), at word ends; a word that's too
- * long on its own is cut. */
-static int wrap(char lines[][160], int max, const char *text, int width,
-                const struct vx_font *font) {
+int vx_text_wrap(char lines[][160], int max, const char *text, int width,
+                 const struct vx_font *font) {
     int count = 0;
     size_t most = 159;
     while (text && *text && count < max) {
@@ -151,8 +148,8 @@ int vx_alert(const struct vx_alert *alert) {
     a.width = a.width > 620 ? 620 : a.width;
     const struct vx_font *bold = vx_font(VX_FACE_BOLD, 15);
     int room = a.width - TEXT_X - MARGIN;
-    a.heading_count = wrap(a.heading, 3, alert->message, room, bold);
-    a.line_count = wrap(a.lines, MAX_LINES, alert->detail, room, NULL);
+    a.heading_count = vx_text_wrap(a.heading, 3, alert->message, room, bold);
+    a.line_count = vx_text_wrap(a.lines, MAX_LINES, alert->detail, room, NULL);
     int text_height = a.heading_count * (vx_font_height(bold) + 2) + 8 + a.line_count * VX_LINE_HEIGHT;
     int content = text_height > ICON ? text_height : ICON;
     a.height = MARGIN + content + 22 + BUTTON_H + MARGIN - 6;

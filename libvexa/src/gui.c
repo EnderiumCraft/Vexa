@@ -239,6 +239,31 @@ void vx_window_set_title(struct vx_window *window, const char *title) {
     send_message(&m);
 }
 
+bool vx_screen_size(int *width, int *height) {
+    struct desktop_message m = {.type = DESKTOP_INFO}, reply;
+    if (send_message(&m) || wait_reply(DESKTOP_INFO_REPLY, &reply)) {
+        return false;
+    }
+    *width = reply.a;
+    *height = reply.b;
+    return true;
+}
+
+void vx_window_move(struct vx_window *window, int x, int y) {
+    struct desktop_message m = {.type = DESKTOP_MOVE, .window = (uint32_t)window->id, .a = x,
+                                .b = y};
+    send_message(&m);
+}
+
+void vx_window_center(struct vx_window *window) {
+    int width, height;
+    if (vx_screen_size(&width, &height)) {
+        int top = 26 + 28 + 4; /* The panel, and the title bar and border over the content. */
+        int y = top + (height - top - window->surface.height) / 2;
+        vx_window_move(window, (width - window->surface.width) / 2, y < top ? top : y);
+    }
+}
+
 void vx_window_set_modified(struct vx_window *window, bool modified) {
     if (window->modified == modified) {
         return;

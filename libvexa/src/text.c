@@ -327,12 +327,12 @@ size_t vx_utf8_previous(const char *text, size_t at) {
 
 /* ---- Drawing ---- */
 
+/* `a` (0 to 256) of src over dst: see widgets.c (a masked difference borrows
+ * between red and blue when src is darker, and tints the result). */
 static inline uint32_t blend(uint32_t dst, uint32_t src, unsigned a) {
-    uint32_t rb = dst & 0xff00ff, g = dst & 0x00ff00;
-    uint32_t srb = src & 0xff00ff, sg = src & 0x00ff00;
-    rb += (((srb - rb) * a) >> 8) & 0xff00ff;
-    g += (((sg - g) * a) >> 8) & 0x00ff00;
-    return (rb & 0xff00ff) | (g & 0x00ff00);
+    uint32_t rb = (((dst & 0xff00ff) * (256 - a) + (src & 0xff00ff) * a) >> 8) & 0xff00ff;
+    uint32_t g = (((dst & 0x00ff00) * (256 - a) + (src & 0x00ff00) * a) >> 8) & 0x00ff00;
+    return rb | g;
 }
 
 static void draw_bitmap_char(struct vx_surface *s, int x, int y, uint32_t c, uint32_t fg) {

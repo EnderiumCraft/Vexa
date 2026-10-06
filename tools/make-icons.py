@@ -15,7 +15,7 @@ only to change them.
 """
 import glob
 import os
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 SIZE = 96
 ART = "art/icons"
@@ -130,6 +130,41 @@ FILES = {
 }
 
 
+def welcome():
+    """Vexa's mark: a glossy rounded square, teal, with a white V (and a
+    little light across its top)."""
+    S = 4
+    size = SIZE * S
+    im = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    pad = 8 * S
+    top, bottom = (110, 232, 220), (14, 120, 118)
+    gradient = Image.new("RGBA", (size, size))
+    gd = ImageDraw.Draw(gradient)
+    for y in range(size):
+        t = y / (size - 1)
+        gd.line([(0, y), (size, y)], fill=tuple(int(a + (b - a) * t) for a, b in zip(top, bottom)) + (255,))
+    mask = Image.new("L", (size, size), 0)
+    ImageDraw.Draw(mask).rounded_rectangle([pad, pad, size - pad, size - pad], 20 * S, fill=255)
+    shadow = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    ImageDraw.Draw(shadow).rounded_rectangle([pad, pad + 3 * S, size - pad, size - pad + 3 * S], 20 * S,
+                                             fill=(0, 0, 0, 90))
+    im.alpha_composite(shadow.filter(ImageFilter.GaussianBlur(3 * S)))
+    im.paste(gradient, (0, 0), mask)
+    # The gloss: light on the top half, with a soft edge.
+    gloss = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    ImageDraw.Draw(gloss).rounded_rectangle([pad + 2 * S, pad + 2 * S, size - pad - 2 * S, size // 2],
+                                            18 * S, fill=(255, 255, 255, 70))
+    im.alpha_composite(Image.composite(gloss, Image.new("RGBA", (size, size), (0, 0, 0, 0)), mask))
+    font = ImageFont.truetype("rootfs/share/fonts/DejaVuSans-Bold.ttf", 62 * S)
+    d = ImageDraw.Draw(im)
+    box = d.textbbox((0, 0), "V", font=font)
+    x = (size - (box[2] - box[0])) // 2 - box[0]
+    y = (size - (box[3] - box[1])) // 2 - box[1] + 2 * S
+    d.text((x + S, y + 2 * S), "V", font=font, fill=(0, 70, 70, 120))
+    d.text((x, y), "V", font=font, fill=(255, 255, 255, 255))
+    return im.resize((SIZE, SIZE), Image.LANCZOS)
+
+
 def main():
     big = {name: load(art) for name, art in SET.items()}
     os.makedirs(SHARE, exist_ok=True)
@@ -139,6 +174,7 @@ def main():
         small(big[name]).save("apps/%s.vxapp/Contents/Resources/icon.png" % app, optimize=True)
     small(badge(big["terminal"], x_mark(), 0.5)).save(
         "apps/XTerm.vxapp/Contents/Resources/icon.png", optimize=True)
+    welcome().save("apps/Welcome.vxapp/Contents/Resources/icon.png", optimize=True)
     files = "apps/Files.vxapp/Contents/Resources"
     for name, icon in FILES.items():
         small(big[icon]).save(os.path.join(files, name + ".png"), optimize=True)

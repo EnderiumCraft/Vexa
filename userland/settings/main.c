@@ -94,6 +94,7 @@ enum hit_kind {
     H_SET_PASSWORD, H_REMOVE_PASSWORD, H_LOCK_NOW, H_OUTPUT, H_TEST_SOUND, H_OLD_PASSWORD_FIELD,
     H_NEW_LOGIN_FIELD, H_NEW_FULL_FIELD, H_NEW_PASSWORD_FIELD, H_NEW_ADMIN, H_ADD_ACCOUNT,
     H_REMOVE_ACCOUNT, H_ADMIN_ACCOUNT, H_GO_WALLPAPER, H_ADD_PICTURE, H_WALLPAPER_MODE,
+    H_WELCOME,
 };
 
 struct hit {
@@ -1899,6 +1900,8 @@ static void draw_about(void) {
     vx_draw_button(S(), LEFT + 130, y, 120, 28, "Shut Down...", false);
     h = add_hit(LEFT + 130, y, 120, 28, H_POWER);
     h->index = VX_POWER_OFF;
+    vx_draw_button(S(), LEFT + 260, y, 140, 28, "Show Welcome", false);
+    add_hit(LEFT + 260, y, 140, 28, H_WELCOME);
     note(y + 44, "A hobby operating system, written from scratch.");
     note(y + 64, "github.com/EnderiumCraft/Vexa");
 }
@@ -2258,6 +2261,16 @@ static void click(struct hit *h, int px) {
         vx_desktop_lock();
         break;
     case H_SAVE_NAME: save_name(); break;
+    case H_WELCOME: { /* The first-run tour, again. */
+        struct vx_app welcome;
+        if (vx_app_find("Welcome", &welcome) == 0) {
+            int process = vx_app_open(&welcome, NULL);
+            if (process >= 0) {
+                vx_close(process);
+            }
+        }
+        break;
+    }
     case H_POWER:
         menu_count = 0;
         menu[menu_count] = (struct vx_menu_item){h->index == VX_POWER_RESTART ? "Restart Now"

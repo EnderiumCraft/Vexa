@@ -3776,6 +3776,19 @@ static bool listed_app(const char *list, const struct vx_app *app) {
 
 /* ---- Sessions: who uses the desktop ---- */
 
+/* True when this Vexa runs from a disk it was installed on (its root is ext2),
+ * not from the CD. */
+static bool installed_system(void) {
+    struct vx_mount_info mounts[16];
+    long n = vx_mounts(mounts, 16);
+    for (long i = 0; i < n && i < 16; i++) {
+        if (!strcmp(mounts[i].path, "/") && !strcmp(mounts[i].type, "ext2")) {
+            return true;
+        }
+    }
+    return false;
+}
+
 /* Starts `user`'s session: the desktop becomes them (when it runs as root),
  * with their settings, folders and startup apps. */
 void session_start(const struct vx_user *user) {
@@ -3832,6 +3845,14 @@ void session_start(const struct vx_user *user) {
             printf("desktop: starting %s (at startup)\n", apps[i].name);
             run_app(i);
         }
+    }
+    /* The first time this account logs in on an installed Vexa (not the live
+     * CD, not a desktop started by hand, not one told to run a program): the
+     * Welcome (the Vexa menu has it, to see it again). It marks itself done. */
+    if (boot && boot_argc <= 2 && installed_system() &&
+        !vx_settings_bool(&config, "welcome_done", false)) {
+        printf("desktop: first login of %s: the Welcome\n", user->name);
+        run_named("Welcome", NULL);
     }
 }
 

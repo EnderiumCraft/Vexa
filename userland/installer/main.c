@@ -589,7 +589,7 @@ static void draw_installing(struct vx_surface *s) {
         centered(s, bold(24), cx, cy + 80, "Vexa is installed", VX_COLOR_TEXT);
         centered_paragraph(s, sans(14), cx, cy + 120, CONTENT_W - 80, 20,
                   "Take the CD (or USB stick) out and restart: the computer starts Vexa from the "
-                  "disk now, and you log in with your account.",
+                  "disk now, and you log in with your account. A short welcome follows.",
                   VX_COLOR_DIM);
         footer(s, "Close", "Restart", true, VX_COLOR_ACCENT);
         return;

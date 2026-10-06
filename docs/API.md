@@ -303,6 +303,9 @@ vx_draw_text(s, end + 8, 18, "café", VX_COLOR_DIM, VX_TRANSPARENT); /* The UI f
 | `int vx_window_resize(struct vx_window *w, int width, int height)` | a new, blank surface of that size |
 | `void vx_window_present(struct vx_window *w, int x, int y, int width, int height)` | shows what was drawn in the rectangle |
 | `void vx_window_set_title(w, const char *title)`, `void vx_window_destroy(w)` | |
+| `bool vx_screen_size(int *width, int *height)` | the screen's size |
+| `void vx_window_move(w, int x, int y)`, `void vx_window_center(w)` | puts the window's content at that spot on the screen (never above the panel), or in the middle |
+| `int vx_text_wrap(char lines[][160], int max, const char *text, int width, const struct vx_font *font)` | breaks text into lines that fit `width` pixels (NULL: the usual font): returns how many |
 | `void vx_window_set_modified(w, bool modified)` | says whether the window has changes that aren't saved (sent only when it changes): the desktop warns before logging out, restarting or shutting down with such windows open, and its Review Unsaved Changes sends them a `VX_GUI_CLOSE`, so the app can offer to save |
 | `void vx_window_set_cursor(w, int shape)` | the pointer's shape over the window: `VX_CURSOR_ARROW`, `TEXT`, `HAND`, `WAIT`, `CROSS`, `MOVE` (sent only when it changes) |
 | `void vx_window_drag_files(w, const char *const *paths, int count, bool copy)` | files dragged out of the window and let go where the pointer is now: the desktop puts them there (on the desktop, or in another window as a `VX_GUI_DROP`) |
