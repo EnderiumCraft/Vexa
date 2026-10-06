@@ -1015,28 +1015,62 @@ static void draw(void) {
 
 /* ---- Commands ---- */
 
-static void save_as(void) {
+/* Asks where to save the document, and saves it there. True if it was saved. */
+static bool save_doc_as(struct doc *d) {
     char path[512], folder[512];
     snprintf(folder, sizeof(folder), "%s", vx_home_folder("Documents"));
-    if (D->path[0]) {
-        snprintf(folder, sizeof(folder), "%s", D->path);
+    if (d->path[0]) {
+        snprintf(folder, sizeof(folder), "%s", d->path);
         char *slash = strrchr(folder, '/');
         if (slash) {
             *slash = slash == folder ? (folder[1] = '\0', '/') : '\0';
         }
     }
-    if (vx_save_dialog("Save", folder, D->path[0] ? doc_name(D) : "Untitled.txt", path,
+    if (vx_save_dialog("Save", folder, d->path[0] ? doc_name(d) : "Untitled.txt", path,
                        sizeof(path))) {
-        save(D, path);
+        return save(d, path);
     }
+    return false;
+}
+
+static void save_as(void) {
+    save_doc_as(D);
+}
+
+/* Saves the document (asking where, if it's never been saved). True if it was. */
+static bool save_doc(struct doc *d) {
+    return d->path[0] ? save(d, d->path) : save_doc_as(d);
 }
 
 static void save_current(void) {
-    if (D->path[0]) {
-        save(D, D->path);
-    } else {
-        save_as();
+    save_doc(D);
+}
+
+/* Before a document with changes is closed: shows it, and asks whether to save
+ * them (Save, Don't Save, Cancel). False if it's to stay open: Cancel, or a
+ * Save that didn't happen. */
+static bool may_close(int i, const char *verb) {
+    struct doc *d = docs[i];
+    if (!d->modified) {
+        return true;
     }
+    current = i;
+    draw();
+    switch (vx_ask_save_changes(doc_name(d), verb)) {
+    case VX_SAVE_YES: return save_doc(d);
+    case VX_SAVE_NO: return true;
+    default: return false;
+    }
+}
+
+/* Before the editor quits: every document with changes, one after the other. */
+static bool may_quit(void) {
+    for (int i = 0; i < doc_count; i++) {
+        if (!may_close(i, "close")) {
+            return false;
+        }
+    }
+    return true;
 }
 
 static void open_file(void) {
@@ -1147,6 +1181,9 @@ static void key(const struct vx_gui_event *e) {
         case 20: new_doc(NULL); return; /* T */
         case 24: open_file(); return; /* O */
         case 17: /* W */
+            if (!may_close(current, "close")) {
+                return;
+            }
             close_doc(current);
             if (!doc_count) {
                 vx_window_destroy(window);
@@ -1268,6 +1305,9 @@ static void pointer(const struct vx_gui_event *e, int *buttons) {
         int w = tab_width(), i = (e->x - 4) / w;
         if (i >= 0 && i < doc_count) {
             if (e->x >= 4 + i * w + w - 22) {
+                if (!may_close(i, "close")) {
+                    return;
+                }
                 close_doc(i);
                 if (!doc_count) {
                     vx_window_destroy(window);
@@ -1333,14 +1373,23 @@ int main(int argc, char **argv) {
     int buttons = 0;
     for (;;) {
         draw();
+        /* The desktop warns before logging out or shutting down with changes unsaved. */
+        bool any = false;
+        for (int i = 0; i < doc_count; i++) {
+            any = any || docs[i]->modified;
+        }
+        vx_window_set_modified(window, any);
         struct vx_gui_event e;
         if (vx_gui_wait(&e, -1) <= 0) {
             return 0;
         }
         switch (e.type) {
         case VX_GUI_CLOSE:
-            vx_window_destroy(window);
-            return 0;
+            if (may_quit()) {
+                vx_window_destroy(window);
+                return 0;
+            }
+            break;
         case VX_GUI_KEY: key(&e); break;
         case VX_GUI_POINTER: pointer(&e, &buttons); break;
         case VX_GUI_FOCUS:

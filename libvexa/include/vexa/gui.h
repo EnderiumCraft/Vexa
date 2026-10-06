@@ -88,6 +88,7 @@ struct vx_window {
     struct vx_surface surface; /* Draw here, then vx_window_present. */
     int buffer_handle;
     int cursor;
+    bool modified; /* (See vx_window_set_modified.) */
 };
 
 /* Opens a window (connecting to the desktop the first time). NULL if there
@@ -104,6 +105,12 @@ int vx_window_resize(struct vx_window *window, int width, int height);
 /* Shows what was drawn in the rectangle. */
 void vx_window_present(struct vx_window *window, int x, int y, int width, int height);
 void vx_window_set_title(struct vx_window *window, const char *title);
+/* Says whether the window has changes that aren't saved. The desktop warns
+ * before logging out, restarting or shutting down while any window has some
+ * (and asks the window to close, so it can offer to save: see vx_alert). Say
+ * so again, false, when they're saved or given up; a closed window needs
+ * nothing said. */
+void vx_window_set_modified(struct vx_window *window, bool modified);
 /* The pointer's shape over the window (until it's set again). */
 enum { VX_CURSOR_ARROW, VX_CURSOR_TEXT, VX_CURSOR_HAND, VX_CURSOR_WAIT, VX_CURSOR_CROSS,
        VX_CURSOR_MOVE, VX_CURSOR_COUNT };
@@ -317,6 +324,40 @@ void vx_clipboard_set(const char *text, size_t length);
 /* Its text, in a new string to free() (empty if there's none); NULL if
  * memory runs out. */
 char *vx_clipboard_get(void);
+
+/* A question in a window of its own, until it's answered (the app's other
+ * windows wait; what they're sent is dropped, as for the dialogs below).
+ *
+ *     const char *buttons[] = {"Don't Save", "Cancel", "Save"};
+ *     struct vx_alert alert = {.title = "Close", .icon = "document",
+ *         .message = "Save the changes to \"Notes\"?",
+ *         .detail = "They'll be lost if you don't.",
+ *         .buttons = buttons, .button_count = 3, .default_button = 2,
+ *         .cancel_button = 1};
+ *     int answer = vx_alert(&alert);
+ *
+ * Returns the button chosen (by a click, by Enter for the default one, by
+ * the first letter of its label, Escape or closing the window for the
+ * cancel one). */
+struct vx_alert {
+    const char *title;      /* The window's. */
+    const char *icon;       /* A name in /share/icons ("document", "help"), or NULL. */
+    const char *message;    /* The question, in bold. */
+    const char *detail;     /* Below it, dimmer (it wraps), or NULL. */
+    const char *const *buttons; /* Left to right. */
+    int button_count;
+    int default_button;     /* The accent one, for Enter; -1: none. */
+    int cancel_button;      /* For Escape and closing the window; -1: none. */
+};
+int vx_alert(const struct vx_alert *alert);
+
+/* Before changes to a document are lost (it's closed, replaced...): "Do you
+ * want to save the changes you made to <name>?" with Save, Don't Save and
+ * Cancel (the first letters work, Escape cancels). `verb` is what's about to
+ * happen to it ("close", "quit", "open another picture instead"...), or
+ * NULL. */
+enum vx_save_answer { VX_SAVE_CANCEL = 0, VX_SAVE_YES, VX_SAVE_NO };
+int vx_ask_save_changes(const char *name, const char *verb);
 
 /* Open and Save dialogs: a window of their own, until the user chooses.
  * `folder` is where they start (NULL: the home folder); Save suggests

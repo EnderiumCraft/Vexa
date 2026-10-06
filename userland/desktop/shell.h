@@ -51,6 +51,7 @@ struct window {
     size_t mapped_size;
     int buffer_handle;
     bool resizable, minimized, maximized;
+    bool modified;    /* Its program has changes that aren't saved (DESKTOP_MODIFIED). */
     bool popup;       /* A menu or tooltip: no frame, always on top, no keyboard. */
     bool undecorated; /* It draws its own title bar: no frame. */
     struct rect restore; /* Where it was before it was maximized or snapped (content). */

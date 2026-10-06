@@ -294,9 +294,34 @@ static void save_as(void) {
     }
 }
 
+/* Before the picture is replaced or closed: if it has changes that aren't
+ * saved, asks whether to save them (Save, Don't Save, Cancel). False if it's
+ * to stay as it is: Cancel, or a Save that didn't happen. */
+static bool may_discard(const char *verb) {
+    if (!modified) {
+        return true;
+    }
+    const char *name = path[0] ? strrchr(path, '/') ? strrchr(path, '/') + 1 : path : "Untitled";
+    switch (vx_ask_save_changes(name, verb)) {
+    case VX_SAVE_YES:
+        save();
+        return !modified;
+    case VX_SAVE_NO: return true;
+    default: return false;
+    }
+}
+
+static void new_picture(void) {
+    if (may_discard("start a new one")) {
+        new_canvas(CANVAS_W, CANVAS_H);
+        path[0] = '\0';
+    }
+}
+
 static void open_dialog(void) {
     char file[512];
-    if (vx_open_dialog("Open Picture", vx_home_folder("Pictures"), file, sizeof(file))) {
+    if (vx_open_dialog("Open Picture", vx_home_folder("Pictures"), file, sizeof(file)) &&
+        may_discard("open another")) {
         open_file(file);
     }
 }
@@ -404,8 +429,7 @@ static void act_button(int px, int py) {
         }
     }
     if (vx_inside(px, py, 380, 8, 50, 28)) {
-        new_canvas(CANVAS_W, CANVAS_H);
-        path[0] = '\0';
+        new_picture();
     } else if (vx_inside(px, py, 434, 8, 56, 28)) {
         open_dialog();
     } else if (vx_inside(px, py, 494, 8, 50, 28)) {
@@ -503,7 +527,7 @@ static void key(const struct vx_gui_event *e) {
         case 44: shift ? step_back(redo, &redo_count, undo, &undo_count)
                        : step_back(undo, &undo_count, redo, &redo_count); return; /* Z */
         case 21: step_back(redo, &redo_count, undo, &undo_count); return;         /* Y */
-        case 49: new_canvas(CANVAS_W, CANVAS_H), path[0] = '\0'; return;          /* N */
+        case 49: new_picture(); return;                                           /* N */
         case 24: open_dialog(); return;                                          /* O */
         case 31: shift ? save_as() : save(); return;                              /* S */
         }
@@ -540,14 +564,18 @@ int main(int argc, char **argv) {
     int held = 0;
     for (;;) {
         draw();
+        vx_window_set_modified(window, modified); /* (The desktop warns before logging out.) */
         struct vx_gui_event e;
         if (vx_gui_wait(&e, -1) <= 0) {
             return 0;
         }
         switch (e.type) {
         case VX_GUI_CLOSE:
-            vx_window_destroy(window);
-            return 0;
+            if (may_discard("close")) {
+                vx_window_destroy(window);
+                return 0;
+            }
+            break;
         case VX_GUI_POINTER: pointer(&e, &held); break;
         case VX_GUI_KEY: key(&e); break;
         case VX_GUI_FOCUS:
@@ -563,7 +591,9 @@ int main(int argc, char **argv) {
                 if (end) {
                     *end = '\0';
                 }
-                open_file(paths);
+                if (may_discard("open another")) {
+                    open_file(paths);
+                }
                 free(paths);
             }
             break;

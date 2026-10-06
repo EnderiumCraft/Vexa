@@ -239,6 +239,16 @@ void vx_window_set_title(struct vx_window *window, const char *title) {
     send_message(&m);
 }
 
+void vx_window_set_modified(struct vx_window *window, bool modified) {
+    if (window->modified == modified) {
+        return;
+    }
+    window->modified = modified;
+    struct desktop_message m = {.type = DESKTOP_MODIFIED, .window = (uint32_t)window->id,
+                                .a = modified};
+    send_message(&m);
+}
+
 void vx_window_set_cursor(struct vx_window *window, int shape) {
     if (window->cursor == shape) {
         return;

@@ -422,7 +422,10 @@ A right click opens a menu with the same.
 ### Text Editor
 
 `edit [file...]` opens files (or a new one), each in a tab. C (and C-like languages),
-Python, shell scripts, Markdown and settings files are coloured.
+Python, shell scripts, Markdown and settings files are coloured. A tab with changes
+that aren't saved has a `*` before its name; closing it (or the window) asks whether
+to **Save**, **Don't Save** or **Cancel** (the keys S, D and Escape do the same), once
+for each such tab.
 
 | Keys | What they do |
 | --- | --- |
@@ -535,7 +538,8 @@ A picture to draw on: Pencil, Brush, Line, Rectangle (Shift: a square), Ellipse,
 Eraser and Pick (a colour from the picture), four sizes and sixteen colours; a right
 click draws with the second colour (the square behind the first; a click on them swaps
 them). Ctrl+Z and Ctrl+Y undo and redo; New, Open and Save (Ctrl+N, O, S) use PNG files
-(BMP and PPM open too). `paint [file]` opens one.
+(BMP and PPM open too). `paint [file]` opens one. Closing the picture, or replacing it
+with a new or another one, asks first if it has changes that aren't saved.
 
 ### Music
 
@@ -719,6 +723,9 @@ get the whole layout, through XKB. The text console (outside the desktop) stays 
 
 **Restarting and turning off.** The Vexa menu has **Restart...** and **Shut Down...**
 (each asks first), and so does About; from the shell, `shutdown` and `shutdown -r`.
+If an app (the Text Editor, Paint) has changes that aren't saved, logging out,
+restarting, shutting down and leaving the desktop say so first, and offer **Review
+Unsaved Changes...**: it asks those apps to close, so each can offer to save.
 
 ## Linux programs
 

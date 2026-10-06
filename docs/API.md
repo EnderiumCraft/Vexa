@@ -303,6 +303,7 @@ vx_draw_text(s, end + 8, 18, "café", VX_COLOR_DIM, VX_TRANSPARENT); /* The UI f
 | `int vx_window_resize(struct vx_window *w, int width, int height)` | a new, blank surface of that size |
 | `void vx_window_present(struct vx_window *w, int x, int y, int width, int height)` | shows what was drawn in the rectangle |
 | `void vx_window_set_title(w, const char *title)`, `void vx_window_destroy(w)` | |
+| `void vx_window_set_modified(w, bool modified)` | says whether the window has changes that aren't saved (sent only when it changes): the desktop warns before logging out, restarting or shutting down with such windows open, and its Review Unsaved Changes sends them a `VX_GUI_CLOSE`, so the app can offer to save |
 | `void vx_window_set_cursor(w, int shape)` | the pointer's shape over the window: `VX_CURSOR_ARROW`, `TEXT`, `HAND`, `WAIT`, `CROSS`, `MOVE` (sent only when it changes) |
 | `void vx_window_drag_files(w, const char *const *paths, int count, bool copy)` | files dragged out of the window and let go where the pointer is now: the desktop puts them there (on the desktop, or in another window as a `VX_GUI_DROP`) |
 | `char *vx_drop_paths(const struct vx_gui_event *e)` | a `VX_GUI_DROP`'s paths, one per line, in a string to `free()` |
@@ -315,6 +316,8 @@ vx_draw_text(s, end + 8, 18, "café", VX_COLOR_DIM, VX_TRANSPARENT); /* The UI f
 | `char *vx_clipboard_get(void)` | the clipboard's text, to `free()` (NULL if it's empty) |
 | `bool vx_open_dialog(title, folder, char *out, size_t size)` | the Open dialog (starting in `folder`, or home): the chosen file's path in `out`; false if cancelled |
 | `bool vx_save_dialog(title, folder, name, char *out, size_t size)` | the Save dialog, with `name` filled in: the path to save to in `out`; false if cancelled |
+| `int vx_alert(const struct vx_alert *alert)` | a question in a window of its own: a title, an icon (a name in `/share/icons`), the question in bold, a sentence below it and buttons (left to right); returns the index of the one chosen (a click, Enter for `default_button`, a label's first letter, Escape or closing the window for `cancel_button`) |
+| `int vx_ask_save_changes(const char *name, const char *verb)` | "Do you want to save the changes you made to *name*?" with Save, Don't Save and Cancel (and "...before you *verb*" if there is one): `VX_SAVE_YES`, `VX_SAVE_NO` or `VX_SAVE_CANCEL`. Use it before changes are lost: when a document is closed or replaced, on `VX_GUI_CLOSE`; after Save, check it was saved (the Save dialog may have been cancelled) |
 
 `struct vx_gui_event` fields, by type:
 

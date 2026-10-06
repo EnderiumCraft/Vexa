@@ -64,6 +64,9 @@ enum desktop_message_type {
     DESKTOP_DROP = 27,      /* window; a, b = x, y; c = 1 to copy; text = the list file:
                                files dropped on the window (see DRAG) */
     DESKTOP_CLIPBOARD = 28, /* the clipboard changed (Xvexa hands it to X programs) */
+    DESKTOP_MODIFIED = 29,  /* window; a = 1 if it has changes that aren't saved, 0 if not
+                               (the desktop asks before logging out, restarting or
+                               shutting down with such windows open) */
 };
 
 /* DESKTOP_WM requests. MOVE and RESIZE start dragging the window with the

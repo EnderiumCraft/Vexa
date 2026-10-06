@@ -667,6 +667,23 @@ SDK_APP_COMMANDS = [
     ("@type exit", None, 5),
 ]
 
+# Unsaved changes: the Text Editor tells the desktop it has some, leaving the
+# desktop warns first (and Escape closes that menu), closing the editor asks
+# (Escape cancels, so it stays; D is Don't Save, which closes it).
+UNSAVED_COMMANDS = [
+    ("@sendkey ctrl-alt-t", None, 6),
+    ("@type edit", "Untitled - Text Editor", 30),
+    ("@type unsaved words", "has unsaved changes", 15),
+    ("@sendkey ctrl-alt-q", "unsaved changes in Text Editor", 15),
+    ("@sendkey esc", None, 3),
+    ("@sendkey alt-f4", '"Save Changes"', 15),
+    ("@sendkey esc", 'answered "Cancel"', 15),
+    ("@sendkey alt-f4", None, 4),
+    ("@sendkey d", 'answered "Don\'t Save"', 15),
+    ("@type echo editor-closed-$((20+22))", "editor-closed-42", 20),
+    ("@type exit", None, 5),
+]
+
 # With --virgl: the virtio GPU with 3D (QEMU's virgl, on this machine's
 # OpenGL), and OpenGL on it in a native program (Mesa's virgl driver).
 VIRGL_COMMANDS = [
@@ -1126,6 +1143,7 @@ def main():
         at = next((i for i, c in enumerate(commands) if c[0] == "#network"), len(commands))
         commands[at:at] = USB_COMMANDS + (USB_AUDIO_COMMANDS if args.usb == "xhci" else [])
         insert_before_leaving_desktop(commands, USB_DESKTOP_COMMANDS)
+    insert_before_leaving_desktop(commands, UNSAVED_COMMANDS)
     if args.disks:
         for name, qemu_args, offset in TEST_DISKS:
             copy = os.path.join(tmp, name)

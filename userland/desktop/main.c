@@ -1102,7 +1102,7 @@ static void draw_menu(struct vx_surface *view, int ox, int oy) {
 
 enum popup_action {
     POP_TERMINAL, POP_FILES, POP_NEW_FOLDER, POP_SETTINGS, POP_ABOUT, POP_ICON, POP_RESTART,
-    POP_POWER_OFF, POP_LEAVE, POP_LOGOUT, POP_LAYOUT, POP_NONE
+    POP_POWER_OFF, POP_LEAVE, POP_LOGOUT, POP_LAYOUT, POP_REVIEW, POP_NONE
 };
 
 #define MAX_POPUP 10
@@ -1167,23 +1167,72 @@ static void close_popup(void) {
     }
 }
 
-/* Restart, Shut Down and leaving the desktop ask first, with a menu. */
+/* The windows whose programs have changes that aren't saved: how many, and
+ * their programs' names ("Text Editor, Paint") in `names`. */
+static int modified_windows(char *names, size_t size) {
+    int count = 0;
+    names[0] = '\0';
+    for (int i = 0; i < window_count; i++) {
+        struct window *w = stack[i];
+        if (!w->modified) {
+            continue;
+        }
+        count++;
+        /* A title is "*name - Program": the program's name, or the title. */
+        const char *program = strstr(w->title, " - ");
+        program = program ? program + 3 : w->title[0] == '*' ? w->title + 1 : w->title;
+        if (!strstr(names, program)) {
+            size_t used = strlen(names);
+            snprintf(names + used, size - used, "%s%s", used ? ", " : "", program);
+        }
+    }
+    return count;
+}
+
+/* Review Unsaved Changes: asks each such window to close, so its program can
+ * offer to save (and any can say Cancel). */
+static void review_unsaved(void) {
+    struct window *first = NULL;
+    for (int i = window_count - 1; i >= 0; i--) {
+        if (stack[i]->modified) {
+            first = first ? first : stack[i];
+            ask_to_close(stack[i]);
+        }
+    }
+    if (first) {
+        activate(first);
+    }
+}
+
+/* Restart, Shut Down and leaving the desktop ask first, with a menu (and a
+ * warning, with a way to review them, if some windows have unsaved changes). */
 static void ask(enum popup_action action, int x, int y) {
     close_popup();
     popup_count = 0;
     popup_icon = -1;
-    popup_add(action == POP_RESTART     ? "Restart Now"
-              : action == POP_POWER_OFF ? "Shut Down Now"
-              : action == POP_LOGOUT    ? "Log Out Now"
-                                        : "Leave the Desktop",
+    static char warning[200];
+    char names[120];
+    int unsaved = modified_windows(names, sizeof(names));
+    if (unsaved) {
+        snprintf(warning, sizeof(warning), "Unsaved changes in %s", names);
+        popup_add(warning, NULL, POP_NONE, 0);
+        popup_items[popup_count - 1].disabled = true;
+        popup_add("Review Unsaved Changes...", NULL, POP_REVIEW, 0);
+        popup_add(NULL, NULL, POP_NONE, 0);
+    }
+    popup_add(action == POP_RESTART     ? unsaved ? "Restart Anyway" : "Restart Now"
+              : action == POP_POWER_OFF ? unsaved ? "Shut Down Anyway" : "Shut Down Now"
+              : action == POP_LOGOUT    ? unsaved ? "Log Out Anyway" : "Log Out Now"
+                                        : unsaved ? "Leave Anyway" : "Leave the Desktop",
               NULL, action, 0);
     popup_add(NULL, NULL, POP_NONE, 0);
     popup_add("Cancel", NULL, POP_NONE, 0);
     place_popup(x, y);
-    printf("desktop: asking before %s\n", action == POP_RESTART     ? "restarting"
-                                          : action == POP_POWER_OFF ? "turning off"
-                                          : action == POP_LOGOUT    ? "logging out"
-                                                                    : "leaving");
+    printf("desktop: asking before %s%s%s\n", action == POP_RESTART     ? "restarting"
+                                              : action == POP_POWER_OFF ? "turning off"
+                                              : action == POP_LOGOUT    ? "logging out"
+                                                                        : "leaving",
+           unsaved ? ": unsaved changes in " : "", unsaved ? names : "");
 }
 
 /* ---- Notifications ---- */
@@ -2250,6 +2299,13 @@ static void client_message(int client) {
             printf("desktop: window %d is now called \"%s\"\n", w->id, w->title);
         }
         break;
+    case DESKTOP_MODIFIED:
+        if (w && w->modified != (m.a != 0)) {
+            w->modified = m.a != 0;
+            printf("desktop: window %d has %s\n", w->id,
+                   w->modified ? "unsaved changes" : "no unsaved changes now");
+        }
+        break;
     case DESKTOP_DESTROY:
         if (w) {
             destroy_window(w);
@@ -2442,6 +2498,10 @@ static void run_popup_item(int index) {
         printf("desktop: %s\n", popup_actions[index] == POP_RESTART ? "restarting" : "turning off");
         fflush(stdout);
         vx_power(popup_actions[index] == POP_RESTART ? VX_POWER_RESTART : VX_POWER_OFF);
+        break;
+    case POP_REVIEW:
+        printf("desktop: asking the windows with unsaved changes to close\n");
+        review_unsaved();
         break;
     case POP_LEAVE: quit = true; break;
     case POP_LOGOUT: logging_out = quit = true; break;
