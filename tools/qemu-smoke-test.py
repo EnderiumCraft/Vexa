@@ -682,7 +682,7 @@ UNSAVED_COMMANDS = [
     ("@sendkey d", None, 4),
     # The editor ended (so the terminal is its shell's again): a Cancel that
     # had closed it anyway would have sent that Alt+F4 to the terminal.
-    ("@type echo editor-closed-$((20+22)) > /dev/console", "editor-closed-42", 20),
+    ('@type echo editor-"closed"-ok > /dev/console', "editor-closed-ok", 20),
     ("@type exit", None, 5),
 ]
 
