@@ -407,8 +407,9 @@ starts that account's shell through `sudo -u`.
 
 `net/` is Vexa's own TCP/IP stack. The network card drivers: `dev/virtio_net.c`,
 `dev/e1000.c` (Intel e1000 and e1000e: legacy descriptor rings, MSI where the card has
-it) and `dev/realtek.c` (RTL8139, with its single receive ring buffer, and
-RTL8111/8168, with descriptor rings). Each registers with `net_register` under the next
+it), `dev/realtek.c` (RTL8139, with its single receive ring buffer, and
+RTL8111/8168, with descriptor rings) and `dev/pcnet.c` (AMD PCnet: an init block in
+memory, 32-bit descriptors, its legacy interrupt). Each registers with `net_register` under the next
 `ethN` name.
 
 - **One lock and one thread.** All protocol state is under `net_lock`, a sleeping

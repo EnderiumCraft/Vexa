@@ -149,9 +149,10 @@ void virtio_net_init(void);
 void net_register(struct net_interface *net);
 /* Names a network card: eth0, eth1... in the order they're found. */
 void net_name(struct net_interface *net);
-/* Card drivers (dev/e1000.c, dev/realtek.c). */
+/* Card drivers (dev/e1000.c, dev/realtek.c, dev/pcnet.c). */
 void e1000_init(void);
 void realtek_init(void);
+void pcnet_init(void);
 /* For drivers' interrupt handlers: there is work for the network thread. */
 void net_wake(void);
 struct net_interface *net_interfaces(void);

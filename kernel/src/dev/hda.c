@@ -12,11 +12,12 @@
 #include <vexa/vfs.h>
 
 /*
- * Intel High Definition Audio: the sound hardware of most PCs since 2004, and
- * QEMU's intel-hda (with hda-output or hda-duplex). The controller talks to
- * codecs over a link, by commands ("verbs") through two rings in memory
- * (CORB out, RIRB back); sound goes out by DMA from a buffer described by a
- * list of pieces (the BDL), which the controller goes round and round.
+ * Intel High Definition Audio: the sound hardware of most PCs since 2004,
+ * QEMU's intel-hda (with hda-output or hda-duplex) and VirtualBox's (with a
+ * STAC9220 codec). The controller talks to codecs over a link, by commands
+ * ("verbs") through two rings in memory (CORB out, RIRB back); sound goes out
+ * by DMA from a buffer described by a list of pieces (the BDL), which the
+ * controller goes round and round.
  *
  * Here: the first codec's first output path (a DAC, through mixers or
  * selectors, to a pin that can drive a speaker or headphones), and one output
@@ -72,6 +73,7 @@
 #define PARAM_GROUP 0x05
 #define PARAM_WIDGET 0x09
 #define PARAM_PIN 0x0c
+#define PARAM_IN_AMP 0x0d
 #define PARAM_CONNECTIONS 0x0e
 #define PARAM_OUT_AMP 0x12
 #define WIDGET_OUTPUT 0
@@ -103,7 +105,9 @@ static struct mutex lock = MUTEX_INIT;
 
 /* The path: DAC, then the widgets after it up to the pin. */
 static uint8_t path[8];
+static uint8_t path_input[8]; /* Which of path[i]'s inputs leads to path[i + 1]. */
 static int path_length;
+static uint8_t afg; /* The audio function group: amplifiers' defaults. */
 
 /* Bytes written and played since the stream started (both only grow). */
 static uint64_t written, played;
@@ -190,6 +194,7 @@ static bool find_dac(uint8_t node, int depth) {
     int n = connections(node, inputs, 16);
     for (int i = 0; i < n; i++) {
         if (find_dac(inputs[i], depth + 1)) {
+            path_input[depth] = (uint8_t)i;
             if (n > 1 && type != WIDGET_MIXER) {
                 command(node, SET_SELECT, (uint32_t)i);
             }
@@ -199,11 +204,31 @@ static bool find_dac(uint8_t node, int depth) {
     return false;
 }
 
-static void unmute(uint8_t node) {
-    uint32_t caps = parameter(node, PARAM_OUT_AMP);
-    uint32_t gain = (caps >> 8) & 0x7f; /* "Offset": 0 dB. */
-    command(node, SET_AMP, 0xb000 | gain);                /* Output, both sides. */
-    command(node, SET_AMP, 0x7000 | gain);                /* Input 0, both sides. */
+/* An amplifier's capabilities: the widget's own, or (without the override
+ * bit, as on many codecs, VirtualBox's STAC9220 among them) the function
+ * group's. */
+static uint32_t amp_caps(uint8_t node, uint32_t which) {
+    uint32_t widget = parameter(node, PARAM_WIDGET);
+    return widget & (1u << 3) ? parameter(node, which) : parameter(afg, which);
+}
+
+/* 0 dB: the "offset" step (or the loudest, if that's 0 and there are steps). */
+static uint32_t zero_db(uint32_t caps) {
+    uint32_t offset = caps & 0x7f, steps = (caps >> 8) & 0x7f;
+    return offset ? offset : steps;
+}
+
+/* Turns up (not muted, 0 dB) the node's output amplifier, and the input one
+ * on the input the path takes. */
+static void unmute(uint8_t node, uint8_t input) {
+    uint32_t widget = parameter(node, PARAM_WIDGET);
+    if (widget & (1u << 2)) { /* An output amplifier. */
+        command(node, SET_AMP, 0xb000 | zero_db(amp_caps(node, PARAM_OUT_AMP)));
+    }
+    if (widget & (1u << 1)) { /* Input ones. */
+        command(node, SET_AMP, 0x7000 | (uint32_t)input << 8 |
+                                   zero_db(amp_caps(node, PARAM_IN_AMP)));
+    }
 }
 
 static uint16_t format_word(void) {
@@ -348,7 +373,7 @@ static bool setup_codec(void) {
         kprintf("[hda] codec %u doesn't answer\n", codec);
         return false;
     }
-    uint8_t afg = 0;
+    afg = 0;
     for (unsigned n = (root >> 16) & 0xff, i = 0; i < (root & 0xff); i++) {
         if ((parameter((uint8_t)(n + i), PARAM_GROUP) & 0xff) == 1) {
             afg = (uint8_t)(n + i);
@@ -392,7 +417,7 @@ static bool setup_codec(void) {
     }
     for (int i = 0; i < path_length; i++) {
         command(path[i], SET_POWER, 0);
-        unmute(path[i]);
+        unmute(path[i], i + 1 < path_length ? path_input[i] : 0);
     }
     uint8_t pin = path[0], dac = path[path_length - 1];
     command(pin, SET_PIN, 0xc0); /* Output, headphone amplifier. */

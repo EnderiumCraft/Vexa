@@ -29,7 +29,8 @@
 void linux_devices_init(void);
 void linux_sound_init(void);
 #endif
-void hda_init(void); /* dev/hda.c */
+void hda_init(void);  /* dev/hda.c */
+void ac97_init(void); /* dev/ac97.c */
 
 static void must(int error, const char *what) {
     if (error) {
@@ -138,7 +139,9 @@ void init_thread(void *unused) {
     virtio_net_init();
     e1000_init();   /* Intel cards. */
     realtek_init(); /* Realtek cards. */
+    pcnet_init();   /* AMD PCnet (VirtualBox's card for many guests). */
     hda_init(); /* Sound, if there's an HD Audio controller: /dev/audio0. */
+    ac97_init(); /* ...or an AC'97 one (VirtualBox's for many guests). */
     usb_init(); /* USB controllers; what's plugged in is found on the "usb" thread. */
 #ifdef LINUX_COMPAT
     linux_sound_init(); /* ALSA's /dev/snd for Linux programs, over it. */

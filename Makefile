@@ -1110,8 +1110,10 @@ native-iso: $(DOOM) $(CXX_TEST) $(CXX_TEST_STATIC) $(MESA_VEXA) $(SDL_GL_TEST) $
 test-install: $(ISO)
 	tools/install-test.sh
 
+# (Also VirtualBox's hardware, for many guests: its chipset, PCnet card, AC'97 sound, OHCI.)
 test-native-boot:
-	tools/qemu-smoke-test.py --no-linux --iso $(BUILD)/native/vexa.iso --usb ohci --machine pc
+	tools/qemu-smoke-test.py --no-linux --iso $(BUILD)/native/vexa.iso --usb ohci --machine pc \
+		--nic pcnet --sound ac97
 test-native: native-iso
 	$(MAKE) --no-print-directory test-native-boot
 

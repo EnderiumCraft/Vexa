@@ -88,7 +88,7 @@ installs it on a disk:
 | `test-bios` | BIOS, 1 CPU, 512 MiB, with virtio, SATA and NVMe test disks |
 | `test-uefi` | UEFI (OVMF), 4 CPUs, 6 GiB, `-cpu max` (AVX, SMEP, SMAP), USB (`--usb`), and an Intel e1000e card |
 | `test-safe` | the safe mode boot (no ACPI, the legacy PIC and PIT), with an Intel e1000 card |
-| `test-native-boot` | a kernel built with `LINUX_COMPAT=0`, on QEMU's `pc` machine (i440FX: the CD on IDE, as in VirtualBox), with OHCI USB |
+| `test-native-boot` | a kernel built with `LINUX_COMPAT=0`, on QEMU's `pc` machine (i440FX: the CD on IDE, as in VirtualBox), with OHCI USB, an AMD PCnet card and AC'97 sound (VirtualBox's hardware for many guests) |
 | `test-install` | `tools/install-test.sh`: the Installer app puts Vexa on an empty disk (`--install`); `e2fsck` checks it; then the disk starts without the CD, with BIOS and with UEFI (`--installed`), and a file written at the first start is read at the second |
 
 `make test-virgl` (not part of `make test`) adds QEMU's virtio GPU with 3D
@@ -128,7 +128,8 @@ In this mode each check looks only at what came after the step before it, since 
 checks were skipped.
 
 **Network cards**: `--nic` picks QEMU's card (`virtio-net-pci` by default; `e1000`,
-`e1000e`, `rtl8139`), and the network checks run over it.
+`e1000e`, `rtl8139`, `pcnet`), and the network checks run over it. **Sound cards**:
+`--sound ac97` gives an AC'97 one instead of HD Audio.
 
 **The test list.** `TYPED_COMMANDS`, `LINUX_COMMANDS` and `DISK_COMMANDS` in
 `tools/qemu-smoke-test.py` are lists of `(command, expected text, seconds[, count])`:
@@ -465,7 +466,8 @@ some starting points:
   (`kernel/src/arch/x86_64/random.c`); Linux programs get them through `getrandom`
   and `/dev/urandom`
 - sound: `dev/hda.c` drives HD Audio (codec commands through the CORB and RIRB rings, a
-  cyclic DMA stream followed by a kernel thread) as `/dev/audio0`;
+  cyclic DMA stream followed by a kernel thread) and `dev/ac97.c` AC'97 (a ring of 32
+  buffers whose last valid index is kept just behind the one playing) as `/dev/audio0`;
   `personality/linux/sound.c` is the kernel ALSA interface for Linux programs over it.
   The tests check sound with QEMU's `wav` audio backend: `@sound HZ` measures the pitch
   of what was recorded

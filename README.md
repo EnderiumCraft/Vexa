@@ -119,7 +119,7 @@ runs X programs such as `xterm` in windows of their own on it. The kernel:
   hubs, keyboards, mice and tablets, and
   USB sticks and disks (mounted at `/mnt/usb0`), plugged in and out while it runs
 - drives wired network cards: virtio-net, Intel e1000 and e1000e, Realtek RTL8139 and
-  RTL8111/8168
+  RTL8111/8168, AMD PCnet (so VirtualBox's adapters all work)
 - drives QEMU's virtio GPU with 3D (virgl), for OpenGL on the host's graphics card,
   with Linux's virtgpu DRM interface (`/dev/dri/renderD128`)
 - keeps a tree of every device and its driver, which Device Manager (an app) and
@@ -216,7 +216,7 @@ of their own: Ctrl+Alt+X opens an `xterm`.
 Linux programs also get the kernel's display and input interfaces, DRM with "dumb
 buffers" on `/dev/dri/card0` and evdev on `/dev/input`, so they can draw on the whole
 screen without X (or run Xorg there: `startxorg`), OpenGL through Mesa's llvmpipe (in X windows, or into memory), a D-Bus
-session bus, and sound: HD Audio and USB sound cards, programs playing at once (mixed, at
+session bus, and sound: HD Audio, AC'97 and USB sound cards, programs playing at once (mixed, at
 the panel's volume), `play`, and ALSA for Linux programs (`aplay`). See [docs/ROADMAP.md](docs/ROADMAP.md) for the
 full plan from here to Firefox.
 

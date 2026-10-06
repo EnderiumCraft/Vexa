@@ -1060,7 +1060,9 @@ def main():
     parser.add_argument("--no-cd", action="store_true",
                         help="boot from the first disk (an installed Vexa), without the CD")
     parser.add_argument("--nic", default="virtio-net-pci",
-                        help="QEMU's network card: virtio-net-pci, e1000, e1000e, rtl8139")
+                        help="QEMU's network card: virtio-net-pci, e1000, e1000e, rtl8139, pcnet")
+    parser.add_argument("--sound", default="hda", choices=["hda", "ac97"],
+                        help="the sound card: Intel HD Audio, or AC'97 (VirtualBox's for many guests)")
     parser.add_argument("--usb", nargs="?", const="xhci", choices=sorted(USB_DEVICES),
                         help="add a USB controller with a keyboard and a mouse on a hub (typing "
                              "and the pointer then go through USB) and run the USB checks")
@@ -1104,7 +1106,8 @@ def main():
         # Sound: an HD Audio controller and codec, whose output QEMU writes
         # to a WAV file (see "@sound").
         "-audiodev", "wav,id=snd0,path=" + os.path.join(tmp, "sound.wav"),
-        "-device", "intel-hda", "-device", "hda-output,audiodev=snd0",
+        *(["-device", "intel-hda", "-device", "hda-output,audiodev=snd0"] if args.sound == "hda"
+          else ["-device", "AC97,audiodev=snd0"]),
     ]
     disks = []
     www = os.path.join(tmp, "www")

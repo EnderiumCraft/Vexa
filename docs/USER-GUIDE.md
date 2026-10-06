@@ -793,8 +793,9 @@ anyway. The desktop itself still draws on the processor.
 
 ## Sound
 
-Vexa plays sound on an HD Audio sound card (the kind in most PCs, and QEMU's
-`intel-hda`; `make run` adds one) and on **USB sound cards, headsets and speakers**
+Vexa plays sound on an HD Audio sound card (the kind in most PCs, QEMU's `intel-hda`
+and VirtualBox's "Intel HD Audio"; `make run` adds one), an **AC'97** one (Intel's ICH
+and those like it: VirtualBox's "ICH AC97", QEMU's `AC97`) and on **USB sound cards, headsets and speakers**
 (USB Audio Class 1, on an xHCI controller; QEMU's `usb-audio`). A USB one plays as soon
 as it's plugged in, and when it's pulled out the built-in one takes over again.
 
@@ -829,10 +830,14 @@ X programs get a D-Bus session bus, started with the X server (`xrun` sets
 
 Vexa drives these wired network cards: virtio-net (QEMU's and other virtual
 machines'), **Intel** PRO/1000 cards (e1000 and e1000e: 82540 to 82574, and the I217,
-I218 and I219 built into many PCs' boards) and **Realtek** RTL8139 and RTL8111/8168
-(also very common on boards). The cards are `eth0`, `eth1`... in the order they're
+I218 and I219 built into many PCs' boards), **Realtek** RTL8139 and RTL8111/8168
+(also very common on boards) and **AMD PCnet** (PCnet-PCI II and PCnet-FAST III). The cards are `eth0`, `eth1`... in the order they're
 found; `net` and Device Manager list them. Wi-Fi isn't supported yet. In QEMU,
-`-device e1000,netdev=n0`, `e1000e` and `rtl8139` try the other drivers.
+`-device e1000,netdev=n0`, `e1000e`, `rtl8139` and `pcnet` try the other drivers.
+
+**VirtualBox**: whichever network adapter and sound controller its machine settings
+give (the "Other" guest types get a PCnet-FAST III and ICH AC'97; others an Intel
+PRO/1000 and Intel HD Audio), Vexa has a driver for it; virtio-net works too.
 
 With a network card (QEMU's `virtio-net-pci`), Vexa gets an address by DHCP when it
 starts. In QEMU's user-mode network: Vexa is 10.0.2.15, the router (and your machine)
