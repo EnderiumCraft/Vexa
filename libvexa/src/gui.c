@@ -390,6 +390,9 @@ int vx_gui_wait(struct vx_gui_event *event, long timeout_ms) {
         } else {
             struct vx_poll poll = {connection, VX_POLL_READ, 0};
             long ready = vx_poll(&poll, 1, timeout_ms);
+            if (ready == -VX_EINTR) {
+                continue; /* A signal that isn't ours to act on: wait on. */
+            }
             if (ready <= 0) {
                 return (int)ready;
             }

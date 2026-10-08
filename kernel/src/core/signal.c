@@ -34,14 +34,15 @@ static void mark_pending(struct process *process, int signal) {
 
 void signal_send(struct process *process, int signal) {
     mark_pending(process, signal);
-    if (valid(signal)) {
+    /* An ignored signal (SIGCHLD, say) doesn't interrupt a call that waits. */
+    if (valid(signal) && !would_ignore(process, signal)) {
         sched_interrupt_process(process, signal);
     }
 }
 
 void signal_send_locked(struct process *process, int signal) {
     mark_pending(process, signal);
-    if (valid(signal)) {
+    if (valid(signal) && !would_ignore(process, signal)) {
         sched_interrupt_process_locked(process, signal);
     }
 }
