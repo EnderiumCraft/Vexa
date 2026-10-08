@@ -470,9 +470,11 @@ install's steps as it goes. It only installs when Vexa was started from the CD.
 
 ### Welcome
 
-The first-run experience. The first time an account logs in on an installed Vexa, a
-card opens over the wallpaper with six pages that slide in (Enter or the arrow keys
-move on, **Back** goes back, **Skip for now** leaves it):
+The first-run experience, in steps like a setup wizard. The first time an account logs
+in on an installed Vexa, a card opens over the wallpaper: the steps down its left (the
+ones done ticked, the one you're on lit up), and the page beside them. **Next** goes on,
+**Back** goes back (any step done can be clicked to go back to it; Enter or the right
+arrow goes on, the left arrow goes back), and **Skip for now** leaves it:
 
 1. **Welcome**: a greeting by name.
 2. **Make it yours**: Light, Dark or Automatic (each shown as a little desktop), and

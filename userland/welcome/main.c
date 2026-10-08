@@ -1,11 +1,14 @@
 /* welcome: the first-run experience (see docs/USER-GUIDE.md, "Welcome").
  *
- * A frosted card over the wallpaper, with six pages that slide in: a greeting,
- * the look (theme and accent), the keyboard and time zone, the network (and
- * the computer's name), a short tour (search, the Vexa menu, window keys,
- * screenshots) and a summary. The desktop starts it the first time an account
- * logs in on an installed Vexa (and the Vexa menu has it, for another go).
- * Choices apply as they're made, the same way Settings does it.
+ * A setup in steps, like Windows XP's: a frosted card over the wallpaper, with
+ * the steps down its left (the ones done ticked, the one you're on lit up, and
+ * any done one clickable to go back to), and the step's page beside them, which
+ * slides in. The steps: a greeting, the look (theme and accent), the keyboard
+ * and time zone, the network (and the computer's name), a short tour (search,
+ * the Vexa menu, window keys, screenshots) and a summary. Back and Next move
+ * between them. The desktop starts it the first time an account logs in on an
+ * installed Vexa (and the Vexa menu has it, for another go). Choices apply as
+ * they're made, the same way Settings does it.
  */
 #include <stdbool.h>
 #include <stdio.h>
@@ -20,21 +23,23 @@
 #include <vexa/time.h>
 #include <vexa/users.h>
 
-#define W 900
-#define H 620
-#define CARD_X 90
-#define CARD_Y 52
-#define CARD_W 720
+#define W 1000
+#define H 600
+#define CARD_X 40
+#define CARD_Y 60
+#define CARD_W 920
 #define CARD_H 480
+#define SIDEBAR 230                 /* The steps, down the left (as in the Installer). */
+#define PAGE_W (CARD_W - SIDEBAR)   /* A page's width: what's beside them. */
 #define MARGIN 44
-#define FOOTER_Y (CARD_H - 70)
+#define FOOTER_Y (CARD_H - 60)      /* Back and Next, under a line. */
 #define SLIDE_MS 340
 
 enum page { P_WELCOME, P_LOOK, P_REGION, P_NETWORK, P_TOUR, P_DONE, PAGE_COUNT };
 
 enum hit_kind {
     H_NEXT, H_BACK, H_SKIP, H_THEME, H_ACCENT, H_LAYOUT, H_ZONE, H_ZONE_FIELD, H_TRY_FIELD,
-    H_NAME_FIELD, H_CHECK, H_SETTINGS, H_SOFTWARE, H_FINISH,
+    H_NAME_FIELD, H_CHECK, H_SETTINGS, H_SOFTWARE, H_FINISH, H_STEP,
 };
 
 struct hit {
@@ -51,6 +56,7 @@ static uint32_t theme_key;              /* Which theme backdrop and card_bg are 
 
 static struct hit hits[96];
 static int hit_count;
+static int hit_dx;                      /* Added to a hit's place: a page's is beside the steps. */
 static int hover = -1;                  /* The hit under the pointer. */
 static struct vx_surface *S;            /* What's being drawn on. */
 static long page_age;                   /* How long the page being drawn has been there. */
@@ -231,8 +237,8 @@ static void make_scenery(void) {
     if (!backdrop.pixels) {
         backdrop = make_surface(W, H);
         card_bg = make_surface(CARD_W, CARD_H);
-        pages[0] = make_surface(CARD_W, CARD_H);
-        pages[1] = make_surface(CARD_W, CARD_H);
+        pages[0] = make_surface(PAGE_W, CARD_H);
+        pages[1] = make_surface(PAGE_W, CARD_H);
     }
     if (image) {
         cover(&backdrop, &image->surface);
@@ -308,7 +314,7 @@ static struct hit *add_hit(int x, int y, int w, int h, enum hit_kind kind, int i
     if (hit_count == (int)(sizeof(hits) / sizeof(hits[0]))) {
         return &spare;
     }
-    hits[hit_count] = (struct hit){x, y, w, h, kind, index};
+    hits[hit_count] = (struct hit){x + hit_dx, y, w, h, kind, index};
     return &hits[hit_count++];
 }
 
@@ -404,14 +410,15 @@ static int keys(int x, int y, const char *combo) {
 
 static void header(const char *title, const char *about) {
     text_at(MARGIN, 36 + rise(0), bold(27), title, VX_COLOR_TEXT);
-    vx_draw_text_fit(S, MARGIN, 76 + rise(1), CARD_W - 2 * MARGIN, about, VX_COLOR_DIM, VX_TRANSPARENT);
+    vx_draw_text_fit(S, MARGIN, 76 + rise(1), PAGE_W - 2 * MARGIN, about, VX_COLOR_DIM, VX_TRANSPARENT);
 }
 
 static void footer(bool back, const char *next) {
+    vx_fill(S, MARGIN, FOOTER_Y - 8, PAGE_W - 2 * MARGIN, 1, VX_COLOR_LINE);
     if (back) {
         button(MARGIN, FOOTER_Y + 10, 96, 34, "Back", false, H_BACK, 0);
     }
-    button(CARD_W - MARGIN - 150, FOOTER_Y + 10, 150, 34, next, true, H_NEXT, 0);
+    button(PAGE_W - MARGIN - 150, FOOTER_Y + 10, 150, 34, next, true, H_NEXT, 0);
 }
 
 /* ---- The settings choices make ---- */
@@ -466,7 +473,7 @@ static void mini_desktop(int x, int y, int w, int h, bool dark, uint32_t accent)
 }
 
 static void page_welcome(void) {
-    int cx = CARD_W / 2;
+    int cx = PAGE_W / 2;
     /* The mark, floating a little. */
     int bob = (int)((now_ms() / 40) % 64);
     bob = (bob < 32 ? bob : 64 - bob) / 8 - 2;
@@ -484,7 +491,7 @@ static void page_welcome(void) {
         centered(cx, 222 + rise(2), bold(19), hi, VX_COLOR_ACCENT);
     }
     if (shown(3)) {
-        paragraph(CARD_W / 2 - 250, 258 + rise(3), 500, 22, sans(15),
+        paragraph(PAGE_W / 2 - 250, 258 + rise(3), 500, 22, sans(15),
                   "Let's make this computer yours. It takes about a minute, and you can change "
                   "everything later in Settings.",
                   VX_COLOR_DIM, true);
@@ -500,9 +507,9 @@ static void page_welcome(void) {
             centered(x, 376 + rise(4), sans(12), ahead[i].label, VX_COLOR_DIM);
         }
     }
-    button(cx - 90, 412 + rise(5), 180, 40, "Get Started", true, H_NEXT, 0);
-    struct hit *skip = add_hit(cx - 60, 458, 120, 20, H_SKIP, 0);
-    centered(cx, 458, sans(12), "Skip for now", hot(skip) ? VX_COLOR_TEXT : VX_COLOR_DIM);
+    button(cx - 90, 404 + rise(5), 180, 40, "Get Started", true, H_NEXT, 0);
+    struct hit *skip = add_hit(cx - 60, 452, 120, 20, H_SKIP, 0);
+    centered(cx, 452, sans(12), "Skip for now", hot(skip) ? VX_COLOR_TEXT : VX_COLOR_DIM);
 }
 
 static void page_look(void) {
@@ -511,7 +518,7 @@ static void page_look(void) {
     static const char *const values[] = {"light", "dark", "auto"};
     static const char *const titles[] = {"Light", "Dark", "Automatic"};
     uint32_t accent_color = vx_theme.accent;
-    int pw = 188, ph = 118, gap = (CARD_W - 2 * MARGIN - 3 * pw) / 2;
+    int pw = 188, ph = 118, gap = (PAGE_W - 2 * MARGIN - 3 * pw) / 2;
     for (int i = 0; i < 3; i++) {
         int x = MARGIN + i * (pw + gap), y = 122 + rise(2);
         bool on = !strcmp(theme, values[i]);
@@ -549,7 +556,7 @@ static void page_look(void) {
     }
     /* The accent colors. */
     text_at(MARGIN, 298 + rise(3), bold(15), "Accent color", VX_COLOR_TEXT);
-    int step = (CARD_W - 2 * MARGIN) / vx_accent_count;
+    int step = (PAGE_W - 2 * MARGIN) / vx_accent_count;
     for (int i = 0; i < vx_accent_count; i++) {
         int cx = MARGIN + i * step + step / 2, cy = 350 + rise(4);
         bool on = !strcmp(accent, vx_accents[i].name);
@@ -565,7 +572,7 @@ static void page_look(void) {
         }
         centered(cx, cy + 28, sans(12), vx_accents[i].label, on ? VX_COLOR_TEXT : VX_COLOR_DIM);
     }
-    footer(true, "Continue");
+    footer(true, "Next");
 }
 
 /* The time zones that match what's typed. */
@@ -619,7 +626,7 @@ static void page_region(void) {
     vx_draw_field(S, lx + 44, ty - 4, 222, try_field, focus == H_TRY_FIELD);
     add_hit(lx + 44, ty - 4, 222, 24, H_TRY_FIELD, 0);
     /* The time zones. */
-    int zx = 340, zw = CARD_W - MARGIN - zx;
+    int zx = 340, zw = PAGE_W - MARGIN - zx;
     text_at(zx, ly, bold(15), "Time zone", VX_COLOR_TEXT);
     vx_draw_field(S, zx, ly + 24, zw, zone_search[0] || focus == H_ZONE_FIELD ? zone_search : "", focus == H_ZONE_FIELD);
     if (!zone_search[0] && focus != H_ZONE_FIELD) {
@@ -669,7 +676,7 @@ static void page_region(void) {
     snprintf(clock, sizeof(clock), "It's %02d:%02d on %s %d%s.", date.hour, date.minute,
              vx_month_names[date.month - 1], date.day, zone[0] ? "" : " (set a city)");
     text_at(zx, list_y + rows * row_h + 18, sans(13), clock, VX_COLOR_DIM);
-    footer(true, "Continue");
+    footer(true, "Next");
 }
 
 /* ---- The network page ---- */
@@ -734,7 +741,7 @@ static void page_network(void) {
     char line[160], ip[16], router[16];
     if (!any) {
         text_at(x, y, bold(18), "No network card found", VX_COLOR_TEXT);
-        paragraph(x, y + 32, CARD_W - x - MARGIN, 21, sans(14),
+        paragraph(x, y + 32, PAGE_W - x - MARGIN, 21, sans(14),
                   "That's fine: Vexa works without one. If this computer has a card Vexa doesn't "
                   "know yet, Settings, Network and Device Manager will say what it found.",
                   VX_COLOR_DIM, false);
@@ -775,32 +782,32 @@ static void page_network(void) {
             vx_fill_rounded(S, x, cy, 22, 22, 11, 0xf0ad4e, 255);
             centered(x + 11, cy + 2, bold(15), "!", 0xffffff);
             text_at(x + 32, cy + 3, bold(14), "Can't reach the internet", VX_COLOR_TEXT);
-            paragraph(x + 32, cy + 28, CARD_W - x - MARGIN - 32, 20, sans(13),
+            paragraph(x + 32, cy + 28, PAGE_W - x - MARGIN - 32, 20, sans(13),
                       "The router may not be online. Check its cable, or carry on: you can "
                       "connect later.",
                       VX_COLOR_DIM, false);
         }
         if (state != CHECK_RUNNING) {
-            button(CARD_W - MARGIN - 130, y + 88, 130, 30, "Check Again", false, H_CHECK, 0);
+            button(PAGE_W - MARGIN - 130, y + 88, 130, 30, "Check Again", false, H_CHECK, 0);
         }
     }
     /* The computer's name. */
-    int ny = 300 + rise(4);
-    panel(MARGIN, ny, CARD_W - 2 * MARGIN, 82);
+    int ny = 288 + rise(4);
+    panel(MARGIN, ny, PAGE_W - 2 * MARGIN, 82);
     text_at(MARGIN + 18, ny + 14, bold(14), "Name this computer", VX_COLOR_TEXT);
     text_at(MARGIN + 18, ny + 38, sans(12), "Other computers on the network will see it.", VX_COLOR_DIM);
-    vx_draw_field(S, CARD_W - MARGIN - 250, ny + 28, 232, name_field, focus == H_NAME_FIELD);
-    add_hit(CARD_W - MARGIN - 250, ny + 28, 232, 24, H_NAME_FIELD, 0);
+    vx_draw_field(S, PAGE_W - MARGIN - 250, ny + 28, 232, name_field, focus == H_NAME_FIELD);
+    add_hit(PAGE_W - MARGIN - 250, ny + 28, 232, 24, H_NAME_FIELD, 0);
     text_at(MARGIN, ny + 96, sans(12), "Wi-Fi isn't supported yet. A wired card connects as soon as the cable is in.",
             VX_COLOR_DIM);
-    footer(true, "Continue");
+    footer(true, "Next");
 }
 
 /* ---- The tour ---- */
 
 static void tip(int col, int row, const char *icon_name, const char *title, const char *combo,
                 const char *about, enum hit_kind action, const char *action_label) {
-    int tw = (CARD_W - 2 * MARGIN - 16) / 2, th = 92;
+    int tw = (PAGE_W - 2 * MARGIN - 16) / 2, th = 92;
     int x = MARGIN + col * (tw + 16), y = 108 + row * (th + 12) + rise(2 + row * 2 + col);
     panel(x, y, tw, th);
     icon(icon_name, x + 12, y + 12, 44);
@@ -822,13 +829,13 @@ static void page_tour(void) {
     tip(1, 1, "control-panel", "Settings", "", "Look, wallpaper, sound, network, accounts: it's all there.", H_SETTINGS, "Open");
     tip(0, 2, "pictures", "Screenshots", "PrtSc", "They land in Pictures. Alt: a window. Shift: an area.", H_NEXT, NULL);
     tip(1, 2, "shield", "Lock and layouts", "Super+L", "Alt+Shift switches the keyboard layout.", H_NEXT, NULL);
-    footer(true, "Continue");
+    footer(true, "Next");
 }
 
 /* ---- All set ---- */
 
 static void page_done(void) {
-    int cx = CARD_W / 2;
+    int cx = PAGE_W / 2;
     /* A ring that fills in, with a tick. */
     int t = ease(page_age, 700);
     int top = 40 + rise(0);
@@ -868,7 +875,7 @@ static void page_done(void) {
     rows[3].icon = "network", rows[3].label = "Network";
     for (int i = 0; i < 4; i++) {
         int col = i % 2, row = i / 2;
-        int x = 120 + col * 250, y = 224 + row * 52 + rise(2 + i);
+        int x = cx - 210 + col * 250, y = 224 + row * 52 + rise(2 + i);
         icon(rows[i].icon, x, y, 36);
         text_at(x + 46, y + 1, sans(12), rows[i].label, VX_COLOR_DIM);
         snprintf(line, sizeof(line), "%s", rows[i].value);
@@ -885,8 +892,13 @@ static void page_done(void) {
 static void draw_page(struct vx_surface *target, int p, long age) {
     S = target;
     page_age = age;
-    memcpy(S->pixels, card_bg.pixels, (size_t)CARD_W * CARD_H * 4);
+    /* The card's glass, beside the steps. */
+    for (int y = 0; y < CARD_H; y++) {
+        memcpy(S->pixels + (long)y * S->stride, card_bg.pixels + (long)y * card_bg.stride + SIDEBAR,
+               (size_t)PAGE_W * 4);
+    }
     hit_count = 0;
+    hit_dx = SIDEBAR;
     switch (p) {
     case P_WELCOME: page_welcome(); break;
     case P_LOOK: page_look(); break;
@@ -895,6 +907,77 @@ static void draw_page(struct vx_surface *target, int p, long age) {
     case P_TOUR: page_tour(); break;
     case P_DONE: page_done(); break;
     }
+    hit_dx = 0;
+}
+
+/* ---- The steps, down the left (as in the Installer's sidebar) ---- */
+
+static void disc(int cx, int cy, int r, uint32_t color) {
+    vx_fill_rounded(S, cx - r, cy - r, 2 * r, 2 * r, r, color, 255);
+}
+
+/* Drawn over the card's left side, in the card's own coordinates (the hits
+ * too), so a click on a step done goes back to it. */
+static void rail(struct vx_surface *win) {
+    static const char *const names[PAGE_COUNT] = {"Welcome", "Your look", "Keyboard and time",
+                                                  "Network", "Tour", "Finish"};
+    static struct vx_surface view;
+    view = (struct vx_surface){win->pixels + (long)CARD_Y * win->stride + CARD_X, SIDEBAR, CARD_H, win->stride};
+    struct vx_surface *keep = S;
+    S = &view;
+    hit_dx = 0;
+    uint32_t top = vx_mix(0x1c2033, VX_COLOR_ACCENT, 70), bottom = vx_mix(0x0d0f18, VX_COLOR_ACCENT, 25);
+    for (int row = 0; row < CARD_H; row++) {
+        vx_fill(S, 0, row, SIDEBAR, 1, vx_mix(top, bottom, row * 255 / (CARD_H - 1)));
+    }
+    for (int row = 0; row < 120; row++) { /* A soft sheen across the top. */
+        vx_fill_rounded(S, 0, row, SIDEBAR, 1, 0, 0xffffff, (120 - row) * 18 / 120);
+    }
+    vx_fill(S, SIDEBAR - 1, 0, 1, CARD_H, vx_mix(bottom, 0x000000, 80));
+
+    vx_draw_gel(S, 20, 24, 44, 44, 14, VX_COLOR_ACCENT);
+    centered(42, 30, bold(26), "V", 0xffffff);
+    text_at(78, 28, bold(16), "Vexa Setup", 0xffffff);
+    char step[32];
+    snprintf(step, sizeof(step), "Step %d of %d", page + 1, PAGE_COUNT);
+    text_at(78, 50, sans(12), step, 0xc8cce0);
+
+    int y0 = 124, gap = 50;
+    for (int i = 0; i < PAGE_COUNT; i++) {
+        int cy = y0 + i * gap;
+        if (i + 1 < PAGE_COUNT) { /* The line to the next: lit where it's done. */
+            vx_fill(S, 41, cy + 13, 2, gap - 26, i < page ? VX_COLOR_ACCENT : 0x4a4f66);
+        }
+        struct hit *hit = NULL;
+        if (i < page) {
+            hit = add_hit(10, cy - 20, SIDEBAR - 20, 40, H_STEP, i);
+        }
+        if (i == page) {
+            vx_fill_rounded(S, 12, cy - 20, SIDEBAR - 24, 40, 10, 0xffffff, 40);
+            disc(42, cy, 15, vx_mix(VX_COLOR_ACCENT, top, 140)); /* Glow. */
+            disc(42, cy, 12, 0xffffff);
+            char number[4];
+            snprintf(number, sizeof(number), "%d", i + 1);
+            centered(42, cy - 8, bold(13), number, VX_COLOR_ACCENT);
+        } else if (i < page) {
+            if (hit && hot(hit)) {
+                vx_fill_rounded(S, 12, cy - 20, SIDEBAR - 24, 40, 10, 0xffffff, 18);
+            }
+            disc(42, cy, 12, VX_COLOR_ACCENT);
+            tick(42 - 10, cy - 10, 20, 0xffffff);
+        } else {
+            disc(42, cy, 12, 0x4a4f66);
+            disc(42, cy, 10, vx_mix(top, bottom, i * 255 / PAGE_COUNT));
+            char number[4];
+            snprintf(number, sizeof(number), "%d", i + 1);
+            centered(42, cy - 8, sans(12), number, 0x8a8fa8);
+        }
+        const struct vx_font *f = i == page ? bold(13) : sans(14);
+        uint32_t color = i == page ? 0xffffff : i < page ? 0xd8dbe8 : 0x8a8fa8;
+        text_at(66, cy - vx_font_height(f) / 2, f, names[i], color);
+    }
+    text_at(28, CARD_H - 30, sans(11), "Vexa: a small system of its own", 0x7d82a0);
+    S = keep;
 }
 
 /* ---- The window ---- */
@@ -906,9 +989,9 @@ static bool sliding(void) {
 /* A page on the card, `at` pixels to the right of where it belongs (negative:
  * to the left); what's outside the card isn't drawn. */
 static void blit_card(struct vx_surface *win, const struct vx_surface *p, int at) {
-    int w = CARD_W - (at < 0 ? -at : at);
+    int w = PAGE_W - (at < 0 ? -at : at);
     if (w > 0) {
-        vx_blit(win, CARD_X + (at > 0 ? at : 0), CARD_Y, p, at < 0 ? -at : 0, 0, w, CARD_H);
+        vx_blit(win, CARD_X + SIDEBAR + (at > 0 ? at : 0), CARD_Y, p, at < 0 ? -at : 0, 0, w, CARD_H);
     }
 }
 
@@ -917,13 +1000,13 @@ static void draw_frame(void) {
     struct vx_surface *win = &window->surface;
     long now = now_ms();
     memcpy(win->pixels, backdrop.pixels, (size_t)W * H * 4);
-    /* The card: the page (or, sliding, the one leaving and the one coming). */
+    /* The page (or, sliding, the one leaving and the one coming), beside the steps. */
     if (sliding() && now - slide_since >= SLIDE_MS) {
         leaving = -1;
     }
     if (sliding()) {
-        int offset = CARD_W * ease(now - slide_since, SLIDE_MS) / 1000;
-        int old_at = -slide_dir * offset, new_at = old_at + slide_dir * CARD_W;
+        int offset = PAGE_W * ease(now - slide_since, SLIDE_MS) / 1000;
+        int old_at = -slide_dir * offset, new_at = old_at + slide_dir * PAGE_W;
         draw_page(&pages[0], leaving, 100000);
         draw_page(&pages[1], page, now - page_since);
         blit_card(win, &pages[0], old_at);
@@ -932,16 +1015,8 @@ static void draw_frame(void) {
         draw_page(&pages[0], page, now - page_since);
         blit_card(win, &pages[0], 0);
     }
+    rail(win);
     round_corners(win, &backdrop, CARD_X, CARD_Y, CARD_W, CARD_H, 20);
-    /* A thin edge of light around the card. */
-    /* The steps: the current one a pill. */
-    int dots_w = (PAGE_COUNT - 1) * 18 + 30, x = (W - dots_w) / 2;
-    for (int i = 0; i < PAGE_COUNT; i++) {
-        bool current = i == page;
-        int w = current ? 30 : 10;
-        vx_fill_rounded(win, x, CARD_Y + CARD_H + 24, w, 10, 5, current ? 0xffffff : 0xffffff, current ? 255 : 110);
-        x += w + 8;
-    }
     vx_window_present(window, 0, 0, W, H);
 }
 
@@ -1015,6 +1090,7 @@ static void click(const struct hit *h) {
     case H_TRY_FIELD: focus = H_TRY_FIELD; break;
     case H_NAME_FIELD: focus = H_NAME_FIELD; break;
     case H_CHECK: check_state = CHECK_IDLE; break;
+    case H_STEP: go(h->index); break;
     case H_SETTINGS: open_app("Settings", NULL); break;
     case H_SOFTWARE: open_app("Software", NULL); break;
     case H_FINISH: finish(); vx_window_destroy(window); exit(0);
@@ -1037,7 +1113,7 @@ static void pointer(const struct vx_gui_event *e, int *held) {
     vx_window_set_cursor(window, hover >= 0 ? (hits[hover].kind == H_ZONE_FIELD || hits[hover].kind == H_TRY_FIELD ||
                                                hits[hover].kind == H_NAME_FIELD ? VX_CURSOR_TEXT : VX_CURSOR_HAND)
                                             : VX_CURSOR_ARROW);
-    if (e->wheel && page == P_REGION && pointer_x > 330) {
+    if (e->wheel && page == P_REGION && pointer_x > SIDEBAR + 330) {
         zone_top += e->wheel * 2;
         zone_top = zone_top < 0 ? 0 : zone_top;
     }
