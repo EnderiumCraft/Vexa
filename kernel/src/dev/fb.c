@@ -57,6 +57,16 @@ void fb_fill_rect(uint64_t x, uint64_t y, uint64_t w, uint64_t h, uint32_t rgb) 
     }
 }
 
+void fb_draw_row(uint64_t x, uint64_t y, uint64_t width, const uint32_t *rgb) {
+    if (!fb || hidden || y >= fb->height) {
+        return;
+    }
+    uint32_t *line = row_ptr(y);
+    for (uint64_t i = 0; i < width && x + i < fb->width; i++) {
+        line[x + i] = pack_color(rgb[i]);
+    }
+}
+
 void fb_draw_bitmap8(uint64_t x, uint64_t y, const uint8_t *rows, uint64_t height,
                      uint32_t fg_rgb, uint32_t bg_rgb) {
     if (!fb || hidden || x + 8 > fb->width || y + height > fb->height) {

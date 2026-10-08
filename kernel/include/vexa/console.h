@@ -16,10 +16,10 @@ void console_redraw(void);
 /* The loading screen (the boot text shows again when it goes). */
 void console_splash(bool on);
 
-#define CONSOLE_COLOR_TEXT 0xe4dcf2
-#define CONSOLE_COLOR_ACCENT 0xb07cff
-#define CONSOLE_COLOR_DIM 0x8a7fa3
+#define CONSOLE_COLOR_TEXT 0xe2f6f3
+#define CONSOLE_COLOR_ACCENT 0x2ec4b6
+#define CONSOLE_COLOR_DIM 0x7fa9a3
 #define CONSOLE_COLOR_ERROR 0xff6b81
-#define CONSOLE_COLOR_BACKGROUND 0x160d26
+#define CONSOLE_COLOR_BACKGROUND 0x062f2d
 
 #endif

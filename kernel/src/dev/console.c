@@ -2,6 +2,7 @@
 #include <vexa/console.h>
 #include <vexa/fb.h>
 #include <vexa/font.h>
+#include <vexa/splash_logo.h>
 #include <vexa/string.h>
 #include <vexa/version.h>
 
@@ -23,10 +24,10 @@ struct cell {
     uint32_t bg;
 };
 
-/* The 16 ANSI colours, tuned to sit on Vexa's dark purple background. */
+/* The 16 ANSI colours, tuned to sit on Vexa's dark teal background. */
 static const uint32_t palette[16] = {
-    0x160d26, 0xff6b81, 0x7ee787, 0xf2cc60, 0x79a8ff, 0xb07cff, 0x56d4dd, 0xe4dcf2,
-    0x6e6485, 0xff8fa0, 0xa5f0ab, 0xffe08a, 0xa3c3ff, 0xcca6ff, 0x8de8ef, 0xffffff,
+    0x062f2d, 0xff6b81, 0x7ee787, 0xf2cc60, 0x79a8ff, 0xc38cff, 0x2ec4b6, 0xe2f6f3,
+    0x4f7f7a, 0xff8fa0, 0xa5f0ab, 0xffe08a, 0xa3c3ff, 0xd9b8ff, 0x7fe9dd, 0xffffff,
 };
 
 /* The text is kept in memory so scrolling only writes to video memory, which is
@@ -357,12 +358,35 @@ void console_reset_color(void) {
 
 /* ---- The loading screen ----
  *
- * The name, big, over a dark gradient, the version, and a bar that fills as
- * boot goes on (with each kernel message, closer to full but never there). */
+ * The desktop's teal (the wallpaper's, from top to bottom), the Vexa logo in
+ * the middle, the version under it, and a glossy bar like the desktop's gel
+ * buttons that fills as boot goes on (with each kernel message, closer to full
+ * but never there). */
 
-#define SPLASH_SCALE 8
+#define SPLASH_TOP 0x44a89e    /* The wallpaper's teal at the top, */
+#define SPLASH_BOTTOM 0x04302f /* and at the bottom. */
+#define SPLASH_TEXT 0xcdf3ee
+#define SPLASH_SHADOW 0x0b3b38
 #define BAR_WIDTH 280
-#define BAR_HEIGHT 6
+#define BAR_HEIGHT 10
+#define BAR_TRACK 0x0a4a47
+#define BAR_EDGE 0x1d8f85
+#define BAR_LIGHT 0x8ff1e5
+#define BAR_DARK 0x1a8f85
+
+/* a to b by t (0 to 255), a channel at a time. */
+static uint32_t splash_mix(uint32_t a, uint32_t b, uint32_t t) {
+    uint32_t out = 0;
+    for (int shift = 0; shift <= 16; shift += 8) {
+        int ca = (a >> shift) & 0xff, cb = (b >> shift) & 0xff;
+        out |= (uint32_t)(ca + (cb - ca) * (int)t / 255) << shift;
+    }
+    return out;
+}
+
+static uint32_t splash_background(uint64_t y, uint64_t height) {
+    return splash_mix(SPLASH_TOP, SPLASH_BOTTOM, height > 1 ? y * 255 / (height - 1) : 0);
+}
 
 static void draw_big_text(const char *text, uint64_t x, uint64_t y, uint32_t scale, uint32_t rgb) {
     for (; *text; text++, x += FONT_WIDTH * scale) {
@@ -377,17 +401,67 @@ static void draw_big_text(const char *text, uint64_t x, uint64_t y, uint32_t sca
     }
 }
 
+static uint64_t logo_x(void) {
+    return (fb_width() - SPLASH_LOGO_WIDTH) / 2;
+}
+
+/* The logo sits a little above the middle, as the eye expects. */
+static uint64_t logo_y(void) {
+    return fb_height() * 42 / 100 - SPLASH_LOGO_HEIGHT / 2;
+}
+
+static uint64_t version_y(void) {
+    return logo_y() + SPLASH_LOGO_HEIGHT + 24;
+}
+
 static uint64_t bar_x(void) {
     return (fb_width() - BAR_WIDTH) / 2;
 }
 
 static uint64_t bar_y(void) {
-    return fb_height() / 2 + FONT_HEIGHT * SPLASH_SCALE / 2 + 48;
+    return version_y() + FONT_HEIGHT * 2 + 40;
 }
 
+/* The logo over the background, a row at a time (each pixel's alpha says how
+ * much of the logo it is: a transparent one is the background). */
+static void draw_logo(void) {
+    uint32_t row[SPLASH_LOGO_WIDTH];
+    for (uint64_t r = 0; r < SPLASH_LOGO_HEIGHT; r++) {
+        uint32_t background = splash_background(logo_y() + r, fb_height());
+        for (uint64_t c = 0; c < SPLASH_LOGO_WIDTH; c++) {
+            uint32_t p = splash_logo[r][c];
+            row[c] = splash_mix(background, p & 0xffffff, p >> 24);
+        }
+        fb_draw_row(logo_x(), logo_y() + r, SPLASH_LOGO_WIDTH, row);
+    }
+}
+
+/* The bar's ends are round (as the desktop's gel buttons are): how far each row
+ * of it is in from the end. */
+static const uint8_t bar_inset[BAR_HEIGHT] = {3, 1, 0, 0, 0, 0, 0, 0, 1, 3};
+
+static void draw_splash_track(void) {
+    for (uint64_t r = 0; r < BAR_HEIGHT; r++) {
+        uint64_t inset = bar_inset[r];
+        fb_fill_rect(bar_x() + inset, bar_y() + r, BAR_WIDTH - 2 * inset, 1,
+                     r == 0 ? BAR_EDGE : BAR_TRACK);
+    }
+}
+
+/* The gel: light in its top half, the accent below, and a darker last line. */
 static void draw_splash_bar(void) {
     uint64_t filled = (uint64_t)BAR_WIDTH * splash_lines / (splash_lines + 60);
-    fb_fill_rect(bar_x(), bar_y(), filled, BAR_HEIGHT, CONSOLE_COLOR_ACCENT);
+    for (uint64_t r = 0; r < BAR_HEIGHT; r++) {
+        uint64_t inset = bar_inset[r];
+        uint64_t end = filled >= BAR_WIDTH ? BAR_WIDTH - inset : filled;
+        if (end <= inset) {
+            continue;
+        }
+        uint32_t color = r < BAR_HEIGHT / 2       ? BAR_LIGHT
+                         : r + 1 < BAR_HEIGHT     ? CONSOLE_COLOR_ACCENT
+                                                  : BAR_DARK;
+        fb_fill_rect(bar_x() + inset, bar_y() + r, end - inset, 1, color);
+    }
 }
 
 void console_splash(bool on) {
@@ -400,22 +474,15 @@ void console_splash(bool on) {
         return;
     }
     uint64_t width = fb_width(), height = fb_height();
-    /* Dark purple, a little lighter in the middle. */
-    for (uint64_t y = 0; y < height; y += 4) {
-        uint64_t d = y > height / 2 ? y - height / 2 : height / 2 - y;
-        uint32_t lift = (uint32_t)(24 - 24 * d / (height / 2 + 1));
-        uint32_t rgb = ((0x16 + lift / 2) << 16) | ((0x0d + lift / 3) << 8) | (0x26 + lift);
-        fb_fill_rect(0, y, width, 4, rgb);
+    for (uint64_t y = 0; y < height; y++) {
+        fb_fill_rect(0, y, width, 1, splash_background(y, height));
     }
-    const char *name = "Vexa";
-    uint64_t name_width = 4 * FONT_WIDTH * SPLASH_SCALE;
-    uint64_t name_y = height / 2 - FONT_HEIGHT * SPLASH_SCALE / 2 - 24;
-    draw_big_text(name, (width - name_width) / 2 + 4, name_y + 4, SPLASH_SCALE, 0x0b0614);
-    draw_big_text(name, (width - name_width) / 2, name_y, SPLASH_SCALE, 0xffffff);
+    draw_logo();
     const char *version = VEXA_VERSION;
     uint64_t version_width = strlen(version) * FONT_WIDTH * 2;
-    draw_big_text(version, (width - version_width) / 2, name_y + FONT_HEIGHT * SPLASH_SCALE + 8, 2,
-                  CONSOLE_COLOR_DIM);
-    fb_fill_rect(bar_x(), bar_y(), BAR_WIDTH, BAR_HEIGHT, 0x2c2142);
+    uint64_t version_x = (width - version_width) / 2;
+    draw_big_text(version, version_x + 2, version_y() + 2, 2, SPLASH_SHADOW);
+    draw_big_text(version, version_x, version_y(), 2, SPLASH_TEXT);
+    draw_splash_track();
     draw_splash_bar();
 }

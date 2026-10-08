@@ -55,8 +55,8 @@ The kernel options behind safe mode (`acpi=off`, `noapic`), `nosmp` (use only th
 first CPU core) and `noaml` (keep ACPI's tables, but don't run their code: older USB
 controllers and some IDE ones are then polled), can also be written into `limine.conf`.
 
-While it starts, Vexa shows a **loading screen**: its name, the version and a bar that
-fills as it goes. The boot text behind it (what the kernel finds: memory, CPUs, disks,
+While it starts, Vexa shows a **loading screen**: the Vexa logo on the desktop's teal, the
+version, and a glossy bar (the desktop's own gel) that fills as it goes. The boot text behind it (what the kernel finds: memory, CPUs, disks,
 the network) comes back when something goes wrong, at the console, and in safe mode and
 the kernel monitor; the kernel option `verbose` shows it from the start.
 The kernel prints what it finds (memory, CPUs, disks, the network).
