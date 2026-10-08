@@ -1,5 +1,7 @@
 # Vexa
 
+<p align="center"><img src="docs/logo.png" alt="Vexa OS" width="360"></p>
+
 Vexa is a hobby operating system for x86_64, written from scratch in C. Why? Because funny.
 The long-term goal is to run **Mozilla Firefox**.
 

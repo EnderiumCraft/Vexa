@@ -32,10 +32,12 @@ enum desktop_message_type {
     /* Program to desktop. */
     DESKTOP_CREATE = 1,  /* a = width, b = height, c = DESKTOP_* flags,
                             text = buffer file, then title */
-    DESKTOP_PRESENT = 2, /* window; a, b, c, d = x, y, width, height */
+    DESKTOP_PRESENT = 2, /* window; a, b, c, d = x, y, width, height; text[0] = the
+                            buffer shown now: 0 or 1 (0 for a program with one) */
     DESKTOP_TITLE = 3,   /* window; text = title */
     DESKTOP_DESTROY = 4, /* window */
-    DESKTOP_BUFFER = 5,  /* window; a = width, b = height, text = the new buffer file */
+    DESKTOP_BUFFER = 5,  /* window; a = width, b = height, text = the new buffer file,
+                            then (after a NUL, if the program has a second) its file */
     DESKTOP_MOVE = 6,    /* window; a, b = where its content goes on the screen */
     DESKTOP_INFO = 7,    /* answered by INFO_REPLY */
     DESKTOP_NOTIFY = 8,  /* text = a notification to show for a few seconds */
@@ -49,6 +51,8 @@ enum desktop_message_type {
     DESKTOP_LOCK = 13,   /* lock the screen now */
     DESKTOP_CLIPBOARD_SET = 14, /* the clipboard changed: it's in DESKTOP_CLIPBOARD_FILE
                                    (a = 1: Xvexa set it, from an X program) */
+    DESKTOP_BACK_BUFFER = 15,   /* window; a = width, b = height, text = the second buffer
+                                   file: answered by RESIZED (a = 0 if it failed) */
     /* Desktop to program. */
     DESKTOP_CREATED = 16, /* window (0 if it failed) */
     DESKTOP_KEY = 17,     /* window; a = key, b = value, c = character */
@@ -67,6 +71,8 @@ enum desktop_message_type {
     DESKTOP_MODIFIED = 29,  /* window; a = 1 if it has changes that aren't saved, 0 if not
                                (the desktop asks before logging out, restarting or
                                shutting down with such windows open) */
+    DESKTOP_RELEASED = 30,  /* window; a = the buffer (0 or 1) the desktop no longer
+                               shows: the program may draw on it again */
 };
 
 /* DESKTOP_WM requests. MOVE and RESIZE start dragging the window with the

@@ -46,7 +46,7 @@ static int disk_count, chosen = -1;
 static bool with_linux = true;
 static bool booted_from_cd;
 /* From Vexa's icons (/share/icons). */
-static struct vx_image *disk_icon, *folder_icon, *program_icon, *computer_icon, *disc_icon;
+static struct vx_image *disk_icon, *folder_icon, *program_icon, *computer_icon, *brand;
 
 /* The account: full name, account name, password (twice); which is typed in. */
 enum { F_FULL, F_NAME, F_PASSWORD, F_AGAIN, FIELD_COUNT };
@@ -247,19 +247,6 @@ static void icon(struct vx_surface *s, const struct vx_image *image, int x, int 
     }
 }
 
-/* The Installer's mark: the CD (or, if it can't be read, a glossy rounded
- * square with a V in it). */
-static void logo(struct vx_surface *s, int x, int y, int size) {
-    if (disc_icon) {
-        icon(s, disc_icon, x - 4, y - 4, size + 8);
-        return;
-    }
-    vx_fill_rounded(s, x + 2, y + 4, size, size, size / 4, 0x000000, 50); /* Shadow. */
-    vx_draw_gel(s, x, y, size, size, size / 4, VX_COLOR_ACCENT);
-    const struct vx_font *f = bold(size * 6 / 10);
-    centered(s, f, x + size / 2, y + (size - vx_font_height(f)) / 2, "V", 0xffffff);
-}
-
 /* A button: the primary one a gel of `color`, the others plain. */
 static void button(struct vx_surface *s, int x, int y, int w, const char *label, bool primary,
                    uint32_t color, bool enabled, enum hit_kind kind) {
@@ -331,12 +318,13 @@ static void draw_sidebar(struct vx_surface *s) {
     }
     vx_fill(s, SIDEBAR - 1, 0, 1, HEIGHT, vx_mix(bottom, 0x000000, 80));
 
-    logo(s, 28, 30, 52);
-    text(s, bold(18), 92, 34, "Vexa", 0xffffff);
-    text(s, sans(13), 92, 58, "Installer", 0xc8cce0);
+    if (brand) {
+        vx_blit_alpha(s, 22, 24, 190, 76, &brand->surface);
+    }
+    text(s, sans(13), 28, 106, "Installer", 0xc8cce0);
 
     int current = current_step();
-    int y0 = 130, gap = 46;
+    int y0 = 146, gap = 44;
     for (int i = 0; i < STEP_COUNT; i++) {
         int cy = y0 + i * gap;
         if (i + 1 < STEP_COUNT) {
@@ -930,7 +918,7 @@ int main(void) {
     folder_icon = resource("user-folder");
     program_icon = resource("terminal");
     computer_icon = resource("computer");
-    disc_icon = resource("disc");
+    brand = vx_image_load("/share/logo.png", VX_IMAGE_ALPHA);
     find_disks();
     printf("installer: %d disk%s\n", disk_count, disk_count == 1 ? "" : "s");
     fflush(stdout);

@@ -33,13 +33,22 @@
 
 /* The window is the whole screen; the card is in its middle (see layout). */
 static int win_w, win_h, card_x, card_y;
+/* The scale: the page is laid out in design units (for a CARD_W x CARD_H card)
+ * and drawn at ui percent of that; the real sizes below are in pixels. */
+static int ui = 100;
+static int real_card_w, real_card_h, real_side, real_page_w;
+
+/* A design unit in pixels. */
+static int u(int v) {
+    return v * ui / 100;
+}
 static bool whole_window;   /* Everything needs drawing and showing (at first, and after a change). */
 
-enum page { P_WELCOME, P_LOOK, P_REGION, P_NETWORK, P_TOUR, P_DONE, PAGE_COUNT };
+enum page { P_WELCOME, P_WHO, P_LOOK, P_REGION, P_NETWORK, P_TOUR, P_DONE, PAGE_COUNT };
 
 enum hit_kind {
     H_NEXT, H_BACK, H_SKIP, H_THEME, H_ACCENT, H_LAYOUT, H_ZONE, H_ZONE_FIELD, H_TRY_FIELD,
-    H_NAME_FIELD, H_CHECK, H_SETTINGS, H_SOFTWARE, H_FINISH, H_STEP,
+    H_NAME_FIELD, H_CHECK, H_SETTINGS, H_SOFTWARE, H_FINISH, H_STEP, H_WHO_FIELD, H_FIND_ZONE,
 };
 
 struct hit {
@@ -64,12 +73,22 @@ static long page_age;                   /* How long the page being drawn has bee
 static int page, leaving = -1, slide_dir;
 static long page_since, slide_since;
 
+static struct vx_image *logo;           /* The Vexa logo (/share/logo.png). */
 static struct vx_user me;
 static char name_field[64], try_field[96], zone_search[48];
+static char who_field[64];              /* The name Vexa greets the user by (their own setting). */
+static bool who_changed;
 static int focus = -1;                  /* The text field with the keyboard, or -1. */
 static int zone_top;
 static int pointer_x, pointer_y;
 static bool name_changed;
+
+/* The time zone from the network (a thread asks, the page shows what it found). */
+enum { ZONE_IDLE, ZONE_RUNNING, ZONE_FOUND, ZONE_FAILED };
+static volatile int zone_state = ZONE_IDLE;
+static char zone_city[32];
+static char zone_note[96] = "Asks ip-api.com for it: your address is sent.";
+static struct vx_thread *zone_thread_handle;
 
 /* The network page: the internet check runs in a thread of its own. */
 enum { CHECK_IDLE, CHECK_RUNNING, CHECK_ONLINE, CHECK_OFFLINE };
@@ -239,9 +258,9 @@ static void make_scenery(void) {
         backdrop = make_surface(win_w, win_h);
     }
     if (!card_bg.pixels) {
-        card_bg = make_surface(CARD_W, CARD_H);
-        pages[0] = make_surface(PAGE_W, CARD_H);
-        pages[1] = make_surface(PAGE_W, CARD_H);
+        card_bg = make_surface(real_card_w, real_card_h);
+        pages[0] = make_surface(real_page_w, real_card_h);
+        pages[1] = make_surface(real_page_w, real_card_h);
     }
     whole_window = true;
     if (image) {
@@ -255,7 +274,7 @@ static void make_scenery(void) {
     }
     /* The frosted glass: the part behind the card, smaller, blurred, enlarged,
      * and mostly the window's color. */
-    struct vx_surface small = make_surface(CARD_W / 4, CARD_H / 4);
+    struct vx_surface small = make_surface(real_card_w / 4, real_card_h / 4);
     for (int y = 0; y < small.height; y++) {
         for (int x = 0; x < small.width; x++) {
             small.pixels[y * small.stride + x] =
@@ -265,30 +284,70 @@ static void make_scenery(void) {
     blur(&small, 4);
     enlarge(&card_bg, &small);
     free(small.pixels);
-    for (int y = 0; y < CARD_H; y++) {
-        for (int x = 0; x < CARD_W; x++) {
+    for (int y = 0; y < real_card_h; y++) {
+        for (int x = 0; x < real_card_w; x++) {
             uint32_t *p = &card_bg.pixels[(long)y * card_bg.stride + x];
             *p = vx_mix(*p, vx_theme.window, 224);
         }
     }
     /* The shadow, under the card (a few rounded rectangles, fainter outwards). */
     for (int i = 14; i >= 1; i--) {
-        vx_fill_rounded(&backdrop, card_x - i, card_y - i + 8, CARD_W + 2 * i, CARD_H + 2 * i, 22 + i,
+        vx_fill_rounded(&backdrop, card_x - i, card_y - i + 8, real_card_w + 2 * i, real_card_h + 2 * i, u(22) + i,
                         0x000000, 5);
     }
     theme_key = vx_theme.accent ^ (vx_theme.dark ? 0xa5a5a5a5u : 0);
 }
 
-/* The window's size (the screen's), and the card in its middle. */
+/* The window's size (the screen's), the scale that fits, and the card in its
+ * middle: a quarter bigger on a screen of 1920 x 1080, the design's size on
+ * 1280 x 800 (and up to half again on a bigger one). */
 static void layout(void) {
     win_w = window->surface.width;
     win_h = window->surface.height;
-    card_x = win_w > CARD_W ? (win_w - CARD_W) / 2 : 0;
-    card_y = win_h > CARD_H ? (win_h - CARD_H) / 2 : 0;
+    int by_width = win_w * 100 / 1280, by_height = win_h * 100 / 800;
+    ui = (by_width < by_height ? by_width : by_height) / 25 * 25;
+    ui = ui < 100 ? 100 : ui > 150 ? 150 : ui;
+    real_card_w = u(CARD_W);
+    real_card_h = u(CARD_H);
+    real_side = u(SIDEBAR);
+    real_page_w = u(PAGE_W);
+    card_x = win_w > real_card_w ? (win_w - real_card_w) / 2 : 0;
+    card_y = win_h > real_card_h ? (win_h - real_card_h) / 2 : 0;
     whole_window = true;
 }
 
 /* ---- Drawing ---- */
+
+/* Drawing on the page, in design units. Edges are scaled (not sizes), so a
+ * line one unit thick stays whole, and gradients have no gaps between rows. */
+static void fill(int x, int y, int w, int h, uint32_t color) {
+    int x0 = u(x), y0 = u(y);
+    vx_fill(S, x0, y0, u(x + w) - x0, u(y + h) - y0, color);
+}
+
+static void fill_rounded(int x, int y, int w, int h, int r, uint32_t color, int alpha) {
+    int x0 = u(x), y0 = u(y);
+    vx_fill_rounded(S, x0, y0, u(x + w) - x0, u(y + h) - y0, u(r), color, alpha);
+}
+
+static void gel(int x, int y, int w, int h, int r, uint32_t color) {
+    int x0 = u(x), y0 = u(y);
+    vx_draw_gel(S, x0, y0, u(x + w) - x0, u(y + h) - y0, u(r), color);
+}
+
+static void field(int x, int y, int w, const char *text, bool focused) {
+    vx_draw_field(S, u(x), u(y), u(x + w) - u(x), text, focused);
+}
+
+static void text_fit(int x, int y, int w, const char *text, uint32_t color, uint32_t background) {
+    vx_draw_text_fit(S, u(x), u(y), u(x + w) - u(x), text, color, background);
+}
+
+/* A picture (an image) in a box, in design units. */
+static void picture(const struct vx_image *image, int x, int y, int w, int h) {
+    int x0 = u(x), y0 = u(y);
+    vx_blit_alpha(S, x0, y0, u(x + w) - x0, u(y + h) - y0, &image->surface);
+}
 
 static const struct vx_font *bold(int size) {
     return vx_font(VX_FACE_BOLD, size);
@@ -299,18 +358,18 @@ static const struct vx_font *sans(int size) {
 }
 
 static int text_at(int x, int y, const struct vx_font *font, const char *text, uint32_t color) {
-    return vx_text(S, font, x, y, text, color, VX_TRANSPARENT);
+    return vx_text(S, font, u(x), u(y), text, color, VX_TRANSPARENT);
 }
 
 static void centered(int cx, int y, const struct vx_font *font, const char *text, uint32_t color) {
-    text_at(cx - vx_text_width_font(font, text) / 2, y, font, text, color);
+    vx_text(S, font, u(cx) - vx_text_width_font(font, text) / 2, u(y), text, color, VX_TRANSPARENT);
 }
 
 /* A paragraph, wrapped, in lines of `line` pixels; returns the y below it. */
 static int paragraph(int x, int y, int width, int line, const struct vx_font *font, const char *text,
                      uint32_t color, bool center) {
     char lines[8][160];
-    int n = vx_text_wrap(lines, 8, text, width, font);
+    int n = vx_text_wrap(lines, 8, text, u(width), font);
     for (int i = 0; i < n; i++) {
         if (center) {
             centered(x + width / 2, y, font, lines[i], color);
@@ -327,7 +386,8 @@ static struct hit *add_hit(int x, int y, int w, int h, enum hit_kind kind, int i
     if (hit_count == (int)(sizeof(hits) / sizeof(hits[0]))) {
         return &spare;
     }
-    hits[hit_count] = (struct hit){x + hit_dx, y, w, h, kind, index};
+    int x0 = u(x + hit_dx), y0 = u(y);
+    hits[hit_count] = (struct hit){x0, y0, u(x + hit_dx + w) - x0, u(y + h) - y0, kind, index};
     return &hits[hit_count++];
 }
 
@@ -341,7 +401,8 @@ static void button(int x, int y, int w, int h, const char *label, bool primary, 
                    int index) {
     struct hit *hit = add_hit(x, y, w, h, kind, index);
     unsigned flags = primary || hot(hit) ? VX_BUTTON_HOT : 0;
-    vx_draw_button_flags(S, x, y, w, h, label, flags);
+    int x0 = u(x), y0 = u(y);
+    vx_draw_button_flags(S, x0, y0, u(x + w) - x0, u(y + h) - y0, label, flags);
 }
 
 static uint32_t card_color(void) {
@@ -351,18 +412,18 @@ static uint32_t card_color(void) {
 /* A rounded panel inside a page. */
 static void panel(int x, int y, int w, int h) {
     uint32_t edge = vx_theme.dark ? vx_mix(vx_theme.window, 0xffffff, 30) : 0xd5d9e1;
-    vx_fill_rounded(S, x, y, w, h, 10, edge, 255);
-    vx_fill_rounded(S, x + 1, y + 1, w - 2, h - 2, 9, card_color(), 255);
+    fill_rounded(x, y, w, h, 10, edge, 255);
+    fill_rounded(x + 1, y + 1, w - 2, h - 2, 9, card_color(), 255);
 }
 
 /* A tick: two strokes. */
 static void tick(int x, int y, int size, uint32_t color) {
     int t = size / 6 > 1 ? size / 6 : 2;
     for (int i = 0; i <= size * 3 / 8; i++) {
-        vx_fill(S, x + i, y + size / 2 + i - t / 2, t, t, color);
+        fill(x + i, y + size / 2 + i - t / 2, t, t, color);
     }
     for (int i = 0; i <= size * 5 / 8; i++) {
-        vx_fill(S, x + size * 3 / 8 + i, y + size / 2 + size * 3 / 8 - i - t / 2, t, t, color);
+        fill(x + size * 3 / 8 + i, y + size / 2 + size * 3 / 8 - i - t / 2, t, t, color);
     }
 }
 
@@ -381,7 +442,7 @@ static void icon(const char *name, int x, int y, int size) {
         }
         if (!strcmp(cache[i].name, name)) {
             if (cache[i].image) {
-                vx_blit_alpha(S, x, y, size, size, &cache[i].image->surface);
+                picture(cache[i].image, x, y, size, size);
             }
             return;
         }
@@ -390,13 +451,13 @@ static void icon(const char *name, int x, int y, int size) {
 
 /* A key on a keyboard; returns its width. */
 static int keycap(int x, int y, const char *label) {
-    int w = vx_text_width_font(sans(12), label) + 18;
+    int w = vx_text_width_font(sans(12), label) * 100 / ui + 18;
     w = w < 30 ? 30 : w;
     uint32_t face = vx_theme.dark ? 0x4a4a4e : 0xffffff;
     uint32_t edge = vx_theme.dark ? 0x232325 : 0xaab0bb;
-    vx_fill_rounded(S, x, y + 2, w, 24, 6, edge, 255);
-    vx_fill_rounded(S, x, y, w, 24, 6, vx_mix(edge, face, 120), 255);
-    vx_fill_rounded(S, x + 1, y + 1, w - 2, 21, 5, face, 255);
+    fill_rounded(x, y + 2, w, 24, 6, edge, 255);
+    fill_rounded(x, y, w, 24, 6, vx_mix(edge, face, 120), 255);
+    fill_rounded(x + 1, y + 1, w - 2, 21, 5, face, 255);
     centered(x + w / 2, y + 3, sans(12), label, VX_COLOR_TEXT);
     return w;
 }
@@ -423,11 +484,11 @@ static int keys(int x, int y, const char *combo) {
 
 static void header(const char *title, const char *about) {
     text_at(MARGIN, 36 + rise(0), bold(27), title, VX_COLOR_TEXT);
-    vx_draw_text_fit(S, MARGIN, 76 + rise(1), PAGE_W - 2 * MARGIN, about, VX_COLOR_DIM, VX_TRANSPARENT);
+    text_fit(MARGIN, 76 + rise(1), PAGE_W - 2 * MARGIN, about, VX_COLOR_DIM, VX_TRANSPARENT);
 }
 
 static void footer(bool back, const char *next) {
-    vx_fill(S, MARGIN, FOOTER_Y - 8, PAGE_W - 2 * MARGIN, 1, VX_COLOR_LINE);
+    fill(MARGIN, FOOTER_Y - 8, PAGE_W - 2 * MARGIN, 1, VX_COLOR_LINE);
     if (back) {
         button(MARGIN, FOOTER_Y + 10, 96, 34, "Back", false, H_BACK, 0);
     }
@@ -464,43 +525,39 @@ static void mini_desktop(int x, int y, int w, int h, bool dark, uint32_t accent)
     vx_theme_make(&t, dark ? "dark" : "light", accent_name);
     uint32_t sky = vx_mix(accent, 0, dark ? 150 : 70), deep = vx_mix(accent, 0, dark ? 230 : 200);
     for (int row = 0; row < h; row++) {
-        vx_fill(S, x, y + row, w, 1, vx_mix(sky, deep, row * 255 / (h - 1)));
+        fill(x, y + row, w, 1, vx_mix(sky, deep, row * 255 / (h - 1)));
     }
-    vx_fill(S, x, y, w, 8, vx_mix(t.panel, sky, 60));
-    vx_fill_rounded(S, x + 3, y + 2, 14, 5, 2, t.accent, 255);
+    fill(x, y, w, 8, vx_mix(t.panel, sky, 60));
+    fill_rounded(x + 3, y + 2, 14, 5, 2, t.accent, 255);
     int wx = x + 20, wy = y + 20, ww = w - 40, wh = h - 30;
-    vx_fill_rounded(S, wx - 1, wy + 1, ww + 2, wh + 3, 6, 0x000000, 70);
-    vx_fill_rounded(S, wx, wy, ww, wh, 5, t.window, 255);
-    vx_fill_rounded(S, wx, wy, ww, 12, 5, t.title_focused, 255);
-    vx_fill(S, wx, wy + 7, ww, 5, t.title_focused);
+    fill_rounded(wx - 1, wy + 1, ww + 2, wh + 3, 6, 0x000000, 70);
+    fill_rounded(wx, wy, ww, wh, 5, t.window, 255);
+    fill_rounded(wx, wy, ww, 12, 5, t.title_focused, 255);
+    fill(wx, wy + 7, ww, 5, t.title_focused);
     static const uint32_t balls[3] = {0xfebc2e, 0x2ac845, 0xff5f57};
     for (int i = 0; i < 3; i++) {
-        vx_draw_gel(S, wx + ww - 27 + i * 9, wy + 3, 7, 7, 3, balls[i]);
+        gel(wx + ww - 27 + i * 9, wy + 3, 7, 7, 3, balls[i]);
     }
-    vx_fill(S, wx, wy + 12, 28, wh - 12, t.sidebar);
-    vx_fill_rounded(S, wx + 3, wy + 16, 22, 6, 3, t.accent, 255);
-    vx_fill(S, wx + 36, wy + 18, 50, 5, t.text);
-    vx_fill(S, wx + 36, wy + 28, ww - 48, 3, t.dim);
-    vx_fill(S, wx + 36, wy + 35, ww - 60, 3, t.dim);
-    vx_draw_gel(S, wx + ww - 36, wy + wh - 14, 28, 9, 4, t.accent);
+    fill(wx, wy + 12, 28, wh - 12, t.sidebar);
+    fill_rounded(wx + 3, wy + 16, 22, 6, 3, t.accent, 255);
+    fill(wx + 36, wy + 18, 50, 5, t.text);
+    fill(wx + 36, wy + 28, ww - 48, 3, t.dim);
+    fill(wx + 36, wy + 35, ww - 60, 3, t.dim);
+    gel(wx + ww - 36, wy + wh - 14, 28, 9, 4, t.accent);
 }
 
 static void page_welcome(void) {
     int cx = PAGE_W / 2;
-    /* The mark, floating a little. */
-    int bob = (int)((now_ms() / 40) % 64);
-    bob = (bob < 32 ? bob : 64 - bob) / 8 - 2;
-    int top = 44 + bob + rise(0);
-    vx_fill_rounded(S, cx - 46, top + 8, 96, 96, 26, 0x000000, 40);
-    vx_fill_rounded(S, cx - 48, top + 4, 96, 96, 26, 0x000000, 30);
-    vx_draw_gel(S, cx - 48, top, 96, 96, 26, VX_COLOR_ACCENT);
-    centered(cx, top + 14, bold(62), "V", 0xffffff);
+    /* The logo, at the top (it settles in with the rest, then stays still). */
+    if (logo) {
+        picture(logo, cx - 150, 26 + rise(0) / 2, 300, 120);
+    }
     if (shown(1)) {
         centered(cx, 168 + rise(1), bold(36), "Welcome to Vexa", VX_COLOR_TEXT);
     }
     if (shown(2)) {
         char hi[120];
-        snprintf(hi, sizeof(hi), "Hello, %s.", me.full_name[0] ? me.full_name : me.name);
+        snprintf(hi, sizeof(hi), "Hello, %s.", who_field[0] ? who_field : me.full_name[0] ? me.full_name : me.name);
         centered(cx, 222 + rise(2), bold(19), hi, VX_COLOR_ACCENT);
     }
     if (shown(3)) {
@@ -525,6 +582,24 @@ static void page_welcome(void) {
     centered(cx, 452, sans(12), "Skip for now", hot(skip) ? VX_COLOR_TEXT : VX_COLOR_DIM);
 }
 
+/* The name of the user (as Vexa greets them) and the computer's name. */
+static void page_who(void) {
+    header("Who will use this computer?", "Vexa greets you by your name. The computer's name is how other computers see it.");
+    int y = 116 + rise(2);
+    panel(MARGIN, y, PAGE_W - 2 * MARGIN, 96);
+    text_at(MARGIN + 18, y + 14, bold(14), "Your name", VX_COLOR_TEXT);
+    text_at(MARGIN + 18, y + 36, sans(12), "Leave it as it is to use your account's name.", VX_COLOR_DIM);
+    field(MARGIN + 18, y + 58, 360, who_field, focus == H_WHO_FIELD);
+    add_hit(MARGIN + 18, y + 58, 360, 24, H_WHO_FIELD, 0);
+    y += 116;
+    panel(MARGIN, y, PAGE_W - 2 * MARGIN, 96);
+    text_at(MARGIN + 18, y + 14, bold(14), "Name this computer", VX_COLOR_TEXT);
+    text_at(MARGIN + 18, y + 36, sans(12), "Other computers on the network will see it.", VX_COLOR_DIM);
+    field(MARGIN + 18, y + 58, 360, name_field, focus == H_NAME_FIELD);
+    add_hit(MARGIN + 18, y + 58, 360, 24, H_NAME_FIELD, 0);
+    footer(true, "Next");
+}
+
 static void page_look(void) {
     header("Make it yours", "Pick a look. Everything follows at once, this window too.");
     const char *theme = setting("theme", "light"), *accent = setting("accent", VX_ACCENT_DEFAULT);
@@ -537,32 +612,33 @@ static void page_look(void) {
         bool on = !strcmp(theme, values[i]);
         struct hit *hit = add_hit(x - 4, y - 4, pw + 8, ph + 44, H_THEME, i);
         if (on) {
-            vx_fill_rounded(S, x - 4, y - 4, pw + 8, ph + 8, 12, VX_COLOR_ACCENT, 255);
-            vx_fill_rounded(S, x - 2, y - 2, pw + 4, ph + 4, 10, card_color(), 255);
+            fill_rounded(x - 4, y - 4, pw + 8, ph + 8, 12, VX_COLOR_ACCENT, 255);
+            fill_rounded(x - 2, y - 2, pw + 4, ph + 4, 10, card_color(), 255);
         } else if (hot(hit)) {
-            vx_fill_rounded(S, x - 3, y - 3, pw + 6, ph + 6, 11, vx_mix(card_color(), VX_COLOR_ACCENT, 120), 255);
-            vx_fill_rounded(S, x - 2, y - 2, pw + 4, ph + 4, 10, card_color(), 255);
+            fill_rounded(x - 3, y - 3, pw + 6, ph + 6, 11, vx_mix(card_color(), VX_COLOR_ACCENT, 120), 255);
+            fill_rounded(x - 2, y - 2, pw + 4, ph + 4, 10, card_color(), 255);
         }
         if (i == 2) { /* Light on the left, dark on the right, cut aslant. */
             mini_desktop(x, y, pw, ph, false, accent_color);
-            struct vx_surface right = make_surface(pw, ph);
+            struct vx_surface right = make_surface(u(pw), u(ph));
             struct vx_surface *keep = S;
             S = &right;
             mini_desktop(0, 0, pw, ph, true, accent_color);
             S = keep;
-            for (int row = 0; row < ph; row++) {
-                int cut = pw / 2 + (ph / 2 - row) * 2 / 5;
-                memcpy(S->pixels + (long)(y + row) * S->stride + x + cut,
-                       right.pixels + (long)row * right.stride + cut, (size_t)(pw - cut) * 4);
+            int rx = u(x), ry = u(y), rw = u(pw), rh = u(ph);
+            for (int row = 0; row < rh; row++) {
+                int cut = rw / 2 + (rh / 2 - row) * 2 / 5;
+                memcpy(S->pixels + (long)(ry + row) * S->stride + rx + cut,
+                       right.pixels + (long)row * right.stride + cut, (size_t)(rw - cut) * 4);
             }
             free(right.pixels);
         } else {
             mini_desktop(x, y, pw, ph, i == 1, accent_color);
         }
-        round_corners(S, &card_bg, x, y, pw, ph, 8); /* (Close enough at its edge.) */
+        round_corners(S, &card_bg, u(x), u(y), u(x + pw) - u(x), u(y + ph) - u(y), u(8)); /* (Close enough at its edge.) */
         if (on) {
-            vx_fill_rounded(S, x + pw - 26, y + 6, 22, 22, 11, 0xffffff, 255);
-            vx_draw_gel(S, x + pw - 24, y + 8, 18, 18, 9, VX_COLOR_ACCENT);
+            fill_rounded(x + pw - 26, y + 6, 22, 22, 11, 0xffffff, 255);
+            gel(x + pw - 24, y + 8, 18, 18, 9, VX_COLOR_ACCENT);
             tick(x + pw - 20, y + 11, 11, 0xffffff);
         }
         centered(x + pw / 2, y + ph + 10, on ? bold(14) : sans(14), titles[i], VX_COLOR_TEXT);
@@ -575,11 +651,11 @@ static void page_look(void) {
         bool on = !strcmp(accent, vx_accents[i].name);
         struct hit *hit = add_hit(cx - step / 2, cy - 26, step, 70, H_ACCENT, i);
         if (on) {
-            vx_fill_rounded(S, cx - 24, cy - 24, 48, 48, 24, vx_accents[i].color, 255);
-            vx_fill_rounded(S, cx - 22, cy - 22, 44, 44, 22, card_color(), 255);
+            fill_rounded(cx - 24, cy - 24, 48, 48, 24, vx_accents[i].color, 255);
+            fill_rounded(cx - 22, cy - 22, 44, 44, 22, card_color(), 255);
         }
         int r = on || hot(hit) ? 18 : 16;
-        vx_draw_gel(S, cx - r, cy - r, 2 * r, 2 * r, r, vx_accents[i].color);
+        gel(cx - r, cy - r, 2 * r, 2 * r, r, vx_accents[i].color);
         if (on) {
             tick(cx - 8, cy - 9, 16, 0xffffff);
         }
@@ -616,6 +692,92 @@ static int matching_zones(int *out, int max) {
     return n;
 }
 
+/* ---- The time zone from the network ---- */
+
+/* Asks for the time zone of this computer's internet address (ip-api.com, over
+ * plain HTTP: the address is sent, and only that). It answers the zone's name
+ * ("America/New_York") and the offset in seconds, on two lines. */
+static void *find_zone(void *arg) {
+    (void)arg;
+    int result = ZONE_FAILED;
+    int handle = vx_connect_to("ip-api.com", 80);
+    if (handle >= 0) {
+        static const char request[] = "GET /line/?fields=timezone,offset HTTP/1.0\r\nHost: ip-api.com\r\n\r\n";
+        static char reply[512];
+        size_t got = 0;
+        if (vx_write(handle, request, sizeof(request) - 1) > 0) {
+            long n;
+            while (got < sizeof(reply) - 1 && (n = vx_read(handle, reply + got, sizeof(reply) - 1 - got)) > 0) {
+                got += (size_t)n;
+            }
+        }
+        vx_close(handle);
+        reply[got] = '\0';
+        char *body = strstr(reply, "\r\n\r\n");
+        if (body) {
+            body += 4;
+            char name[64] = "";
+            size_t length = strcspn(body, "\r\n");
+            if (length && length < sizeof(name)) {
+                memcpy(name, body, length);
+                name[length] = '\0';
+            }
+            char city[32];
+            const char *slash = strrchr(name, '/');
+            snprintf(city, sizeof(city), "%s", slash ? slash + 1 : name);
+            for (char *c = city; *c; c++) {
+                *c = *c == '_' ? ' ' : *c;
+            }
+            const struct vx_zone *zone = vx_find_zone(city);
+            if (!zone) { /* Not a city of ours: the zone with that offset (now, or standard). */
+                char *after = body + length;
+                long minutes = strtol(after + strspn(after, "\r\n"), NULL, 10) / 60;
+                for (int i = 0; i < vx_zone_count && !zone; i++) {
+                    if (vx_zones[i].offset == minutes || vx_zones[i].offset == minutes - 60) {
+                        zone = &vx_zones[i];
+                    }
+                }
+            }
+            if (zone) {
+                snprintf(zone_city, sizeof(zone_city), "%s", zone->city);
+                result = ZONE_FOUND;
+            }
+        }
+    }
+    __atomic_store_n(&zone_state, result, __ATOMIC_SEQ_CST);
+    return NULL;
+}
+
+static void start_zone_lookup(void) {
+    if (zone_state == ZONE_RUNNING) {
+        return;
+    }
+    if (zone_thread_handle) {
+        vx_thread_join(zone_thread_handle);
+        zone_thread_handle = NULL;
+    }
+    zone_state = ZONE_RUNNING;
+    zone_thread_handle = vx_thread_create(find_zone, NULL);
+    if (!zone_thread_handle) {
+        zone_state = ZONE_FAILED;
+    }
+}
+
+/* When the lookup has an answer: the time zone is set to it (on the main
+ * thread, where the settings are). */
+static void settle_zone(void) {
+    if (zone_state != ZONE_FOUND && zone_state != ZONE_FAILED) {
+        return;
+    }
+    if (zone_state == ZONE_FOUND) {
+        apply("time_zone", zone_city);
+        snprintf(zone_note, sizeof(zone_note), "Time zone set to %s.", zone_city);
+    } else {
+        snprintf(zone_note, sizeof(zone_note), "Couldn't find it. Is the network connected?");
+    }
+    zone_state = ZONE_IDLE;
+}
+
 static void page_region(void) {
     header("Keyboard and time", "So the keys type what they say, and the clock is right.");
     /* The layouts. */
@@ -627,21 +789,21 @@ static void page_region(void) {
         bool on = !strcmp(layout, layouts[i][0]);
         struct hit *hit = add_hit(lx - 4, y - 3, 270, 30, H_LAYOUT, i);
         if (on) {
-            vx_draw_gel(S, lx - 4, y - 3, 270, 28, 8, VX_COLOR_ACCENT);
+            gel(lx - 4, y - 3, 270, 28, 8, VX_COLOR_ACCENT);
         } else if (hot(hit)) {
-            vx_fill_rounded(S, lx - 4, y - 3, 270, 28, 8, vx_mix(card_color(), VX_COLOR_ACCENT, 50), 255);
+            fill_rounded(lx - 4, y - 3, 270, 28, 8, vx_mix(card_color(), VX_COLOR_ACCENT, 50), 255);
         }
         text_at(lx + 8, y + 2, sans(14), layouts[i][1], on ? 0xffffff : VX_COLOR_TEXT);
     }
     /* Try the keys. */
     int ty = ly + 28 + 6 * 31 + 8;
     text_at(lx, ty, sans(12), "Try it:", VX_COLOR_DIM);
-    vx_draw_field(S, lx + 44, ty - 4, 222, try_field, focus == H_TRY_FIELD);
+    field(lx + 44, ty - 4, 222, try_field, focus == H_TRY_FIELD);
     add_hit(lx + 44, ty - 4, 222, 24, H_TRY_FIELD, 0);
     /* The time zones. */
     int zx = 340, zw = PAGE_W - MARGIN - zx;
     text_at(zx, ly, bold(15), "Time zone", VX_COLOR_TEXT);
-    vx_draw_field(S, zx, ly + 24, zw, zone_search[0] || focus == H_ZONE_FIELD ? zone_search : "", focus == H_ZONE_FIELD);
+    field(zx, ly + 24, zw, zone_search[0] || focus == H_ZONE_FIELD ? zone_search : "", focus == H_ZONE_FIELD);
     if (!zone_search[0] && focus != H_ZONE_FIELD) {
         text_at(zx + 8, ly + 28, sans(13), "Search for a city", VX_COLOR_DIM);
     }
@@ -661,16 +823,16 @@ static void page_region(void) {
         bool on = !strcmp(zone, vx_zones[i].city);
         struct hit *hit = add_hit(zx + 4, y, zw - 8 - 10, row_h, H_ZONE, i);
         if (on) {
-            vx_draw_gel(S, zx + 4, y, zw - 18, row_h - 2, 7, VX_COLOR_ACCENT);
+            gel(zx + 4, y, zw - 18, row_h - 2, 7, VX_COLOR_ACCENT);
         } else if (hot(hit)) {
-            vx_fill_rounded(S, zx + 4, y, zw - 18, row_h - 2, 7, vx_mix(card_color(), VX_COLOR_ACCENT, 50), 255);
+            fill_rounded(zx + 4, y, zw - 18, row_h - 2, 7, vx_mix(card_color(), VX_COLOR_ACCENT, 50), 255);
         }
         char line[80], offset[24];
         int minutes = vx_zones[i].offset;
         snprintf(offset, sizeof(offset), "UTC%+d:%02d", minutes / 60, (minutes < 0 ? -minutes : minutes) % 60);
         snprintf(line, sizeof(line), "%s", vx_zones[i].city);
         text_at(zx + 12, y + 4, sans(14), line, on ? 0xffffff : VX_COLOR_TEXT);
-        int w = vx_text_width_font(sans(12), offset);
+        int w = vx_text_width_font(sans(12), offset) * 100 / ui;
         text_at(zx + zw - 22 - w, y + 5, sans(12), offset, on ? 0xe8f4f2 : VX_COLOR_DIM);
     }
     if (!n) {
@@ -680,7 +842,7 @@ static void page_region(void) {
         int bar = (rows * row_h) * rows / n;
         bar = bar < 24 ? 24 : bar;
         int at = list_y + 4 + (rows * row_h - bar) * zone_top / (n - rows);
-        vx_fill_rounded(S, zx + zw - 8, at, 4, bar, 2, VX_COLOR_DIM, 255);
+        fill_rounded(zx + zw - 8, at, 4, bar, 2, VX_COLOR_DIM, 255);
     }
     /* What time it is there. */
     struct vx_date date;
@@ -689,6 +851,11 @@ static void page_region(void) {
     snprintf(clock, sizeof(clock), "It's %02d:%02d on %s %d%s.", date.hour, date.minute,
              vx_month_names[date.month - 1], date.day, zone[0] ? "" : " (set a city)");
     text_at(zx, list_y + rows * row_h + 18, sans(13), clock, VX_COLOR_DIM);
+    /* From the network: the button, and what's happening with it. */
+    button(zx + zw - 190, ly - 4, 190, 24, "From my network", false, H_FIND_ZONE, 0);
+    text_fit(zx, list_y + rows * row_h + 36, zw, zone_state == ZONE_RUNNING ? "Asking for your time zone..."
+                                                                            : zone_note,
+             VX_COLOR_DIM, VX_TRANSPARENT);
     footer(true, "Next");
 }
 
@@ -765,7 +932,7 @@ static void page_network(void) {
         text_at(x, y + 32, sans(14), line, VX_COLOR_DIM);
     } else {
         text_at(x, y, bold(18), "Connected", VX_COLOR_TEXT);
-        vx_fill_rounded(S, x + 112, y + 3, 18, 18, 9, 0x3fbf6f, 255);
+        fill_rounded(x + 112, y + 3, 18, 18, 9, 0x3fbf6f, 255);
         tick(x + 116, y + 6, 11, 0xffffff);
         snprintf(line, sizeof(line), "Wired (%s). Address %s.", card.name, vx_format_ipv4(card.address, ip));
         text_at(x, y + 32, sans(14), line, VX_COLOR_DIM);
@@ -784,15 +951,15 @@ static void page_network(void) {
             int phase = (int)(now_ms() / 120 % 8);
             for (int i = 0; i < 8; i++) {
                 int d = (phase + 8 - i) % 8;
-                vx_fill_rounded(S, x + 2 + i * 6, cy + 6, 4, 10, 2, vx_mix(VX_COLOR_ACCENT, card_color(), d * 30), 255);
+                fill_rounded(x + 2 + i * 6, cy + 6, 4, 10, 2, vx_mix(VX_COLOR_ACCENT, card_color(), d * 30), 255);
             }
             text_at(x + 62, cy + 3, sans(14), "Checking the internet", VX_COLOR_DIM);
         } else if (state == CHECK_ONLINE) {
-            vx_fill_rounded(S, x, cy, 22, 22, 11, 0x3fbf6f, 255);
+            fill_rounded(x, cy, 22, 22, 11, 0x3fbf6f, 255);
             tick(x + 5, cy + 5, 12, 0xffffff);
             text_at(x + 32, cy + 3, bold(14), "Online: Vexa can reach the internet", VX_COLOR_TEXT);
         } else {
-            vx_fill_rounded(S, x, cy, 22, 22, 11, 0xf0ad4e, 255);
+            fill_rounded(x, cy, 22, 22, 11, 0xf0ad4e, 255);
             centered(x + 11, cy + 2, bold(15), "!", 0xffffff);
             text_at(x + 32, cy + 3, bold(14), "Can't reach the internet", VX_COLOR_TEXT);
             paragraph(x + 32, cy + 28, PAGE_W - x - MARGIN - 32, 20, sans(13),
@@ -804,14 +971,7 @@ static void page_network(void) {
             button(PAGE_W - MARGIN - 130, y + 88, 130, 30, "Check Again", false, H_CHECK, 0);
         }
     }
-    /* The computer's name. */
-    int ny = 288 + rise(4);
-    panel(MARGIN, ny, PAGE_W - 2 * MARGIN, 82);
-    text_at(MARGIN + 18, ny + 14, bold(14), "Name this computer", VX_COLOR_TEXT);
-    text_at(MARGIN + 18, ny + 38, sans(12), "Other computers on the network will see it.", VX_COLOR_DIM);
-    vx_draw_field(S, PAGE_W - MARGIN - 250, ny + 28, 232, name_field, focus == H_NAME_FIELD);
-    add_hit(PAGE_W - MARGIN - 250, ny + 28, 232, 24, H_NAME_FIELD, 0);
-    text_at(MARGIN, ny + 96, sans(12), "Wi-Fi isn't supported yet. A wired card connects as soon as the cable is in.",
+    text_at(MARGIN, 300 + rise(4), sans(12), "Wi-Fi isn't supported yet. A wired card connects as soon as the cable is in.",
             VX_COLOR_DIM);
     footer(true, "Next");
 }
@@ -852,9 +1012,9 @@ static void page_done(void) {
     /* A ring that fills in, with a tick. */
     int t = ease(page_age, 700);
     int top = 40 + rise(0);
-    vx_fill_rounded(S, cx - 46, top + 6, 92, 92, 46, vx_mix(card_color(), 0x3fbf6f, 60), 255);
+    fill_rounded(cx - 46, top + 6, 92, 92, 46, vx_mix(card_color(), 0x3fbf6f, 60), 255);
     if (t > 120) {
-        vx_draw_gel(S, cx - 40, top + 12, 80, 80, 40, 0x3fbf6f);
+        gel(cx - 40, top + 12, 80, 80, 40, 0x3fbf6f);
     }
     if (t > 500) {
         tick(cx - 22, top + 30, 44, 0xffffff);
@@ -892,7 +1052,7 @@ static void page_done(void) {
         icon(rows[i].icon, x, y, 36);
         text_at(x + 46, y + 1, sans(12), rows[i].label, VX_COLOR_DIM);
         snprintf(line, sizeof(line), "%s", rows[i].value);
-        vx_draw_text_fit(S, x + 46, y + 17, 190, line, VX_COLOR_TEXT, VX_TRANSPARENT);
+        text_fit(x + 46, y + 17, 190, line, VX_COLOR_TEXT, VX_TRANSPARENT);
     }
     paragraph(cx - 270, 336 + rise(6), 540, 20, sans(13),
               "Find this tour again in the Vexa menu, under System, Welcome. Enjoy.",
@@ -906,14 +1066,15 @@ static void draw_page(struct vx_surface *target, int p, long age) {
     S = target;
     page_age = age;
     /* The card's glass, beside the steps. */
-    for (int y = 0; y < CARD_H; y++) {
-        memcpy(S->pixels + (long)y * S->stride, card_bg.pixels + (long)y * card_bg.stride + SIDEBAR,
-               (size_t)PAGE_W * 4);
+    for (int y = 0; y < real_card_h; y++) {
+        memcpy(S->pixels + (long)y * S->stride, card_bg.pixels + (long)y * card_bg.stride + real_side,
+               (size_t)real_page_w * 4);
     }
     hit_count = 0;
     hit_dx = SIDEBAR;
     switch (p) {
     case P_WELCOME: page_welcome(); break;
+    case P_WHO: page_who(); break;
     case P_LOOK: page_look(); break;
     case P_REGION: page_region(); break;
     case P_NETWORK: page_network(); break;
@@ -926,47 +1087,48 @@ static void draw_page(struct vx_surface *target, int p, long age) {
 /* ---- The steps, down the left (as in the Installer's sidebar) ---- */
 
 static void disc(int cx, int cy, int r, uint32_t color) {
-    vx_fill_rounded(S, cx - r, cy - r, 2 * r, 2 * r, r, color, 255);
+    fill_rounded(cx - r, cy - r, 2 * r, 2 * r, r, color, 255);
 }
 
 /* Drawn over the card's left side, in the card's own coordinates (the hits
  * too), so a click on a step done goes back to it. */
 static void rail(struct vx_surface *win) {
-    static const char *const names[PAGE_COUNT] = {"Welcome", "Your look", "Keyboard and time",
-                                                  "Network", "Tour", "Finish"};
+    static const char *const names[PAGE_COUNT] = {"Welcome", "Your name", "Your look",
+                                                  "Keyboard and time", "Network", "Tour", "Finish"};
     static struct vx_surface view;
-    view = (struct vx_surface){win->pixels + (long)card_y * win->stride + card_x, SIDEBAR, CARD_H, win->stride};
+    view = (struct vx_surface){win->pixels + (long)card_y * win->stride + card_x, real_side, real_card_h,
+                               win->stride};
     struct vx_surface *keep = S;
     S = &view;
     hit_dx = 0;
     uint32_t top = vx_mix(0x1c2033, VX_COLOR_ACCENT, 70), bottom = vx_mix(0x0d0f18, VX_COLOR_ACCENT, 25);
     for (int row = 0; row < CARD_H; row++) {
-        vx_fill(S, 0, row, SIDEBAR, 1, vx_mix(top, bottom, row * 255 / (CARD_H - 1)));
+        fill(0, row, SIDEBAR, 1, vx_mix(top, bottom, row * 255 / (CARD_H - 1)));
     }
     for (int row = 0; row < 120; row++) { /* A soft sheen across the top. */
-        vx_fill_rounded(S, 0, row, SIDEBAR, 1, 0, 0xffffff, (120 - row) * 18 / 120);
+        fill_rounded(0, row, SIDEBAR, 1, 0, 0xffffff, (120 - row) * 18 / 120);
     }
-    vx_fill(S, SIDEBAR - 1, 0, 1, CARD_H, vx_mix(bottom, 0x000000, 80));
+    fill(SIDEBAR - 1, 0, 1, CARD_H, vx_mix(bottom, 0x000000, 80));
 
-    vx_draw_gel(S, 20, 24, 44, 44, 14, VX_COLOR_ACCENT);
-    centered(42, 30, bold(26), "V", 0xffffff);
-    text_at(78, 28, bold(16), "Vexa Setup", 0xffffff);
+    if (logo) {
+        picture(logo, 18, 16, 196, 78);
+    }
     char step[32];
     snprintf(step, sizeof(step), "Step %d of %d", page + 1, PAGE_COUNT);
-    text_at(78, 50, sans(12), step, 0xc8cce0);
+    text_at(22, 100, sans(12), step, 0xc8cce0);
 
-    int y0 = 124, gap = 50;
+    int y0 = 142, gap = 44;
     for (int i = 0; i < PAGE_COUNT; i++) {
         int cy = y0 + i * gap;
         if (i + 1 < PAGE_COUNT) { /* The line to the next: lit where it's done. */
-            vx_fill(S, 41, cy + 13, 2, gap - 26, i < page ? VX_COLOR_ACCENT : 0x4a4f66);
+            fill(41, cy + 13, 2, gap - 26, i < page ? VX_COLOR_ACCENT : 0x4a4f66);
         }
         struct hit *hit = NULL;
         if (i < page) {
             hit = add_hit(10, cy - 20, SIDEBAR - 20, 40, H_STEP, i);
         }
         if (i == page) {
-            vx_fill_rounded(S, 12, cy - 20, SIDEBAR - 24, 40, 10, 0xffffff, 40);
+            fill_rounded(12, cy - 20, SIDEBAR - 24, 40, 10, 0xffffff, 40);
             disc(42, cy, 15, vx_mix(VX_COLOR_ACCENT, top, 140)); /* Glow. */
             disc(42, cy, 12, 0xffffff);
             char number[4];
@@ -974,7 +1136,7 @@ static void rail(struct vx_surface *win) {
             centered(42, cy - 8, bold(13), number, VX_COLOR_ACCENT);
         } else if (i < page) {
             if (hit && hot(hit)) {
-                vx_fill_rounded(S, 12, cy - 20, SIDEBAR - 24, 40, 10, 0xffffff, 18);
+                fill_rounded(12, cy - 20, SIDEBAR - 24, 40, 10, 0xffffff, 18);
             }
             disc(42, cy, 12, VX_COLOR_ACCENT);
             tick(42 - 10, cy - 10, 20, 0xffffff);
@@ -1002,13 +1164,14 @@ static bool sliding(void) {
 /* A page on the card, `at` pixels to the right of where it belongs (negative:
  * to the left); what's outside the card isn't drawn. */
 static void blit_card(struct vx_surface *win, const struct vx_surface *p, int at) {
-    int w = PAGE_W - (at < 0 ? -at : at);
+    int w = real_page_w - (at < 0 ? -at : at);
     if (w > 0) {
-        vx_blit(win, card_x + SIDEBAR + (at > 0 ? at : 0), card_y, p, at < 0 ? -at : 0, 0, w, CARD_H);
+        vx_blit(win, card_x + real_side + (at > 0 ? at : 0), card_y, p, at < 0 ? -at : 0, 0, w, real_card_h);
     }
 }
 
 static void draw_frame(void) {
+    settle_zone();
     reload_settings();
     struct vx_surface *win = &window->surface;
     long now = now_ms();
@@ -1020,17 +1183,17 @@ static void draw_frame(void) {
     if (all) {
         memcpy(win->pixels, backdrop.pixels, (size_t)win_w * win_h * 4);
     }
-    for (int y = card_y; y < card_y + CARD_H; y++) {
+    for (int y = card_y; y < card_y + real_card_h; y++) {
         memcpy(win->pixels + (long)y * win->stride + card_x, backdrop.pixels + (long)y * backdrop.stride + card_x,
-               (size_t)CARD_W * 4);
+               (size_t)real_card_w * 4);
     }
     /* The page (or, sliding, the one leaving and the one coming), beside the steps. */
     if (sliding() && now - slide_since >= SLIDE_MS) {
         leaving = -1;
     }
     if (sliding()) {
-        int offset = PAGE_W * ease(now - slide_since, SLIDE_MS) / 1000;
-        int old_at = -slide_dir * offset, new_at = old_at + slide_dir * PAGE_W;
+        int offset = real_page_w * ease(now - slide_since, SLIDE_MS) / 1000;
+        int old_at = -slide_dir * offset, new_at = old_at + slide_dir * real_page_w;
         draw_page(&pages[0], leaving, 100000);
         draw_page(&pages[1], page, now - page_since);
         blit_card(win, &pages[0], old_at);
@@ -1040,17 +1203,29 @@ static void draw_frame(void) {
         blit_card(win, &pages[0], 0);
     }
     rail(win);
-    round_corners(win, &backdrop, card_x, card_y, CARD_W, CARD_H, 20);
+    round_corners(win, &backdrop, card_x, card_y, real_card_w, real_card_h, u(20));
     if (all) {
         vx_window_present(window, 0, 0, win_w, win_h);
     } else {
-        vx_window_present(window, card_x, card_y, CARD_W, CARD_H);
+        vx_window_present(window, card_x, card_y, real_card_w, real_card_h);
+    }
+}
+
+static void remember_name(void) {
+    if (who_changed) {
+        vx_settings_set(&desk, "display_name", who_field);
+        who_changed = false;
     }
 }
 
 static void go(int target) {
     if (target < 0 || target >= PAGE_COUNT || target == page) {
         return;
+    }
+    if (page == P_WHO && who_changed) {
+        reload_settings();
+        remember_name();
+        vx_settings_save(&desk);
     }
     leaving = page;
     slide_dir = target > page ? 1 : -1;
@@ -1084,6 +1259,7 @@ static void finish(void) {
         }
     }
     reload_settings();
+    remember_name();
     vx_settings_set_bool(&desk, "welcome_done", true);
     vx_settings_save(&desk);
     printf("welcome: finished\n");
@@ -1117,6 +1293,8 @@ static void click(const struct hit *h) {
     case H_ZONE_FIELD: focus = H_ZONE_FIELD; break;
     case H_TRY_FIELD: focus = H_TRY_FIELD; break;
     case H_NAME_FIELD: focus = H_NAME_FIELD; break;
+    case H_WHO_FIELD: focus = H_WHO_FIELD; break;
+    case H_FIND_ZONE: start_zone_lookup(); break;
     case H_CHECK: check_state = CHECK_IDLE; break;
     case H_STEP: go(h->index); break;
     case H_SETTINGS: open_app("Settings", NULL); break;
@@ -1141,7 +1319,7 @@ static void pointer(const struct vx_gui_event *e, int *held) {
     vx_window_set_cursor(window, hover >= 0 ? (hits[hover].kind == H_ZONE_FIELD || hits[hover].kind == H_TRY_FIELD ||
                                                hits[hover].kind == H_NAME_FIELD ? VX_CURSOR_TEXT : VX_CURSOR_HAND)
                                             : VX_CURSOR_ARROW);
-    if (e->wheel && page == P_REGION && pointer_x > SIDEBAR + 330) {
+    if (e->wheel && page == P_REGION && pointer_x > real_side + u(330)) {
         zone_top += e->wheel * 2;
         zone_top = zone_top < 0 ? 0 : zone_top;
     }
@@ -1158,14 +1336,17 @@ static void key(const struct vx_gui_event *e) {
         return;
     }
     if (focus >= 0) {
-        char *field = focus == H_TRY_FIELD ? try_field : focus == H_ZONE_FIELD ? zone_search : name_field;
+        char *field = focus == H_TRY_FIELD ? try_field : focus == H_ZONE_FIELD ? zone_search
+                      : focus == H_WHO_FIELD ? who_field : name_field;
         size_t size = focus == H_TRY_FIELD ? sizeof(try_field) : focus == H_ZONE_FIELD ? sizeof(zone_search)
-                                                                                         : sizeof(name_field);
+                      : focus == H_WHO_FIELD ? sizeof(who_field) : sizeof(name_field);
         if (e->key == VX_KEY_ENTER || e->key == VX_KEY_ESC) {
             focus = -1;
         } else if (vx_field_key(field, size, e)) {
             if (focus == H_NAME_FIELD) {
                 name_changed = true;
+            } else if (focus == H_WHO_FIELD) {
+                who_changed = true;
             } else if (focus == H_ZONE_FIELD) {
                 zone_top = 0;
             }
@@ -1197,6 +1378,10 @@ int main(int argc, char **argv) {
         me.full_name[0] = '\0';
     }
     vx_get_hostname(name_field, sizeof(name_field));
+    reload_settings();
+    snprintf(who_field, sizeof(who_field), "%s",
+             setting("display_name", me.full_name[0] ? me.full_name : me.name));
+    logo = vx_image_load("/share/logo.png", VX_IMAGE_ALPHA);
     make_scenery();
     page = P_WELCOME;
     page_since = now_ms();
@@ -1204,9 +1389,12 @@ int main(int argc, char **argv) {
     for (;;) {
         draw_frame();
         /* Animations (and the network's live status) need a frame now and then. */
-        long wait = sliding() || now_ms() - page_since < 900 || page == P_WELCOME ? 33
-                    : page == P_NETWORK                                          ? 200
-                                                                                 : -1;
+        /* Animation only while a page settles in (and the network's live status):
+         * once it has, nothing moves until something is done. */
+        long wait = sliding() || now_ms() - page_since < 1200 ? 33
+                    : zone_state == ZONE_RUNNING               ? 100
+                    : page == P_NETWORK                       ? 200
+                                                              : -1;
         struct vx_gui_event e;
         int got = vx_gui_wait(&e, wait);
         if (got < 0) {

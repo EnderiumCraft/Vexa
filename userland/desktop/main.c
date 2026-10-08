@@ -1975,6 +1975,21 @@ struct window *window_at(int x, int y) {
 
 static void update_cursor(void);
 
+static void unmap_slot(struct window_buffer *slot) {
+    if (slot->size) {
+        vx_unmap(slot->surface.pixels, slot->size);
+        vx_close(slot->handle);
+        slot->size = 0;
+    }
+}
+
+static void unmap_buffers(struct window *w) {
+    unmap_slot(&w->slot[0]);
+    unmap_slot(&w->slot[1]);
+    w->front = 0;
+    w->has_back = false;
+}
+
 static void destroy_window(struct window *w) {
     add_ghost(w);
     add_damage(window_damage(w));
@@ -2008,8 +2023,7 @@ static void destroy_window(struct window *w) {
         focused = NULL;
         set_focus(top_window());
     }
-    vx_unmap(w->content.pixels, w->mapped_size);
-    vx_close(w->buffer_handle);
+    unmap_buffers(w);
     printf("desktop: closed window %d \"%s\"\n", w->id, w->title);
     if (installer_only && !strcmp(w->title, "Installer")) {
         installer_only = false; /* The desktop, now: the panel and the icons. */
@@ -2040,6 +2054,18 @@ static bool map_buffer(const char *path, int width, int height, int *handle, voi
     return true;
 }
 
+/* Maps a buffer into a slot (nothing changes if it can't be mapped). */
+static bool map_slot(struct window_buffer *slot, const char *path, int width, int height) {
+    struct window_buffer mapped;
+    void *pixels;
+    if (!map_buffer(path, width, height, &mapped.handle, &pixels, &mapped.size)) {
+        return false;
+    }
+    mapped.surface = (struct vx_surface){pixels, width, height, width};
+    *slot = mapped;
+    return true;
+}
+
 static void create_window(int client, struct desktop_message *m) {
     struct desktop_message reply = {.type = DESKTOP_CREATED};
     m->text[sizeof(m->text) - 1] = '\0';
@@ -2048,13 +2074,12 @@ static void create_window(int client, struct desktop_message *m) {
     const char *title = path_length + 1 < sizeof(m->text) ? path + path_length + 1 : "";
     int width = m->a, height = m->b;
     struct window *w = window_count < MAX_WINDOWS ? calloc(1, sizeof(*w)) : NULL;
-    void *pixels;
-    if (w && !map_buffer(path, width, height, &w->buffer_handle, &pixels, &w->mapped_size)) {
+    if (w && !map_slot(&w->slot[0], path, width, height)) {
         free(w);
         w = NULL;
     }
     if (w) {
-        w->content = (struct vx_surface){pixels, width, height, width};
+        w->content = w->slot[0].surface;
         w->id = next_window_id++;
         w->client = client;
         w->resizable = m->c & DESKTOP_RESIZABLE;
@@ -2103,25 +2128,62 @@ static void create_window(int client, struct desktop_message *m) {
 }
 
 /* A program's new buffer, at a new size. */
+/* The program's new buffers (for a new size): the first, and after a NUL the
+ * second if it has one. The first one is shown from now on. */
 static void replace_buffer(int client, struct window *w, struct desktop_message *m) {
     struct desktop_message reply = {.type = DESKTOP_RESIZED, .window = m->window};
     m->text[sizeof(m->text) - 1] = '\0';
-    int handle;
-    void *pixels;
-    size_t size;
-    if (w && map_buffer(m->text, m->a, m->b, &handle, &pixels, &size)) {
+    const char *first = m->text;
+    size_t first_length = strlen(first);
+    const char *second = first_length + 1 < sizeof(m->text) ? first + first_length + 1 : "";
+    struct window_buffer next[2];
+    memset(next, 0, sizeof(next));
+    bool ok = w && map_slot(&next[0], first, m->a, m->b);
+    if (ok && second[0] && !map_slot(&next[1], second, m->a, m->b)) {
+        unmap_slot(&next[0]);
+        ok = false;
+    }
+    if (ok) {
         add_damage(window_damage(w));
-        vx_unmap(w->content.pixels, w->mapped_size);
-        vx_close(w->buffer_handle);
-        w->content = (struct vx_surface){pixels, m->a, m->b, m->a};
-        w->buffer_handle = handle;
-        w->mapped_size = size;
+        unmap_buffers(w);
+        w->slot[0] = next[0];
+        w->slot[1] = next[1];
+        w->has_back = next[1].size != 0;
+        w->content = w->slot[0].surface;
         add_damage(window_damage(w));
         reply.a = m->a;
         reply.b = m->b;
         printf("desktop: window %d is now %dx%d\n", w->id, m->a, m->b);
     }
     send_to(client, &reply);
+}
+
+/* The program's second buffer (DESKTOP_BACK_BUFFER): it draws on this one while
+ * the desktop shows the first. Answered like a resize. */
+static void add_back_buffer(int client, struct window *w, struct desktop_message *m) {
+    struct desktop_message reply = {.type = DESKTOP_RESIZED, .window = m->window};
+    m->text[sizeof(m->text) - 1] = '\0';
+    if (w && !w->has_back && map_slot(&w->slot[1], m->text, w->content.width, w->content.height)) {
+        w->has_back = true;
+        reply.a = w->content.width;
+        reply.b = w->content.height;
+    }
+    send_to(client, &reply);
+}
+
+/* The program presents its buffer `index`: the desktop shows that one from now
+ * on, and the other is the program's to draw on again (DESKTOP_RELEASED). The
+ * desktop reads a buffer only while it's shown, and never while it's drawn on. */
+static void show_buffer(struct window *w, int index) {
+    if (index < 0 || index > 1 || !w->has_back || index == w->front) {
+        return;
+    }
+    int old = w->front;
+    w->front = index;
+    w->content = w->slot[index].surface;
+    struct desktop_message released = {.type = DESKTOP_RELEASED, .window = (uint32_t)w->id,
+                                       .a = old};
+    send_to(w->client, &released);
 }
 
 static struct rect outline_damage(void) {
@@ -2306,6 +2368,12 @@ static void client_message(int client) {
         if (w && !w->minimized) {
             add_damage((struct rect){w->x + m.a, w->y + m.b, m.c, m.d});
         }
+        if (w) {
+            show_buffer(w, (unsigned char)m.text[0]);
+        }
+        break;
+    case DESKTOP_BACK_BUFFER:
+        add_back_buffer(client, w, &m);
         break;
     case DESKTOP_TITLE:
         if (w) {

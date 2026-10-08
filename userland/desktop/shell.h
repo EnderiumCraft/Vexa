@@ -42,14 +42,24 @@ enum snap {
  * back from it, and fade out when they close. */
 enum animation { ANIM_NONE, ANIM_OPEN, ANIM_MINIMIZE, ANIM_RESTORE };
 
+/* A pixel buffer the program draws on, mapped here (size 0: none). */
+struct window_buffer {
+    struct vx_surface surface;
+    size_t size;
+    int handle;
+};
+
 struct window {
     int id;
     int client; /* Index in clients[]. */
     char title[64];
     int x, y; /* The content's top-left corner on the screen. */
+    /* What's shown: slot[front]. A second slot (has_back) lets the program draw
+     * on the other while the desktop shows one (DESKTOP_BACK_BUFFER). */
     struct vx_surface content;
-    size_t mapped_size;
-    int buffer_handle;
+    struct window_buffer slot[2];
+    int front;
+    bool has_back;
     bool resizable, minimized, maximized;
     bool modified;    /* Its program has changes that aren't saved (DESKTOP_MODIFIED). */
     bool popup;       /* A menu or tooltip: no frame, always on top, no keyboard. */

@@ -134,6 +134,39 @@ static int make_buffer(int width, int height, char *path, size_t path_size, void
     return handle;
 }
 
+/* The windows this program has open (for DESKTOP_RELEASED, by id). */
+static struct vx_window *open_windows[64];
+static int open_count;
+
+static void register_window(struct vx_window *window) {
+    if (open_count < (int)(sizeof(open_windows) / sizeof(open_windows[0]))) {
+        open_windows[open_count++] = window;
+    }
+}
+
+static void unregister_window(struct vx_window *window) {
+    for (int i = 0; i < open_count; i++) {
+        if (open_windows[i] == window) {
+            open_windows[i] = open_windows[--open_count];
+            return;
+        }
+    }
+}
+
+/* Takes a DESKTOP_RELEASED (a buffer the desktop has stopped showing) as it
+ * comes: true if the message was one. */
+static bool absorb(const struct desktop_message *m) {
+    if (m->type != DESKTOP_RELEASED) {
+        return false;
+    }
+    for (int i = 0; i < open_count; i++) {
+        if (open_windows[i]->id == (int)m->window && m->a >= 0 && m->a < 2) {
+            open_windows[i]->busy[m->a] = false;
+        }
+    }
+    return true;
+}
+
 /* Waits for the desktop's answer of this type; events that come first wait
  * in the queue. Returns 0, or an error if the desktop is gone. */
 static long wait_reply(uint32_t type, struct desktop_message *reply) {
@@ -142,6 +175,9 @@ static long wait_reply(uint32_t type, struct desktop_message *reply) {
         if (error) {
             return error;
         }
+        if (absorb(reply)) {
+            continue;
+        }
         if (reply->type == type) {
             return 0;
         }
@@ -149,6 +185,26 @@ static long wait_reply(uint32_t type, struct desktop_message *reply) {
             queued[queued_count++] = *reply;
         }
     }
+}
+
+/* Waits (a little) until the desktop has stopped showing buffer `index`: the
+ * program can't draw on it until then. Events read meanwhile wait in the
+ * queue. A desktop that doesn't answer doesn't hold the program up for long. */
+static void wait_release(struct vx_window *window, int index) {
+    for (int tries = 0; window->busy[index] && tries < 20; tries++) {
+        struct vx_poll poll = {connection, VX_POLL_READ, 0};
+        if (vx_poll(&poll, 1, 25) <= 0) {
+            continue;
+        }
+        struct desktop_message m;
+        if (receive_message(&m)) {
+            break;
+        }
+        if (!absorb(&m) && queued_count < QUEUE_MAX) {
+            queued[queued_count++] = m;
+        }
+    }
+    window->busy[index] = false;
 }
 
 struct vx_window *vx_window_create_flags(const char *title, int width, int height,
@@ -176,6 +232,9 @@ struct vx_window *vx_window_create_flags(const char *title, int width, int heigh
     }
     window->surface = (struct vx_surface){pixels, width, height, width};
     window->buffer_handle = handle;
+    window->buffers[0] = window->surface;
+    window->handles[0] = handle;
+    window->handles[1] = -1;
 
     struct desktop_message m = {.type = DESKTOP_CREATE, .a = width, .b = height,
                                 .c = (flags & VX_WINDOW_RESIZABLE ? DESKTOP_RESIZABLE : 0) |
@@ -193,6 +252,34 @@ struct vx_window *vx_window_create_flags(const char *title, int width, int heigh
         return NULL;
     }
     window->id = (int)reply.window;
+
+    /* A second buffer, for drawing while the desktop shows the first. */
+    char back_path[64];
+    void *back_pixels;
+    int back_handle = make_buffer(width, height, back_path, sizeof(back_path), &back_pixels);
+    if (back_handle >= 0) {
+        struct desktop_message b = {.type = DESKTOP_BACK_BUFFER, .window = reply.window,
+                                    .a = width, .b = height};
+        strncpy(b.text, back_path, sizeof(b.text) - 1);
+        struct desktop_message answer;
+        long error = send_message(&b);
+        if (!error) {
+            do {
+                error = wait_reply(DESKTOP_RESIZED, &answer);
+            } while (!error && answer.window != reply.window);
+        }
+        vx_remove(back_path);
+        if (!error && answer.a) {
+            window->buffers[1] = (struct vx_surface){back_pixels, width, height, width};
+            window->handles[1] = back_handle;
+            window->double_buffered = true;
+            window->buffers[0] = window->surface;
+        } else {
+            vx_unmap(back_pixels, buffer_size(width, height));
+            vx_close(back_handle);
+        }
+    }
+    register_window(window);
     return window;
 }
 
@@ -204,15 +291,29 @@ int vx_window_resize(struct vx_window *window, int width, int height) {
     if (width <= 0 || height <= 0 || width > 4096 || height > 4096) {
         return -VX_EINVAL;
     }
-    char path[64];
-    void *pixels;
+    char path[64], back_path[64];
+    void *pixels, *back_pixels = NULL;
     int handle = make_buffer(width, height, path, sizeof(path), &pixels);
     if (handle < 0) {
         return handle;
     }
+    int back_handle = -1;
+    if (window->double_buffered) {
+        back_handle = make_buffer(width, height, back_path, sizeof(back_path), &back_pixels);
+        if (back_handle < 0) {
+            vx_unmap(pixels, buffer_size(width, height));
+            vx_close(handle);
+            vx_remove(path);
+            return back_handle;
+        }
+    }
     struct desktop_message m = {.type = DESKTOP_BUFFER, .window = (uint32_t)window->id,
                                 .a = width, .b = height};
-    strncpy(m.text, path, sizeof(m.text) - 1);
+    size_t path_length = strlen(path);
+    memcpy(m.text, path, path_length + 1);
+    if (back_handle >= 0) {
+        strncpy(m.text + path_length + 1, back_path, sizeof(m.text) - path_length - 2);
+    }
     struct desktop_message reply;
     long error = send_message(&m);
     if (!error) {
@@ -222,22 +323,62 @@ int vx_window_resize(struct vx_window *window, int width, int height) {
         } while (!error && reply.window != (uint32_t)window->id);
     }
     vx_remove(path);
+    if (back_handle >= 0) {
+        vx_remove(back_path);
+    }
     if (error || reply.a == 0) {
         vx_unmap(pixels, buffer_size(width, height));
         vx_close(handle);
+        if (back_handle >= 0) {
+            vx_unmap(back_pixels, buffer_size(width, height));
+            vx_close(back_handle);
+        }
         return error ? (int)error : -VX_EINVAL;
     }
-    vx_unmap(window->surface.pixels, buffer_size(window->surface.width, window->surface.height));
-    vx_close(window->buffer_handle);
-    window->surface = (struct vx_surface){pixels, width, height, width};
+    /* The old buffers go; the new ones start blank, the first one drawn on. */
+    unsigned long old_size = buffer_size(window->surface.width, window->surface.height);
+    for (int i = 0; i < 2; i++) {
+        if (window->handles[i] >= 0 && window->buffers[i].pixels) {
+            vx_unmap(window->buffers[i].pixels, old_size);
+            vx_close(window->handles[i]);
+        }
+    }
+    window->buffers[0] = (struct vx_surface){pixels, width, height, width};
+    window->handles[0] = handle;
+    window->buffers[1] = back_handle >= 0 ? (struct vx_surface){back_pixels, width, height, width}
+                                          : (struct vx_surface){NULL, 0, 0, 0};
+    window->handles[1] = back_handle;
+    window->double_buffered = back_handle >= 0;
+    window->back = window->shown = 0;
+    window->busy[0] = window->busy[1] = false;
+    window->surface = window->buffers[0];
     window->buffer_handle = handle;
     return 0;
 }
 
+/* Shows what's drawn on the window's surface (x, y, width, height of it). With
+ * two buffers the next one to draw on becomes a copy of this one, so drawing
+ * goes on from what's shown, and the desktop never reads what's being drawn. */
 void vx_window_present(struct vx_window *window, int x, int y, int width, int height) {
     struct desktop_message m = {.type = DESKTOP_PRESENT, .window = (uint32_t)window->id,
                                 .a = x, .b = y, .c = width, .d = height};
-    send_message(&m);
+    m.text[0] = (char)(window->double_buffered ? window->back : 0);
+    if (send_message(&m) || !window->double_buffered) {
+        return;
+    }
+    if (window->back != window->shown) {
+        window->busy[window->shown] = true; /* The desktop releases it now it shows the other. */
+    }
+    window->shown = window->back;
+    int next = 1 - window->shown;
+    if (window->busy[next]) {
+        wait_release(window, next);
+    }
+    struct vx_surface *from = &window->buffers[window->shown];
+    struct vx_surface *to = &window->buffers[next];
+    memcpy(to->pixels, from->pixels, (size_t)from->width * from->height * 4);
+    window->back = next;
+    window->surface = *to;
 }
 
 void vx_window_set_title(struct vx_window *window, const char *title) {
@@ -336,8 +477,14 @@ char *vx_drop_paths(const struct vx_gui_event *event) {
 void vx_window_destroy(struct vx_window *window) {
     struct desktop_message m = {.type = DESKTOP_DESTROY, .window = (uint32_t)window->id};
     send_message(&m);
-    vx_unmap(window->surface.pixels, buffer_size(window->surface.width, window->surface.height));
-    vx_close(window->buffer_handle);
+    unregister_window(window);
+    unsigned long size = buffer_size(window->surface.width, window->surface.height);
+    for (int i = 0; i < 2; i++) {
+        if (window->handles[i] >= 0 && window->buffers[i].pixels) {
+            vx_unmap(window->buffers[i].pixels, size);
+            vx_close(window->handles[i]);
+        }
+    }
     free(window);
 }
 
@@ -407,6 +554,9 @@ int vx_gui_wait(struct vx_gui_event *event, long timeout_ms) {
             if (error) {
                 return (int)error;
             }
+        }
+        if (absorb(&m)) {
+            continue; /* (The desktop's release of a buffer: no event.) */
         }
         to_event(&m, event);
         if (event->type) {

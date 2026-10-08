@@ -301,7 +301,7 @@ vx_draw_text(s, end + 8, 18, "café", VX_COLOR_DIM, VX_TRANSPARENT); /* The UI f
 | `struct vx_window *vx_window_create(const char *title, int width, int height)` | a window (NULL if no desktop is running); draw into `window->surface` |
 | `struct vx_window *vx_window_create_flags(title, width, height, unsigned flags)` | `VX_WINDOW_RESIZABLE`: the user can resize it (you get `VX_GUI_RESIZE`) |
 | `int vx_window_resize(struct vx_window *w, int width, int height)` | a new, blank surface of that size |
-| `void vx_window_present(struct vx_window *w, int x, int y, int width, int height)` | shows what was drawn in the rectangle |
+| `void vx_window_present(struct vx_window *w, int x, int y, int width, int height)` | shows what was drawn in the rectangle. A window has two buffers: the desktop reads the one shown, and the next one to draw on is a copy of it (so drawing goes on from what's shown), which the desktop has let go of before you get it back. Draw the rectangle you changed |
 | `void vx_window_set_title(w, const char *title)`, `void vx_window_destroy(w)` | |
 | `bool vx_screen_size(int *width, int *height)` | the screen's size |
 | `void vx_window_move(w, int x, int y)`, `void vx_window_center(w)` | puts the window's content at that spot on the screen (never above the panel), or in the middle |

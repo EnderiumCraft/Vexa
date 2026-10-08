@@ -13,7 +13,6 @@
 #define VALUE_LEFT 130
 
 #define COLOR_BACKGROUND VX_COLOR_WINDOW
-#define COLOR_TITLE VX_COLOR_ACCENT
 #define COLOR_LABEL VX_COLOR_DIM
 #define COLOR_TEXT VX_COLOR_TEXT
 
@@ -24,18 +23,26 @@ static int line(struct vx_surface *s, int y, const char *label, const char *valu
 }
 
 static void draw(struct vx_window *window) {
+    static struct vx_image *brand;
+    if (!brand) {
+        brand = vx_image_load("/share/logo.png", VX_IMAGE_ALPHA);
+    }
     struct vx_surface *s = &window->surface;
     vx_fill(s, 0, 0, s->width, s->height, COLOR_BACKGROUND);
     struct vx_system_info info;
     if (vx_system_info(&info)) {
         memset(&info, 0, sizeof(info));
     }
-    const struct vx_font *big = vx_font(VX_FACE_BOLD, 40);
-    int end = vx_text(s, big, LEFT, 12, "Vexa", COLOR_TITLE, VX_TRANSPARENT);
+    /* The logo, with the version beside it. */
+    int logo_height = 50, logo_width = logo_height * 640 / 255;
+    if (brand) {
+        vx_blit_alpha(s, LEFT, 12, logo_width, logo_height, &brand->surface);
+    }
     char text[96];
     snprintf(text, sizeof(text), "version %s", info.version);
-    vx_draw_text(s, end + 12, 12 + vx_font_ascent(big) - 13, text, COLOR_LABEL, VX_TRANSPARENT);
-    int y = 12 + vx_font_height(big) + 12;
+    vx_draw_text(s, LEFT + logo_width + 14, 12 + logo_height - VX_LINE_HEIGHT, text, COLOR_LABEL,
+                 VX_TRANSPARENT);
+    int y = 12 + logo_height + 14;
 
     snprintf(text, sizeof(text), "%u", info.cpus);
     y = line(s, y, "CPUs", text);

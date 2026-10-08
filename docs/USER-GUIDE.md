@@ -471,22 +471,27 @@ install's steps as it goes. It only installs when Vexa was started from the CD.
 ### Welcome
 
 The first-run experience, in steps like a setup wizard. The first time an account logs
-in on an installed Vexa, a card opens over the wallpaper: the steps down its left (the
-ones done ticked, the one you're on lit up), and the page beside them. **Next** goes on,
+in on an installed Vexa, it fills the screen: a card in its middle (a quarter bigger on a
+1920 x 1080 screen, and so on), with the steps down its left (the ones done ticked, the
+one you're on lit up), and the page beside them. **Next** goes on,
 **Back** goes back (any step done can be clicked to go back to it; Enter or the right
 arrow goes on, the left arrow goes back), and **Skip for now** leaves it:
 
-1. **Welcome**: a greeting by name.
-2. **Make it yours**: Light, Dark or Automatic (each shown as a little desktop), and
+1. **Welcome**: the Vexa logo and a greeting by name.
+2. **Who will use this computer?**: your name, which Vexa greets you by (leave it as it
+   is to use your account's name; it's kept in your own settings), and the computer's
+   name, which other computers on the network see.
+3. **Make it yours**: Light, Dark or Automatic (each shown as a little desktop), and
    the accent color. They apply at once, the Welcome itself included.
-3. **Keyboard and time**: the keyboard layout (with a box to try it) and the time zone
-   (search for a city; the wheel scrolls the list), shown with the time there.
-4. **Connect to the network**: whether a wired card has an address and a router, and
-   whether Vexa can reach the internet (**Check Again**); the computer's name. Wi-Fi
-   isn't supported yet.
-5. **Find your way around**: search (Ctrl+Space), the Vexa menu, window keys,
+4. **Keyboard and time**: the keyboard layout (with a box to try it) and the time zone
+   (search for a city; the wheel scrolls the list), shown with the time there. **From my
+   network** asks ip-api.com for the time zone of your internet address, so that address
+   is sent to it; it's only done when you press the button.
+5. **Connect to the network**: whether a wired card has an address and a router, and
+   whether Vexa can reach the internet (**Check Again**). Wi-Fi isn't supported yet.
+6. **Find your way around**: search (Ctrl+Space), the Vexa menu, window keys,
    screenshots, locking and the layout key, and a button to open Settings.
-6. **You're all set**: what you chose, **Get Apps** (Software), **Settings** and
+7. **You're all set**: what you chose, **Get Apps** (Software), **Settings** and
    **Start Using Vexa**.
 
 It's shown once per account (whichever way it ends); **Welcome** in the Vexa menu

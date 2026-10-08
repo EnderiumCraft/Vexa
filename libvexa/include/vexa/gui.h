@@ -89,6 +89,14 @@ struct vx_window {
     int buffer_handle;
     int cursor;
     bool modified; /* (See vx_window_set_modified.) */
+    /* Two buffers, so the desktop never reads one while the program draws on
+     * it: surface is buffers[back], the desktop shows buffers[shown]. A window
+     * the desktop gives only one (an older one) has double_buffered false. */
+    bool double_buffered;
+    struct vx_surface buffers[2];
+    int handles[2];
+    int back, shown;
+    bool busy[2];   /* The desktop may still show it (until DESKTOP_RELEASED). */
 };
 
 /* Opens a window (connecting to the desktop the first time). NULL if there

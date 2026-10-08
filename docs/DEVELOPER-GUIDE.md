@@ -359,11 +359,16 @@ and the desktop send each other fixed-size messages (`struct desktop_message` in
 `<vexa/desktop.h>`): a type, a window id, four numbers and some text. `<vexa/gui.h>`
 wraps all of it; only the desktop and Xvexa use it directly.
 
-- A window's pixels are a file the program makes in `/run/shm` and maps; the
-  desktop maps the same file, so presenting copies nothing.
+- A window's pixels are files the program makes in `/run/shm` and maps; the desktop
+  maps the same files, so presenting copies nothing. A program has two (double
+  buffering): `PRESENT` says which one is shown (`text[0]`), and the desktop answers
+  `RELEASED` for the one it stopped showing, so the program never draws on a buffer
+  while the desktop reads it. `BACK_BUFFER` sends the second; a window with one buffer
+  (such as Xvexa's) just shows buffer 0.
 - **Program to desktop**: `CREATE` (size, flags: `RESIZABLE`, `POPUP` for menus and
   tooltips, `UNDECORATED` for windows that draw their own title bar), `PRESENT` (a
-  rectangle), `TITLE`, `DESTROY`, `BUFFER` (a new buffer after a resize), `MOVE`, `INFO`
+  rectangle), `TITLE`, `DESTROY`, `BUFFER` (new buffers after a resize), `BACK_BUFFER`
+  (the second buffer), `MOVE`, `INFO`
   (the screen's size), `NOTIFY`, `RELOAD` (read `/etc/desktop.conf` again), `WM`
   (what a program asks of a window manager: maximize, restore, minimize, activate, or
   start dragging to move or resize), `CURSOR` (the pointer's shape over the window),
