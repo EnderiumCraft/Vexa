@@ -1276,6 +1276,16 @@ static void open_app(const char *name, const char *argument) {
     }
 }
 
+/* The welcome melody, once as the window opens. The player runs on its own: nothing waits for it. */
+static void play_welcome_sound(void) {
+    const char *argv[] = {"play", "--welcome"};
+    struct vx_spawn spawn = {.argv = argv, .argc = 2, .handles = {0, 1, 2}};
+    long child = vx_spawn("/bin/play", &spawn);
+    if (child >= 0) {
+        vx_close((int)child);
+    }
+}
+
 static void click(const struct hit *h) {
     focus = -1;
     switch (h->kind) {
@@ -1383,6 +1393,7 @@ int main(int argc, char **argv) {
              setting("display_name", me.full_name[0] ? me.full_name : me.name));
     logo = vx_image_load("/share/logo.png", VX_IMAGE_ALPHA);
     make_scenery();
+    play_welcome_sound();
     page = P_WELCOME;
     page_since = now_ms();
     int held = 0;

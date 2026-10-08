@@ -494,6 +494,9 @@ arrow goes on, the left arrow goes back), and **Skip for now** leaves it:
 7. **You're all set**: what you chose, **Get Apps** (Software), **Settings** and
    **Start Using Vexa**.
 
+It opens with a short melody: three notes rising, then a chord that rings out. It
+plays each time the Welcome opens, and the volume and Mute apply to it.
+
 It's shown once per account (whichever way it ends); **Welcome** in the Vexa menu
 (System), `welcome` in a terminal and **Show Welcome** in Settings, About bring it
 back. The live CD doesn't show it.
@@ -846,6 +849,7 @@ volume.
 play --tone 440 3        # a 440 Hz tone for three seconds
 play music.wav           # a WAV file (16-bit, 8000 to 96000 Hz, mono or stereo)
 play --chime             # the notification sound
+play --welcome           # the sound of the Welcome
 ```
 
 **The volume**: the speaker on the panel (next to the clock) shows it; scrolling over

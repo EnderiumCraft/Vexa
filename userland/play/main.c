@@ -2,7 +2,9 @@
  *
  *   play file.wav             a WAV file (16-bit PCM, 8000 to 96000 Hz, mono or stereo)
  *   play --tone HZ [SECONDS]  a sine wave (one second unless told)
- *   play --chime              two short notes (the sound for notifications) */
+ *   play --chime              two short notes (the sound for notifications)
+ *   play --welcome            the sound of the Welcome: a bell-like arpeggio up a
+ *                             chord, which rings out */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -149,9 +151,92 @@ static int play_chime(void) {
     return 0;
 }
 
+/* sin(x) and cos(x) from their Taylor series: close enough for the small angles
+ * (under one radian) of the partials below. */
+static double sine(double x) {
+    double x2 = x * x;
+    return x * (1 - x2 / 6 * (1 - x2 / 20 * (1 - x2 / 42 * (1 - x2 / 72))));
+}
+
+static double cosine(double x) {
+    double x2 = x * x;
+    return 1 - x2 / 2 * (1 - x2 / 12 * (1 - x2 / 30 * (1 - x2 / 56)));
+}
+
+/* A partial of a note: a sine from the recurrence of play_tone(). */
+struct partial {
+    double c, previous, now, amplitude;
+};
+
+/* A note of the welcome: its pitch, when it starts, and how long it takes to fade by 1/e. */
+struct welcome_note {
+    double hz, start, decay;
+};
+
+/* The sound of the Welcome: C5, E5, G5 going up, then the chord C6, E6, G6 ringing out.
+ * Each note has the octaves above it as well, fainter, which makes it sound like a bell. */
+static int play_welcome(void) {
+    const unsigned rate = 48000;
+    static const struct welcome_note notes[] = {
+        {523.25, 0.00, 0.8}, {659.25, 0.13, 0.8}, {783.99, 0.26, 0.8},
+        {1046.50, 0.40, 1.2}, {1318.51, 0.40, 1.2}, {1567.98, 0.40, 1.2},
+    };
+    static const double partials[4] = {1.0, 0.4, 0.18, 0.08};
+    const double attack = 0.008, release = 0.3; /* Seconds to swell in, and to fade out at the end. */
+    size_t frames = (size_t)(rate * 2.6);
+    double *mix = calloc(frames, sizeof(double));
+    if (!mix) {
+        return 1;
+    }
+    for (unsigned n = 0; n < sizeof(notes) / sizeof(notes[0]); n++) {
+        size_t first = (size_t)(notes[n].start * rate);
+        struct partial p[4];
+        for (int k = 0; k < 4; k++) {
+            double w = 2 * 3.14159265358979 * notes[n].hz * (k + 1) / rate;
+            p[k] = (struct partial){2 * cosine(w), 0, sine(w), partials[k]};
+        }
+        double level = 1, fade = 1 - 1 / (notes[n].decay * rate);
+        for (size_t i = first, step = 0; i < frames && level > 0.001; i++, step++) {
+            double swell = step < attack * rate ? step / (attack * rate) : 1;
+            double sum = 0;
+            for (int k = 0; k < 4; k++) {
+                sum += p[k].amplitude * p[k].now;
+                double next = p[k].c * p[k].now - p[k].previous;
+                p[k].previous = p[k].now, p[k].now = next;
+            }
+            mix[i] += swell * level * sum;
+            level *= fade;
+        }
+    }
+    double peak = 0;
+    for (size_t i = 0; i < frames; i++) {
+        if (frames - i < release * rate) {
+            mix[i] *= (frames - i) / (release * rate);
+        }
+        double size = mix[i] < 0 ? -mix[i] : mix[i];
+        peak = size > peak ? size : peak;
+    }
+    short *samples = malloc(frames * 4);
+    if (!samples) {
+        free(mix);
+        return 1;
+    }
+    for (size_t i = 0; i < frames; i++) {
+        short value = (short)(mix[i] / peak * 18000); /* About 55% of full scale. */
+        samples[2 * i] = samples[2 * i + 1] = value;
+    }
+    free(mix);
+    int status = open_audio(rate, 2) || play_all(samples, frames * 4);
+    free(samples);
+    return status;
+}
+
 int main(int argc, char **argv) {
     if (argc == 2 && !strcmp(argv[1], "--chime")) {
         return play_chime();
+    }
+    if (argc == 2 && !strcmp(argv[1], "--welcome")) {
+        return play_welcome();
     }
     if (argc >= 3 && !strcmp(argv[1], "--tone")) {
         return play_tone((unsigned)atoi(argv[2]), argc > 3 ? (unsigned)atoi(argv[3]) : 1);
@@ -159,6 +244,6 @@ int main(int argc, char **argv) {
     if (argc == 2 && argv[1][0] != '-') {
         return play_wav(argv[1]);
     }
-    fprintf(stderr, "usage: play file.wav | play --tone HZ [SECONDS] | play --chime\n");
+    fprintf(stderr, "usage: play file.wav | play --tone HZ [SECONDS] | play --chime | play --welcome\n");
     return 2;
 }

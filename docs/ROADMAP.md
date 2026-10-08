@@ -347,6 +347,7 @@ Before Firefox, the things that make Vexa comfortable to use every day:
 - [x] A setup in steps at the first login (0.31.0): the Welcome fills the screen, with
       your name, the look, the keyboard and time zone (from the network, if asked), the
       network and a tour; the Installer and About show the logo too
+- [x] A sound when the Welcome opens (0.31.0): a short melody, `play --welcome`
 - [x] Windows draw on a second buffer (0.31.0): the desktop never reads one while it's
       drawn, so windows don't tear under load
 - [x] Unsaved changes (0.31.0): Save, Don't Save or Cancel in the Editor and Paint, and a
