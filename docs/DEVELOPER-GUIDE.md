@@ -491,12 +491,14 @@ the ISO, publishes it as the **Nightly** (untested, from the newest commit only)
 `make test` (with KVM), and if the tests pass publishes:
 
 - **Latest build**, replaced on every push
-- a **versioned release** (`vX.Y.Z`) whenever `VEXA_VERSION` in
+- a **release of the big version** (`v0.MINOR`) whenever `VEXA_MINOR` in
   `kernel/include/vexa/version.h` changes
 
-Each release carries the ISO and the sources of the GPL and LGPL programs in it. To
-make a release, change `VEXA_VERSION` in the same commit as the changes it describes,
-and add them to `docs/ROADMAP.md`.
+Each release carries the ISO and the sources of the GPL and LGPL programs in it. The
+version is `0.MINOR.BUILD`: CI sets BUILD to its run number, so every nightly build has
+its own (`make print-version` shows it; a local build is `0.MINOR.0`, or `make
+VEXA_BUILD=7` for any number). To make a big release, change `VEXA_MINOR` in the same
+commit as the changes it describes, and add them to `docs/ROADMAP.md`.
 
 ## Conventions
 

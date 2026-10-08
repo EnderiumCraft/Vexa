@@ -337,7 +337,12 @@ $(BUILD)/programs/%: $(CRT0) $(LIBVEXA_SO) $(LIBVEXA_OBJS) $(LIBM) libvexa/progr
 # machine's compiler, set up for Vexa), vexa-new-app and the app template, a
 # CMake toolchain file, and the guide (docs/SDK.md). The releases publish it
 # as vexa-sdk-<version>.tar.gz.
-VEXA_VERSION := $(shell sed -n 's/^\#define VEXA_VERSION "\(.*\)"/\1/p' kernel/include/vexa/version.h)
+# The version: 0.MINOR.BUILD (see kernel/include/vexa/version.h). CI sets VEXA_BUILD
+# to its run number, so every nightly build has its own.
+VEXA_MINOR := $(shell sed -n 's/^\#define VEXA_MINOR \([0-9][0-9]*\)/\1/p' kernel/include/vexa/version.h)
+VEXA_BUILD ?= 0
+VEXA_VERSION := 0.$(VEXA_MINOR).$(VEXA_BUILD)
+CFLAGS += -DVEXA_BUILD=$(VEXA_BUILD)
 SDK_DIR := $(BUILD)/sdk/vexa-sdk
 SDK_TARBALL := $(BUILD)/vexa-sdk-$(VEXA_VERSION).tar.gz
 SDK_FILES := $(shell find sdk -type f -not -path '*/build/*') docs/SDK.md
@@ -1122,6 +1127,10 @@ test-native: native-iso
 ONLY ?= desktop
 test-quick: $(ISO) $(TEST_DISKS)
 	tools/qemu-smoke-test.py --disks $(BUILD)/disks --only $(ONLY)
+
+# The version (for CI, which names the release after it).
+print-version:
+	@echo $(VEXA_VERSION)
 
 clean:
 	rm -rf $(BUILD)

@@ -342,7 +342,15 @@ Before Firefox, the things that make Vexa comfortable to use every day:
 - [x] Files: restore from the Trash to where things were; Open With (a choice of app,
       and making it the default)
 - [x] The input language in the top bar (pick a layout) and a key to switch layouts
-- [x] A loading screen while Vexa boots
+- [x] A loading screen while Vexa boots (0.31.0: the Vexa logo on the desktop's teal, with
+      a gel bar)
+- [x] A setup in steps at the first login (0.31.0): the Welcome fills the screen, with
+      your name, the look, the keyboard and time zone (from the network, if asked), the
+      network and a tour; the Installer and About show the logo too
+- [x] Windows draw on a second buffer (0.31.0): the desktop never reads one while it's
+      drawn, so windows don't tear under load
+- [x] Unsaved changes (0.31.0): Save, Don't Save or Cancel in the Editor and Paint, and a
+      warning before logging out or shutting down
 - [x] The Vexa menu groups apps by type (Accessories, Games, Graphics, Internet,
       Multimedia, System; Linux programs), from each bundle's category
 

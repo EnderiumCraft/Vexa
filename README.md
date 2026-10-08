@@ -232,8 +232,11 @@ published on the [Releases page](https://github.com/EnderiumCraft/Vexa/releases)
   ISO as soon as it's built, before the tests (it may not work), replaced on every push
 - **[Latest build](https://github.com/EnderiumCraft/Vexa/releases/tag/latest-build)**:
   the newest ISO that passed the tests, replaced on every push
-- **Versioned releases** (`v0.1.1`, ...): created whenever `VEXA_VERSION` in
-  `kernel/include/vexa/version.h` changes, and kept permanently
+- **Releases of the big versions** (`v0.31`, ...): one for each minor version, made by
+  its first build and kept permanently
+
+Versions are `0.MINOR.BUILD`: the middle number is for big releases, and every build
+has its own last number (a nightly is `0.31.<run number>`; a local build is `0.31.0`).
 
 Run a downloaded ISO with `qemu-system-x86_64 -M q35 -m 512M -cdrom vexa-<version>.iso`.
 
