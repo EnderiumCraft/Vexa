@@ -1,7 +1,7 @@
 /* welcome: the first-run experience (see docs/USER-GUIDE.md, "Welcome").
  *
- * A setup in steps, like Windows XP's: a frosted card over the wallpaper, with
- * the steps down its left (the ones done ticked, the one you're on lit up, and
+ * A setup in steps, like Windows XP's, over the whole screen: the wallpaper, and
+ * in its middle a frosted card, with the steps down its left (the ones done ticked, the one you're on lit up, and
  * any done one clickable to go back to), and the step's page beside them, which
  * slides in. The steps: a greeting, the look (theme and accent), the keyboard
  * and time zone, the network (and the computer's name), a short tour (search,
@@ -23,10 +23,6 @@
 #include <vexa/time.h>
 #include <vexa/users.h>
 
-#define W 1000
-#define H 600
-#define CARD_X 40
-#define CARD_Y 60
 #define CARD_W 920
 #define CARD_H 480
 #define SIDEBAR 230                 /* The steps, down the left (as in the Installer). */
@@ -34,6 +30,10 @@
 #define MARGIN 44
 #define FOOTER_Y (CARD_H - 60)      /* Back and Next, under a line. */
 #define SLIDE_MS 340
+
+/* The window is the whole screen; the card is in its middle (see layout). */
+static int win_w, win_h, card_x, card_y;
+static bool whole_window;   /* Everything needs drawing and showing (at first, and after a change). */
 
 enum page { P_WELCOME, P_LOOK, P_REGION, P_NETWORK, P_TOUR, P_DONE, PAGE_COUNT };
 
@@ -234,19 +234,23 @@ static void make_scenery(void) {
     char path[96];
     vx_theme_wallpaper(&vx_theme, path, sizeof(path));
     struct vx_image *image = vx_image_load(path, 0);
-    if (!backdrop.pixels) {
-        backdrop = make_surface(W, H);
+    if (!backdrop.pixels || backdrop.width != win_w || backdrop.height != win_h) {
+        free(backdrop.pixels);
+        backdrop = make_surface(win_w, win_h);
+    }
+    if (!card_bg.pixels) {
         card_bg = make_surface(CARD_W, CARD_H);
         pages[0] = make_surface(PAGE_W, CARD_H);
         pages[1] = make_surface(PAGE_W, CARD_H);
     }
+    whole_window = true;
     if (image) {
         cover(&backdrop, &image->surface);
         vx_image_free(image);
     } else {
-        for (int y = 0; y < H; y++) {
-            vx_fill(&backdrop, 0, y, W, 1, vx_mix(vx_mix(vx_theme.accent, 0, 70),
-                                                   vx_mix(vx_theme.accent, 0, 200), y * 255 / (H - 1)));
+        for (int y = 0; y < win_h; y++) {
+            vx_fill(&backdrop, 0, y, win_w, 1, vx_mix(vx_mix(vx_theme.accent, 0, 70),
+                                                   vx_mix(vx_theme.accent, 0, 200), y * 255 / (win_h - 1)));
         }
     }
     /* The frosted glass: the part behind the card, smaller, blurred, enlarged,
@@ -255,7 +259,7 @@ static void make_scenery(void) {
     for (int y = 0; y < small.height; y++) {
         for (int x = 0; x < small.width; x++) {
             small.pixels[y * small.stride + x] =
-                backdrop.pixels[(long)(CARD_Y + y * 4 + 2) * backdrop.stride + CARD_X + x * 4 + 2];
+                backdrop.pixels[(long)(card_y + y * 4 + 2) * backdrop.stride + card_x + x * 4 + 2];
         }
     }
     blur(&small, 4);
@@ -269,10 +273,19 @@ static void make_scenery(void) {
     }
     /* The shadow, under the card (a few rounded rectangles, fainter outwards). */
     for (int i = 14; i >= 1; i--) {
-        vx_fill_rounded(&backdrop, CARD_X - i, CARD_Y - i + 8, CARD_W + 2 * i, CARD_H + 2 * i, 22 + i,
+        vx_fill_rounded(&backdrop, card_x - i, card_y - i + 8, CARD_W + 2 * i, CARD_H + 2 * i, 22 + i,
                         0x000000, 5);
     }
     theme_key = vx_theme.accent ^ (vx_theme.dark ? 0xa5a5a5a5u : 0);
+}
+
+/* The window's size (the screen's), and the card in its middle. */
+static void layout(void) {
+    win_w = window->surface.width;
+    win_h = window->surface.height;
+    card_x = win_w > CARD_W ? (win_w - CARD_W) / 2 : 0;
+    card_y = win_h > CARD_H ? (win_h - CARD_H) / 2 : 0;
+    whole_window = true;
 }
 
 /* ---- Drawing ---- */
@@ -922,7 +935,7 @@ static void rail(struct vx_surface *win) {
     static const char *const names[PAGE_COUNT] = {"Welcome", "Your look", "Keyboard and time",
                                                   "Network", "Tour", "Finish"};
     static struct vx_surface view;
-    view = (struct vx_surface){win->pixels + (long)CARD_Y * win->stride + CARD_X, SIDEBAR, CARD_H, win->stride};
+    view = (struct vx_surface){win->pixels + (long)card_y * win->stride + card_x, SIDEBAR, CARD_H, win->stride};
     struct vx_surface *keep = S;
     S = &view;
     hit_dx = 0;
@@ -991,7 +1004,7 @@ static bool sliding(void) {
 static void blit_card(struct vx_surface *win, const struct vx_surface *p, int at) {
     int w = PAGE_W - (at < 0 ? -at : at);
     if (w > 0) {
-        vx_blit(win, CARD_X + SIDEBAR + (at > 0 ? at : 0), CARD_Y, p, at < 0 ? -at : 0, 0, w, CARD_H);
+        vx_blit(win, card_x + SIDEBAR + (at > 0 ? at : 0), card_y, p, at < 0 ? -at : 0, 0, w, CARD_H);
     }
 }
 
@@ -999,7 +1012,18 @@ static void draw_frame(void) {
     reload_settings();
     struct vx_surface *win = &window->surface;
     long now = now_ms();
-    memcpy(win->pixels, backdrop.pixels, (size_t)W * H * 4);
+    /* The backdrop doesn't change, so after the first frame only the card is
+     * drawn again and shown (the desktop has less to copy, and what it reads
+     * is the card as it was finished). */
+    bool all = whole_window;
+    whole_window = false;
+    if (all) {
+        memcpy(win->pixels, backdrop.pixels, (size_t)win_w * win_h * 4);
+    }
+    for (int y = card_y; y < card_y + CARD_H; y++) {
+        memcpy(win->pixels + (long)y * win->stride + card_x, backdrop.pixels + (long)y * backdrop.stride + card_x,
+               (size_t)CARD_W * 4);
+    }
     /* The page (or, sliding, the one leaving and the one coming), beside the steps. */
     if (sliding() && now - slide_since >= SLIDE_MS) {
         leaving = -1;
@@ -1016,8 +1040,12 @@ static void draw_frame(void) {
         blit_card(win, &pages[0], 0);
     }
     rail(win);
-    round_corners(win, &backdrop, CARD_X, CARD_Y, CARD_W, CARD_H, 20);
-    vx_window_present(window, 0, 0, W, H);
+    round_corners(win, &backdrop, card_x, card_y, CARD_W, CARD_H, 20);
+    if (all) {
+        vx_window_present(window, 0, 0, win_w, win_h);
+    } else {
+        vx_window_present(window, card_x, card_y, CARD_W, CARD_H);
+    }
 }
 
 static void go(int target) {
@@ -1100,8 +1128,8 @@ static void click(const struct hit *h) {
 static void pointer(const struct vx_gui_event *e, int *held) {
     bool pressed = (e->buttons & 1) && !(*held & 1);
     *held = e->buttons;
-    pointer_x = e->x - CARD_X;
-    pointer_y = e->y - CARD_Y;
+    pointer_x = e->x - card_x;
+    pointer_y = e->y - card_y;
     int before = hover;
     hover = -1;
     for (int i = hit_count - 1; i >= 0 && !sliding(); i--) {
@@ -1158,12 +1186,12 @@ static void key(const struct vx_gui_event *e) {
 
 int main(int argc, char **argv) {
     (void)argc, (void)argv;
-    window = vx_window_create_flags("Welcome to Vexa", W, H, 0);
+    window = vx_window_create_flags("Welcome to Vexa", 0, 0, VX_WINDOW_FULLSCREEN);
     if (!window) {
         fprintf(stderr, "welcome: no desktop to open a window on\n");
         return 1;
     }
-    vx_window_center(window);
+    layout();
     if (vx_current_user(&me) != 0) {
         snprintf(me.name, sizeof(me.name), "there");
         me.full_name[0] = '\0';
@@ -1197,6 +1225,12 @@ int main(int argc, char **argv) {
         case VX_GUI_THEME:
             vx_theme_load();
             make_scenery();
+            break;
+        case VX_GUI_RESIZE: /* The screen changed size: the window follows it. */
+            if (vx_window_resize(window, e.width, e.height) == 0) {
+                layout();
+                make_scenery();
+            }
             break;
         }
     }

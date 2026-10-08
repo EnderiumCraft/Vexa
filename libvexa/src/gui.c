@@ -153,7 +153,13 @@ static long wait_reply(uint32_t type, struct desktop_message *reply) {
 
 struct vx_window *vx_window_create_flags(const char *title, int width, int height,
                                          unsigned flags) {
-    if (width <= 0 || height <= 0 || width > 4096 || height > 4096 || connect_desktop() < 0) {
+    if (connect_desktop() < 0) {
+        return NULL;
+    }
+    if (flags & VX_WINDOW_FULLSCREEN && !vx_screen_size(&width, &height)) {
+        return NULL;
+    }
+    if (width <= 0 || height <= 0 || width > 4096 || height > 4096) {
         return NULL;
     }
     struct vx_window *window = calloc(1, sizeof(*window));
@@ -172,7 +178,8 @@ struct vx_window *vx_window_create_flags(const char *title, int width, int heigh
     window->buffer_handle = handle;
 
     struct desktop_message m = {.type = DESKTOP_CREATE, .a = width, .b = height,
-                                .c = flags & VX_WINDOW_RESIZABLE ? DESKTOP_RESIZABLE : 0};
+                                .c = (flags & VX_WINDOW_RESIZABLE ? DESKTOP_RESIZABLE : 0) |
+                                     (flags & VX_WINDOW_FULLSCREEN ? DESKTOP_FULLSCREEN : 0)};
     size_t path_length = strlen(path);
     memcpy(m.text, path, path_length + 1);
     strncpy(m.text + path_length + 1, title ? title : "", sizeof(m.text) - path_length - 2);

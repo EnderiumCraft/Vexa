@@ -97,6 +97,8 @@ struct vx_window *vx_window_create(const char *title, int width, int height);
 /* The same, with VX_WINDOW_* flags. A resizable window gets VX_GUI_RESIZE
  * events when the user resizes or maximizes it. */
 #define VX_WINDOW_RESIZABLE 0x1
+/* The whole screen, over the panel too (the width and height are ignored). */
+#define VX_WINDOW_FULLSCREEN 0x2
 struct vx_window *vx_window_create_flags(const char *title, int width, int height,
                                          unsigned flags);
 /* Gives the window a new size: a new, blank surface to draw on (present it

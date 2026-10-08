@@ -84,6 +84,9 @@ enum {
 /* A window that draws its own title bar (GTK's client-side decorations):
  * no frame, but otherwise like any other. */
 #define DESKTOP_UNDECORATED 0x4
+/* The whole screen, the panel too: no frame, at the screen's top left, and
+ * the size the desktop has for the screen (the program's size is not used). */
+#define DESKTOP_FULLSCREEN 0x8
 
 struct desktop_message {
     uint32_t type;

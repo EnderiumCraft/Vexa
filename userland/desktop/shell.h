@@ -54,6 +54,7 @@ struct window {
     bool modified;    /* Its program has changes that aren't saved (DESKTOP_MODIFIED). */
     bool popup;       /* A menu or tooltip: no frame, always on top, no keyboard. */
     bool undecorated; /* It draws its own title bar: no frame. */
+    bool fullscreen;  /* The whole screen, the panel too (DESKTOP_FULLSCREEN). */
     struct rect restore; /* Where it was before it was maximized or snapped (content). */
     enum snap snapped;
     int cursor; /* VX_CURSOR_* over its content. */

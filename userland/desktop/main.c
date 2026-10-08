@@ -1528,6 +1528,8 @@ static void draw_animated(struct vx_surface *view, int ox, int oy, struct window
 
 /* ---- Composing the screen ---- */
 
+static bool fullscreen_on_top(void);
+
 /* Draws everything that overlaps `area` into the screen buffer. */
 static void compose(struct rect area) {
     /* A view of the screen buffer clipped to the area; coordinates shift. */
@@ -1597,7 +1599,7 @@ static void compose(struct rect area) {
             outline_rounded(&view, s, 10, COLOR_OUTLINE);
         }
         draw_notes(&view, ox, oy);
-        if (area.y < PANEL_HEIGHT && !installer_only) {
+        if (area.y < PANEL_HEIGHT && !installer_only && !fullscreen_on_top()) {
             draw_panel(&view, ox, oy);
         }
         if (menu_open) {
@@ -1790,6 +1792,12 @@ static struct window *top_window(void) {
     return NULL;
 }
 
+/* A fullscreen window on top covers the panel too. */
+static bool fullscreen_on_top(void) {
+    struct window *w = top_window();
+    return w && w->fullscreen;
+}
+
 /* Puts the window on top of the others (of its kind: popups stay above). */
 static void raise_window(struct window *w) {
     int at = 0;
@@ -1807,6 +1815,7 @@ static void raise_window(struct window *w) {
     memmove(stack + to + 1, stack + to, (size_t)(window_count - 1 - to) * sizeof(stack[0]));
     stack[to] = w;
     add_damage(window_damage(w));
+    add_damage(panel_rect()); /* (It shows or hides under a fullscreen window.) */
 }
 
 /* Tells the program whether its window is maximized or minimized. */
@@ -1902,7 +1911,7 @@ static const char *const snap_names[] = {
 /* Puts a window in a half or a quarter of the screen (SNAP_TOP: maximized;
  * SNAP_NONE: back where it was). */
 static void snap_window(struct window *w, enum snap where) {
-    if (!w->resizable) {
+    if (!w->resizable || w->fullscreen) {
         return;
     }
     if (where == SNAP_TOP) {
@@ -1953,7 +1962,7 @@ static struct window *find_window(int client, uint32_t id) {
 }
 
 struct window *window_at(int x, int y) {
-    if (y < PANEL_HEIGHT) {
+    if (y < PANEL_HEIGHT && !fullscreen_on_top()) {
         return NULL;
     }
     for (int i = window_count - 1; i >= 0; i--) {
@@ -2050,7 +2059,8 @@ static void create_window(int client, struct desktop_message *m) {
         w->client = client;
         w->resizable = m->c & DESKTOP_RESIZABLE;
         w->popup = m->c & DESKTOP_POPUP;
-        w->undecorated = !w->popup && (m->c & DESKTOP_UNDECORATED);
+        w->fullscreen = m->c & DESKTOP_FULLSCREEN;
+        w->undecorated = !w->popup && (m->c & (DESKTOP_UNDECORATED | DESKTOP_FULLSCREEN));
         strncpy(w->title, title, sizeof(w->title) - 1);
         /* Cascade new windows from the top left (popups go where they're told). */
         int n = (w->id - 1) % 8;
@@ -2067,6 +2077,10 @@ static void create_window(int client, struct desktop_message *m) {
             w->y = screen.height > height + TITLE_HEIGHT
                        ? (screen.height - height - TITLE_HEIGHT) / 2 + TITLE_HEIGHT
                        : TITLE_HEIGHT + BORDER;
+        }
+        if (w->fullscreen) {
+            w->x = 0;
+            w->y = 0;
         }
         stack[window_count++] = w;
         raise_window(w);
@@ -2119,6 +2133,9 @@ static struct rect outline_damage(void) {
 /* Starts dragging a window by the pointer. A maximized or snapped one first
  * goes back to its size from before, under the pointer. */
 static void start_move(struct window *w) {
+    if (w->fullscreen) {
+        return;
+    }
     if (w->maximized || w->snapped != SNAP_NONE) {
         int offset_y = pointer_y - w->y;
         add_damage(window_damage(w));
@@ -3225,8 +3242,8 @@ static void button_event(int bit, bool down) {
     bool right_down = bit == 2 && down && !(before & 2);
     if (!down) {
         desktop_buttons &= ~bit;
-    } else if (pointer_y < PANEL_HEIGHT || menu_open || popup_open || search_open || clock_open ||
-               volume_open) {
+    } else if ((pointer_y < PANEL_HEIGHT && !fullscreen_on_top()) || menu_open || popup_open ||
+               search_open || clock_open || volume_open) {
         desktop_buttons |= bit;
     }
     if (left_down) {
@@ -3326,7 +3343,7 @@ static void button_event(int bit, bool down) {
         }
         return;
     }
-    if (left_down && pointer_y < PANEL_HEIGHT) {
+    if (left_down && pointer_y < PANEL_HEIGHT && !fullscreen_on_top()) {
         panel_click();
         return;
     }
@@ -3645,6 +3662,15 @@ static void fit_windows(void) {
     struct rect area = work_area();
     for (int i = 0; i < window_count; i++) {
         struct window *w = stack[i];
+        if (w->fullscreen) {
+            w->x = 0;
+            w->y = 0;
+            if (w->content.width != screen.width || w->content.height != screen.height) {
+                configure(w, screen.width, screen.height);
+            }
+            send_moved(w);
+            continue;
+        }
         if (w->maximized) {
             w->x = area.x;
             w->y = area.y;
