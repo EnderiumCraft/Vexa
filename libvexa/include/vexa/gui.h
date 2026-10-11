@@ -239,6 +239,14 @@ uint32_t vx_mix(uint32_t a, uint32_t b, int amount);
  * of a round corner of `radius` starts, and how much of the pixel just
  * outside it is covered (0 to 255), for a smooth edge. */
 int vx_corner_inset(int radius, int row, int *coverage);
+/* How much of pixel (col, row) of a round corner of `radius` (both counted
+ * from the corner's outer edges) is inside the curve: 0 to 255, for each
+ * pixel on its own, so the whole curve is smooth (not only one pixel a row). */
+int vx_corner_coverage(int radius, int col, int row);
+/* A row of a rectangle with round corners: `from_edge` rows from its top or
+ * bottom (or -1, a row between the corners), `alpha` of `color`, smooth. */
+void vx_blend_rounded_row(struct vx_surface *s, int x, int y, int width, int radius, int from_edge,
+                          uint32_t color, int alpha);
 /* A rectangle with round corners, filled: `alpha` (0 to 255) of `color`
  * over what's there. */
 void vx_fill_rounded(struct vx_surface *s, int x, int y, int width, int height, int radius,

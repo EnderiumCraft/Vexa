@@ -251,11 +251,7 @@ static void round_corners(struct vx_surface *s, const struct vx_surface *from, i
                           int h, int r) {
     for (int dy = 0; dy < r; dy++) {
         for (int dx = 0; dx < r; dx++) {
-            int cx = r - dx, cy = r - dy, out = 0;
-            for (int sub = 0; sub < 4; sub++) {
-                int sx = cx * 4 - (sub & 1) * 2 - 1, sy = cy * 4 - (sub >> 1) * 2 - 1;
-                out += sx * sx + sy * sy > r * r * 16;
-            }
+            int out = 255 - vx_corner_coverage(r, dx, dy);
             if (!out) {
                 continue;
             }
@@ -266,8 +262,7 @@ static void round_corners(struct vx_surface *s, const struct vx_surface *from, i
                     continue;
                 }
                 long at = (long)py[c] * s->stride + px[c];
-                s->pixels[at] = vx_mix(s->pixels[at], from->pixels[(long)py[c] * from->stride + px[c]],
-                                       out * 255 / 4);
+                s->pixels[at] = vx_mix(s->pixels[at], from->pixels[(long)py[c] * from->stride + px[c]], out);
             }
         }
     }

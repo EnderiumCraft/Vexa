@@ -362,6 +362,8 @@ two colors.
 | `void vx_draw_gel(s, x, y, width, height, radius, color)` | a glossy gel shape like Aqua's buttons: shiny on top, a glow at the bottom, a darker edge (`radius` = half the height: a pill; a square with it: a ball) |
 | `uint32_t vx_gel_color(color, row, height)` | the color of a gel's row, for drawing one's parts |
 | `int vx_corner_inset(radius, row, int *coverage)` | where a round corner's row starts, and how much of the pixel before it is covered |
+| `int vx_corner_coverage(radius, col, row)` | how much of a pixel of a round corner (counted from its outer edges) is inside the curve, 0-255: every pixel on its own, for a smooth curve |
+| `void vx_blend_rounded_row(s, x, y, width, radius, from_edge, color, alpha)` | one row of a rounded rectangle (`from_edge` rows from its top or bottom, or -1), smooth |
 | `bool vx_field_key(char *text, size_t size, const struct vx_gui_event *e)` | edits a field's text (UTF-8) with a key event; true if it changed |
 | `bool vx_inside(px, py, x, y, width, height)` | a point in a rectangle |
 | `void vx_menu_size(items, count, int *width, int *height)` | a pop-up menu's size |

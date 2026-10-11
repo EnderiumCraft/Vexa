@@ -127,16 +127,22 @@ static inline void lk_art(struct vx_surface *s, int x, int y, int size, int radi
     uint32_t a = lk_hsv(hue, 150, 235), b = lk_hsv(hue + 35 + (int)(h >> 9) % 50, 200, 120);
     vx_fill_rounded(s, x, y, size, size, radius, vx_mix(a, b, 128), 255);
     for (int row = 2; row < size - 2; row++) {
-        int inset = 0, coverage;
-        if (row < radius) {
-            inset = vx_corner_inset(radius, row, &coverage);
-        } else if (row >= size - radius) {
-            inset = vx_corner_inset(radius, size - 1 - row, &coverage);
-        }
-        for (int col = inset; col < size - inset; col += 4) {
+        int from_edge = row < radius ? row : row >= size - radius ? size - 1 - row : -1;
+        for (int col = 0; col < size; col += 4) {
             int t = (row + col) * 255 / (2 * size);
-            vx_fill(s, x + col, y + row, col + 4 <= size - inset ? 4 : size - inset - col, 1,
-                    vx_mix(a, b, t));
+            int w = col + 4 <= size ? 4 : size - col;
+            if (from_edge >= 0 && (col < radius || col + w > size - radius)) {
+                /* Beside a round corner: each pixel as much as the corner covers it. */
+                for (int k = col; k < col + w; k++) {
+                    int c = k < radius ? k : size - 1 - k < radius ? size - 1 - k : -1;
+                    int cover = c >= 0 ? vx_corner_coverage(radius, c, from_edge) : 255;
+                    if (cover > 0) {
+                        vx_blend_rounded_row(s, x + k, y + row, 1, 0, -1, vx_mix(a, b, t), cover);
+                    }
+                }
+            } else {
+                vx_fill(s, x + col, y + row, w, 1, vx_mix(a, b, t));
+            }
         }
     }
     /* Rings, faint, off center: a record's grooves. */

@@ -617,20 +617,19 @@ static void draw_library(struct vx_surface *s) {
         if (v->thumb) {
             /* The picture, with round corners. */
             for (int y = 0; y < THUMB_H; y++) {
-                int inset = 0, coverage;
-                if (y < 12) {
-                    inset = vx_corner_inset(12, y, &coverage);
-                } else if (y >= THUMB_H - 12) {
-                    inset = vx_corner_inset(12, THUMB_H - 1 - y, &coverage);
-                }
+                int from_edge = y < 12 ? y : y >= THUMB_H - 12 ? THUMB_H - 1 - y : -1;
                 if (r.y + y < 0 || r.y + y >= H()) {
                     continue;
                 }
-                for (int x = inset; x < THUMB_W - inset; x++) {
+                for (int x = 0; x < THUMB_W; x++) {
                     int px = r.x + x;
-                    if (px >= 0 && px < W()) {
-                        s->pixels[(long)(r.y + y) * s->stride + px] = v->thumb[y * THUMB_W + x];
+                    int c = x < 12 ? x : THUMB_W - 1 - x < 12 ? THUMB_W - 1 - x : -1;
+                    int cover = from_edge >= 0 && c >= 0 ? vx_corner_coverage(12, c, from_edge) : 255;
+                    if (px < 0 || px >= W() || cover == 0) {
+                        continue;
                     }
+                    uint32_t *p = &s->pixels[(long)(r.y + y) * s->stride + px];
+                    *p = cover == 255 ? v->thumb[y * THUMB_W + x] : vx_mix(*p, v->thumb[y * THUMB_W + x], cover);
                 }
             }
             vx_fill_rounded(s, r.x, r.y, THUMB_W, THUMB_H / 2, 12, 0xffffff, 18);

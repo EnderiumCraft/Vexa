@@ -1,4 +1,5 @@
 #include <stdbool.h>
+#include <stdlib.h>
 #include <string.h>
 #include <vexa/gui.h>
 
@@ -57,6 +58,73 @@ int vx_corner_inset(int radius, int row, int *coverage) {
     return inset;
 }
 
+static uint32_t isqrt(uint64_t n) {
+    uint64_t x = n, y = (x + 1) / 2;
+    while (y < x) {
+        x = y, y = (x + n / x) / 2;
+    }
+    return (uint32_t)x;
+}
+
+/* A pixel's coverage: 1 at the curve's middle less its distance from the
+ * corner's center (in 256ths of a pixel), and half a pixel either way. */
+static int coverage_of(int radius, int col, int row) {
+    uint64_t dx = (uint64_t)(2 * (radius - col) - 1), dy = (uint64_t)(2 * (radius - row) - 1);
+    int dist = (int)isqrt((dx * dx + dy * dy) * 16384); /* 256ths of a pixel. */
+    int c = 256 * radius - dist + 128;
+    c = c < 0 ? 0 : c > 256 ? 256 : c;
+    return c * 255 / 256;
+}
+
+/* Corners of small radii are kept, worked out once. */
+#define CORNER_CACHE 64
+static unsigned char *corners[CORNER_CACHE + 1];
+
+int vx_corner_coverage(int radius, int col, int row) {
+    if (radius <= 0 || col < 0 || row < 0 || col >= radius || row >= radius) {
+        return 255;
+    }
+    if (radius > CORNER_CACHE) {
+        return coverage_of(radius, col, row);
+    }
+    unsigned char *table = corners[radius];
+    if (!table) {
+        table = malloc((size_t)radius * radius);
+        if (!table) {
+            return coverage_of(radius, col, row);
+        }
+        for (int r = 0; r < radius; r++) {
+            for (int c = 0; c < radius; c++) {
+                table[r * radius + c] = (unsigned char)coverage_of(radius, c, r);
+            }
+        }
+        corners[radius] = table;
+    }
+    return table[row * radius + col];
+}
+
+void vx_blend_rounded_row(struct vx_surface *s, int x, int y, int width, int radius, int from_edge,
+                          uint32_t color, int alpha) {
+    if (from_edge < 0 || from_edge >= radius) {
+        blend_span(s, x, y, width, color, alpha);
+        return;
+    }
+    int a = alpha >= 255 ? 255 : alpha;
+    for (int col = 0; col < radius && col < width - col; col++) {
+        int c = vx_corner_coverage(radius, col, from_edge);
+        if (c > 0) {
+            int ca = c >= 255 ? a : c * a / 255;
+            blend_span(s, x + col, y, 1, color, ca);
+            if (width - 1 - col != col) {
+                blend_span(s, x + width - 1 - col, y, 1, color, ca);
+            }
+        }
+    }
+    if (width > 2 * radius) {
+        blend_span(s, x + radius, y, width - 2 * radius, color, alpha);
+    }
+}
+
 /* Where row `row` of a rounded rectangle starts (inset from each side), and
  * the coverage of the pixel outside that. */
 static int row_inset(int radius, int height, int row, int *coverage) {
@@ -70,17 +138,17 @@ static int fit_radius(int radius, int width, int height) {
     return radius * 2 > width ? width / 2 : radius;
 }
 
+/* How many rows a row is from the top or bottom of a rectangle with round
+ * corners, if it's beside a corner (or -1). */
+static int edge_row(int radius, int height, int row) {
+    return row < radius ? row : height - 1 - row < radius ? height - 1 - row : -1;
+}
+
 void vx_fill_rounded(struct vx_surface *s, int x, int y, int width, int height, int radius,
                      uint32_t color, int alpha) {
     radius = fit_radius(radius, width, height);
     for (int row = 0; row < height; row++) {
-        int coverage, inset = row_inset(radius, height, row, &coverage);
-        blend_span(s, x + inset, y + row, width - 2 * inset, color, alpha);
-        if (inset > 0 && coverage > 0) {
-            int edge = coverage * (alpha >= 255 ? 255 : alpha) / 255;
-            blend_span(s, x + inset - 1, y + row, 1, color, edge);
-            blend_span(s, x + width - inset, y + row, 1, color, edge);
-        }
+        vx_blend_rounded_row(s, x, y + row, width, radius, edge_row(radius, height, row), color, alpha);
     }
 }
 
@@ -102,13 +170,8 @@ void vx_draw_gel(struct vx_surface *s, int x, int y, int width, int height, int 
     x++, y++, width -= 2, height -= 2;
     radius = fit_radius(radius > 1 ? radius - 1 : radius, width, height);
     for (int row = 0; row < height; row++) {
-        int coverage, inset = row_inset(radius, height, row, &coverage);
-        uint32_t c = vx_gel_color(color, row, height);
-        blend_span(s, x + inset, y + row, width - 2 * inset, c, 255);
-        if (inset > 0 && coverage > 0) {
-            blend_span(s, x + inset - 1, y + row, 1, c, coverage);
-            blend_span(s, x + width - inset, y + row, 1, c, coverage);
-        }
+        vx_blend_rounded_row(s, x, y + row, width, radius, edge_row(radius, height, row),
+                             vx_gel_color(color, row, height), 255);
     }
     /* A thin highlight along the top, inside the edge. */
     int coverage, inset = row_inset(radius, height, 0, &coverage);
