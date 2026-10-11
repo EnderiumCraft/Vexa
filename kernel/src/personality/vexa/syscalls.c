@@ -1491,6 +1491,35 @@ static int64_t sys_hostname(uint64_t out, uint64_t size, uint64_t new_name, uint
     return 0;
 }
 
+/* vx_socket_timeout(handle, flags, uint64_t *ms): the receive timeout of a socket, or its
+ * send timeout with VX_TIMEOUT_SEND, set from *ms with VX_TIMEOUT_SET or read into it. */
+static int64_t sys_socket_timeout(uint64_t handle, uint64_t flags, uint64_t user_ms, uint64_t a3) {
+    (void)a3;
+    if (flags & ~(uint64_t)(VX_TIMEOUT_SEND | VX_TIMEOUT_SET)) {
+        return -VX_EINVAL;
+    }
+    int error;
+    struct socket *socket = get_socket(handle, &error);
+    if (!socket) {
+        return error;
+    }
+    uint64_t *timeout = flags & VX_TIMEOUT_SEND ? &socket->send_timeout_ms
+                                                : &socket->receive_timeout_ms;
+    int64_t result = 0;
+    if (flags & VX_TIMEOUT_SET) {
+        uint64_t ms;
+        if (!copy_from_user(&ms, user_ms, sizeof(ms))) {
+            result = -VX_EFAULT;
+        } else {
+            *timeout = ms;
+        }
+    } else if (!copy_to_user(user_ms, timeout, sizeof(*timeout))) {
+        result = -VX_EFAULT;
+    }
+    object_put(&socket->object);
+    return result;
+}
+
 static const syscall_fn syscalls[] = {
     [VX_SYS_EXIT] = sys_exit,
     [VX_SYS_LOG] = sys_log,
@@ -1559,6 +1588,7 @@ static const syscall_fn syscalls[] = {
     [VX_SYS_CHOWN] = sys_chown,
     [VX_SYS_ACCESS] = sys_access,
     [VX_SYS_CHMOD] = sys_chmod,
+    [VX_SYS_SOCKET_TIMEOUT] = sys_socket_timeout,
 };
 
 static void vexa_syscall(struct interrupt_frame *frame) {

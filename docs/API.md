@@ -164,6 +164,7 @@ long code = child >= 0 ? vx_wait(child, 0) : child;
 | `long vx_shutdown(int h, int how)` | `VX_SHUT_READ`, `VX_SHUT_WRITE`, `VX_SHUT_BOTH` |
 | `long vx_socket_address(int h, int peer, struct vx_socket_address *a)` | its own address (peer 0) or its peer's |
 | `long vx_socket_pair(int family, int type, int handles[2])` | two connected local sockets |
+| `long vx_socket_timeout(int h, unsigned flags, uint64_t *ms)` | the receive timeout, or the send one with `VX_TIMEOUT_SEND`, in ms: set from `*ms` with `VX_TIMEOUT_SET`, else read into it; 0 waits for as long as it takes. `setsockopt` and `getsockopt` with `SO_RCVTIMEO` and `SO_SNDTIMEO` use it |
 | `long vx_poll(struct vx_poll *handles, size_t count, long timeout_ms)` | waits until one is ready (`VX_POLL_READ`, `WRITE`; `ERROR`, `HANGUP` always reported); returns how many |
 | `long vx_net_info(struct vx_net_interface *interfaces, size_t count)` | the network interfaces |
 

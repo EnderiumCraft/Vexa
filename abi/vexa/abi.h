@@ -103,6 +103,12 @@
                               may, else -VX_EACCES */
 #define VX_SYS_CHMOD 67    /* vx_chmod(path, length, mode, VX_AT_* flags): new permission bits
                               (the owner or root only) */
+#define VX_SYS_SOCKET_TIMEOUT 68 /* vx_socket_timeout(handle, flags, uint64_t *ms): a socket's
+                              receive timeout, or its send timeout with VX_TIMEOUT_SEND, in
+                              ms: set from *ms with VX_TIMEOUT_SET, else read into *ms. 0
+                              waits for as long as it takes. */
+#define VX_TIMEOUT_SEND 1  /* The send timeout, not the receive one. */
+#define VX_TIMEOUT_SET 2   /* Set the timeout from *ms (else read it). */
 
 /* Users and groups. Each process has a real, an effective and a saved user
  * id, the same for its group, and a list of other groups it belongs to.

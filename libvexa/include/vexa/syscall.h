@@ -78,6 +78,9 @@ long vx_shutdown(int handle, int how);
 /* The socket's own address (peer 0) or its peer's; returns the length. */
 long vx_socket_address(int handle, int peer, struct vx_socket_address *address);
 long vx_socket_pair(int family, int type, int handles[2]);
+/* A socket's receive timeout in ms, or its send timeout with VX_TIMEOUT_SEND: set from *ms
+ * with VX_TIMEOUT_SET, else read into it. 0 waits for as long as it takes. */
+long vx_socket_timeout(int handle, unsigned flags, uint64_t *ms);
 /* Waits until one of the handles is ready (or timeout_ms passes; -1: no limit). */
 long vx_poll(struct vx_poll *handles, size_t count, long timeout_ms);
 /* The network interfaces; returns how many there are. */

@@ -214,6 +214,10 @@ long vx_shutdown(int handle, int how) {
     return syscall2(VX_SYS_SHUTDOWN, handle, how);
 }
 
+long vx_socket_timeout(int handle, unsigned flags, uint64_t *ms) {
+    return syscall3(VX_SYS_SOCKET_TIMEOUT, handle, flags, ms);
+}
+
 long vx_socket_address(int handle, int peer, struct vx_socket_address *address) {
     return syscall3(VX_SYS_SOCKET_ADDRESS, handle, peer, address);
 }

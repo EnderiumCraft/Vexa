@@ -14,6 +14,7 @@
 #include <sys/ioctl.h>
 #include <sys/select.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <vexa/net.h>
 #include <vexa/syscall.h>
 
@@ -220,13 +221,25 @@ int getpeername(int fd, struct sockaddr *address, socklen_t *length) {
     return socket_name(fd, 1, address, length);
 }
 
-/* Options: the common ones are accepted (Vexa's sockets behave as if they
- * were set the usual way); unknown ones aren't. */
+/* Options: the timeouts (SO_RCVTIMEO, SO_SNDTIMEO) are the kernel's. The others at these
+ * levels are accepted and ignored, so they have no effect: TCP_NODELAY is already the
+ * behaviour (Vexa's TCP sends at once), and keepalive, IP_HDRINCL and the multicast
+ * interfaces are not implemented. Other options are refused. */
 int setsockopt(int fd, int level, int name, const void *value, socklen_t length) {
-    (void)name, (void)value, (void)length;
     if (!__vx_is_socket(fd)) {
         errno = ENOTSOCK;
         return -1;
+    }
+    if (level == SOL_SOCKET && (name == SO_RCVTIMEO || name == SO_SNDTIMEO)) {
+        if (!value || length < sizeof(struct timeval)) {
+            errno = EINVAL;
+            return -1;
+        }
+        const struct timeval *tv = value;
+        /* Rounded up: a short timeout must not become 0, which waits for ever. */
+        uint64_t ms = (uint64_t)tv->tv_sec * 1000 + ((uint64_t)tv->tv_usec + 999) / 1000;
+        unsigned flags = VX_TIMEOUT_SET | (name == SO_SNDTIMEO ? VX_TIMEOUT_SEND : 0);
+        return (int)__vx_errno_result(vx_socket_timeout(fd, flags, &ms));
     }
     if (level == SOL_SOCKET || level == IPPROTO_TCP || level == IPPROTO_IP ||
         level == IPPROTO_IPV6) {
@@ -240,6 +253,22 @@ int getsockopt(int fd, int level, int name, void *value, socklen_t *length) {
     if (!__vx_is_socket(fd)) {
         errno = ENOTSOCK;
         return -1;
+    }
+    if (level == SOL_SOCKET && (name == SO_RCVTIMEO || name == SO_SNDTIMEO)) {
+        if (!value || !length || *length < sizeof(struct timeval)) {
+            errno = EINVAL;
+            return -1;
+        }
+        uint64_t ms = 0;
+        long result = vx_socket_timeout(fd, name == SO_SNDTIMEO ? VX_TIMEOUT_SEND : 0, &ms);
+        if (result < 0) {
+            return (int)__vx_errno_result(result);
+        }
+        struct timeval tv = {.tv_sec = (time_t)(ms / 1000),
+                             .tv_usec = (suseconds_t)(ms % 1000) * 1000};
+        memcpy(value, &tv, sizeof(tv));
+        *length = sizeof(tv);
+        return 0;
     }
     int answer = 0;
     if (level == SOL_SOCKET && name == SO_TYPE) {
