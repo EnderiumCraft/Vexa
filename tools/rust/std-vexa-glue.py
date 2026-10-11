@@ -36,6 +36,14 @@ EDITS_BUILD = [
     ("../build.rs",
      '        || target_os == "vexos"\n',
      '        || target_os == "vexos"\n        || target_os == "vexa"\n'),
+    # The errno accessor reads libvexa's __errno_location, as on Linux.
+    ("sys/io/error/unix.rs",
+     '            target_os = "hurd",\n        ),\n        link_name = "__errno_location"\n',
+     '            target_os = "hurd",\n            target_os = "vexa",\n        ),\n        link_name = "__errno_location"\n'),
+    # Vexa has no unwinder (libgcc's _Unwind_*), so its backtraces are the no-op ones.
+    ("../../backtrace/src/backtrace/mod.rs",
+     '                not(target_os = "emscripten"),\n                not(all(target_os = "ios", target_arch = "arm")),\n',
+     '                not(target_os = "emscripten"),\n                not(all(target_os = "ios", target_arch = "arm")),\n                not(target_os = "vexa"),\n'),
 ]
 
 # The directory-entry lists: each names "wasi" as its last OS, and Vexa goes next to it.
