@@ -1,6 +1,6 @@
-diff -ruN -x .cargo-ok -x consts.rs -x types.rs -x fns.rs -x '*.orig' a/libc/src/new/mod.rs b/libc/src/new/mod.rs
---- a/libc/src/new/mod.rs	2026-10-11 19:41:16.605411006 +0000
-+++ b/libc/src/new/mod.rs	2026-10-11 19:41:16.620639929 +0000
+diff -ruN a/libc/src/new/mod.rs b/libc/src/new/mod.rs
+--- a/libc/src/new/mod.rs	2026-10-11 20:10:08.498148932 +0000
++++ b/libc/src/new/mod.rs	2026-10-11 20:10:08.547270264 +0000
 @@ -125,6 +125,9 @@
      } else if #[cfg(target_os = "vxworks")] {
          mod vxworks;
@@ -11,15 +11,15 @@ diff -ruN -x .cargo-ok -x consts.rs -x types.rs -x fns.rs -x '*.orig' a/libc/src
      } else if #[cfg(target_os = "wasi")] {
          mod wasi;
          // pub(crate) use wasi::*;
-diff -ruN -x .cargo-ok -x consts.rs -x types.rs -x fns.rs -x '*.orig' a/libc/src/new/vexa/mod.rs b/libc/src/new/vexa/mod.rs
+diff -ruN a/libc/src/new/vexa/mod.rs b/libc/src/new/vexa/mod.rs
 --- a/libc/src/new/vexa/mod.rs	1970-01-01 00:00:00.000000000 +0000
-+++ b/libc/src/new/vexa/mod.rs	2026-10-11 19:41:16.622359938 +0000
++++ b/libc/src/new/vexa/mod.rs	2026-10-11 20:10:08.547456837 +0000
 @@ -0,0 +1,2 @@
 +//! Vexa's C library (libvexa), as libc's Rust declarations.
 +pub(crate) use super::common::posix::unistd;
-diff -ruN -x .cargo-ok -x consts.rs -x types.rs -x fns.rs -x '*.orig' a/libc/src/unix/mod.rs b/libc/src/unix/mod.rs
---- a/libc/src/unix/mod.rs	2026-10-11 19:41:16.612836021 +0000
-+++ b/libc/src/unix/mod.rs	2026-10-11 19:41:16.628319944 +0000
+diff -ruN a/libc/src/unix/mod.rs b/libc/src/unix/mod.rs
+--- a/libc/src/unix/mod.rs	2026-10-11 20:10:08.511617065 +0000
++++ b/libc/src/unix/mod.rs	2026-10-11 20:10:08.547626612 +0000
 @@ -1923,6 +1923,9 @@
      } else if #[cfg(target_os = "nuttx")] {
          mod nuttx;
@@ -30,10 +30,10 @@ diff -ruN -x .cargo-ok -x consts.rs -x types.rs -x fns.rs -x '*.orig' a/libc/src
      } else {
          // Unknown target_os
      }
-diff -ruN -x .cargo-ok -x consts.rs -x types.rs -x fns.rs -x '*.orig' a/libc/src/unix/vexa/mod.rs b/libc/src/unix/vexa/mod.rs
+diff -ruN a/libc/src/unix/vexa/mod.rs b/libc/src/unix/vexa/mod.rs
 --- a/libc/src/unix/vexa/mod.rs	1970-01-01 00:00:00.000000000 +0000
-+++ b/libc/src/unix/vexa/mod.rs	2026-10-11 19:41:16.629407931 +0000
-@@ -0,0 +1,445 @@
++++ b/libc/src/unix/vexa/mod.rs	2026-10-11 20:10:15.587682808 +0000
+@@ -0,0 +1,474 @@
 +//! Vexa (libvexa): the types and functions of Vexa's C library, as libc declares them.
 +//!
 +//! The layouts here follow libvexa's own headers (`libvexa/include`), not Linux's: libvexa
@@ -311,6 +311,24 @@ diff -ruN -x .cargo-ok -x consts.rs -x types.rs -x fns.rs -x '*.orig' a/libc/src
 +    pub f_namemax: c_ulong,
 +}
 +
++// Structures libvexa's headers don't define, with Linux's layouts. libvexa's setsockopt
++// accepts the options that use them and ignores them, so they have no effect yet.
++#[repr(C)]
++#[derive(Copy, Clone)]
++pub struct ip_mreqn {
++    pub imr_multiaddr: in_addr,
++    pub imr_address: in_addr,
++    pub imr_ifindex: c_int,
++}
++
++#[repr(C)]
++#[derive(Copy, Clone)]
++pub struct ip_mreq_source {
++    pub imr_multiaddr: in_addr,
++    pub imr_interface: in_addr,
++    pub imr_sourceaddr: in_addr,
++}
++
 +// Constants and macros libvexa's headers don't define, with Linux's values for them. Vexa's
 +// own values would go here once libvexa defines them.
 +pub const EDQUOT: c_int = 122;
@@ -326,6 +344,17 @@ diff -ruN -x .cargo-ok -x consts.rs -x types.rs -x fns.rs -x '*.orig' a/libc/src
 +pub const IPV6_MULTICAST_LOOP: c_int = 19;
 +pub const IPV6_ADD_MEMBERSHIP: c_int = 20;
 +pub const IPV6_DROP_MEMBERSHIP: c_int = 21;
++pub const IP_HDRINCL: c_int = 3;
++pub const IP_RECVTOS: c_int = 13;
++pub const IP_MULTICAST_IF: c_int = 32;
++pub const IP_ADD_SOURCE_MEMBERSHIP: c_int = 39;
++pub const IP_DROP_SOURCE_MEMBERSHIP: c_int = 40;
++pub const IPV6_MULTICAST_IF: c_int = 17;
++pub const IPV6_RECVHOPLIMIT: c_int = 51;
++pub const IPV6_RECVTCLASS: c_int = 66;
++pub const TCP_MAXSEG: c_int = 2;
++pub const SOCK_RDM: c_int = 4;
++pub const MSG_EOR: c_int = 0x80;
 +pub const _SC_HOST_NAME_MAX: c_int = 180;
 +pub const _SC_GETPW_R_SIZE_MAX: c_int = 70;
 +
