@@ -14,6 +14,8 @@
 #   hyper-probe.rs   hyper's HTTP/1 client and server over loopback, on tokio
 #   https-probe.rs   the CA bundle in /etc/ssl/certs as rustls's trust store: a self-signed
 #                    server is refused, and example.com is fetched over HTTPS
+#   native-probe.rs  poll over 120 descriptors, dlopen and dlsym of libvexa.so, and a read
+#                    timeout on a socket
 #
 # WORKDIR is the directory build-std-vexa.sh made. Its crates/ and probes are recreated on
 # each run. The probes share one target directory, so std is built once.
@@ -181,3 +183,17 @@ getrandom02 = { package = "getrandom", path = "$work/crates/getrandom-0.2.17" }
 EOF2
 cp "$here/https-probe.rs" "$work/probe-https/src/main.rs"
 build_probe "$work/probe-https"
+
+echo "== probe 6: poll over more descriptors than before, dlopen, and a socket read timeout"
+rm -rf "$work/probe-native"
+mkdir -p "$work/probe-native/src"
+cat > "$work/probe-native/Cargo.toml" <<EOF2
+[package]
+name = "probe-native"
+version = "0.0.0"
+edition = "2021"
+
+[dependencies]
+EOF2
+cp "$here/native-probe.rs" "$work/probe-native/src/main.rs"
+build_probe "$work/probe-native"
