@@ -199,8 +199,14 @@ lands.
    (`tools/mozjs/build-mozjs-vexa.sh`), links with the Rust glue, and runs a script with a GC
    in the VM. The Rust bindings build too (`tools/mozjs/build-rust-vexa.sh`), and the Rust
    program runs the same script in the VM and passes. The JIT and intl stay off for now.
-4. **M4, GL for WebRender.** Give surfman a software GL context on Vexa, from OSMesa
-   (softpipe). Check first that softpipe gives the GL version WebRender requires.
+4. **M4, GL for WebRender.** Done. Mesa's softpipe through OSMesa gives OpenGL 3.3 core, and
+   WebRender needs 3.2: [`tests/gl/core-gl-test.c`](../tests/gl/core-gl-test.c) checks the core
+   profile in the VM. surfman had no OSMesa backend, so
+   [`third_party/surfman-vexa.patch`](../third_party/surfman-vexa.patch) adds one (selected on
+   Vexa), and WebRender 0.70 creates its renderer on that context, draws a rectangle, and gets
+   the right pixels back. The test is [`tools/webrender/webrender-test`](../tools/webrender/webrender-test),
+   built by [`tools/webrender/build-webrender-vexa.sh`](../tools/webrender/build-webrender-vexa.sh),
+   and it prints `webrender-test: passed` in the VM.
 5. **M5, an embedder.** A Vexa app that hosts Servo: a window through libvexa's GUI, input,
    loading pages through `net`, painting the frame. Runs in the VM.
 6. **M6, integration.** An app bundle, a desktop entry, tests and docs, and the sandbox
@@ -208,6 +214,6 @@ lands.
 
 ## Next step
 
-M4, GL for WebRender. Find out which GL version WebRender needs, and whether Mesa's softpipe
-(OSMesa) on Vexa gives it. Then give surfman a software GL context. The first Servo build keeps
-the JIT and intl off; revisit that once M5 runs.
+M5, an embedder. Host Servo in a Vexa app: a window through libvexa's GUI (or the native
+compositor), input, loading pages through `net`, and painting WebRender's frame into it. The
+first Servo build keeps the JIT and intl off; revisit that once M5 runs.

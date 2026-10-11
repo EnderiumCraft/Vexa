@@ -1,0 +1,28 @@
+[package]
+name = "webrender-test"
+version = "0.0.0"
+edition = "2021"
+build = "build.rs"
+
+# Built by build-webrender-vexa.sh, which lays out ../surfman and ../libc next to this crate.
+[dependencies]
+euclid = "0.22"
+gleam = "0.15.1"
+surfman = { path = "../surfman" }
+webrender = "=0.70.0"
+# FreeType and libpng built from their sources (the same version WebRender uses).
+freetype-sys = { version = "=0.23.0", features = ["bundled"] }
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+
+# Vexa's libc: the crates.io libc has no Vexa module. ../libc is libc 0.2.190 with
+# third_party/libc-vexa.patch and tools/rust/gen-vexa-libc.py applied.
+[patch.crates-io]
+libc = { path = "../libc" }
+
+# This crate is its own workspace, so the repo's layout does not matter to cargo.
+[workspace]

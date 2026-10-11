@@ -1,0 +1,587 @@
+diff -ruN a/Cargo.toml b/Cargo.toml
+--- a/Cargo.toml	2026-10-11 23:28:28.344514943 +0000
++++ b/Cargo.toml	2026-10-11 23:28:28.354147599 +0000
+@@ -105,7 +105,7 @@
+ [build-dependencies.gl_generator]
+ version = "0.14"
+ 
+-[target.'cfg(all(unix, not(any(target_os = "macos", target_os = "android", target_env = "ohos"))))'.dependencies.wayland-sys]
++[target.'cfg(all(unix, not(any(target_os = "macos", target_os = "android", target_os = "vexa", target_env = "ohos"))))'.dependencies.wayland-sys]
+ version = "0.31"
+ features = [
+     "client",
+@@ -113,7 +113,7 @@
+     "egl",
+ ]
+ 
+-[target.'cfg(all(unix, not(any(target_os = "macos", target_os = "android", target_env = "ohos"))))'.dependencies.x11-dl]
++[target.'cfg(all(unix, not(any(target_os = "macos", target_os = "android", target_os = "vexa", target_env = "ohos"))))'.dependencies.x11-dl]
+ version = "2.3.0"
+ optional = true
+ 
+diff -ruN a/build.rs b/build.rs
+--- a/build.rs	2026-10-11 23:28:28.347252857 +0000
++++ b/build.rs	2026-10-11 23:28:28.356192382 +0000
+@@ -17,7 +17,8 @@
+         ios_platform: { target_os = "ios" },
+         windows_platform: { target_os = "windows" },
+         apple: { any(target_os = "ios", target_os = "macos") },
+-        free_unix: { all(unix, not(apple), not(android_platform), not(target_os = "emscripten"), not(ohos_platform)) },
++        osmesa_platform: { target_os = "vexa" },
++        free_unix: { all(unix, not(apple), not(android_platform), not(target_os = "emscripten"), not(ohos_platform), not(osmesa_platform)) },
+ 
+         // Native displays.
+         x11_platform: { all(free_unix, feature = "sm-x11") },
+diff -ruN a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs	2026-10-11 23:28:28.349555598 +0000
++++ b/src/lib.rs	2026-10-11 23:28:28.358097479 +0000
+@@ -32,6 +32,8 @@
+ #[cfg(free_unix)]
+ pub mod mesa_surfaceless;
+ pub mod multi;
++#[cfg(osmesa_platform)]
++pub mod osmesa;
+ mod renderbuffers;
+ mod surface;
+ #[cfg(all(x11_platform, not(wayland_default)))]
+@@ -53,6 +55,8 @@
+ pub use unix as default;
+ #[cfg(wayland_default)]
+ pub use wayland as default;
++#[cfg(osmesa_platform)]
++pub use osmesa as default;
+ #[cfg(all(windows_platform, not(angle_default)))]
+ pub use wgl as default;
+ 
+diff -ruN a/src/osmesa/connection.rs b/src/osmesa/connection.rs
+--- a/src/osmesa/connection.rs	1970-01-01 00:00:00.000000000 +0000
++++ b/src/osmesa/connection.rs	2026-10-11 23:28:28.359614638 +0000
+@@ -0,0 +1,64 @@
++//! Connections to OSMesa. There is no display server, so a connection is only a handle.
++use super::device::{Adapter, Device};
++use super::surface::NativeWidget;
++use crate::info::GLApi;
++use crate::Error;
++use euclid::default::Size2D;
++use std::os::raw::c_void;
++
++/// A connection to OSMesa.
++#[derive(Clone, Debug)]
++pub struct Connection;
++
++impl Connection {
++    /// Connects to OSMesa, which needs no display.
++    pub fn new() -> Result<Connection, Error> {
++        Ok(Connection)
++    }
++
++    /// OSMesa is desktop OpenGL.
++    pub fn gl_api(&self) -> GLApi {
++        GLApi::GL
++    }
++
++    /// The adapter: OSMesa has only the software renderer.
++    pub fn create_adapter(&self) -> Result<Adapter, Error> {
++        self.create_hardware_adapter()
++    }
++
++    pub fn create_hardware_adapter(&self) -> Result<Adapter, Error> {
++        Ok(Adapter)
++    }
++
++    pub fn create_low_power_adapter(&self) -> Result<Adapter, Error> {
++        Ok(Adapter)
++    }
++
++    pub fn create_software_adapter(&self) -> Result<Adapter, Error> {
++        Ok(Adapter)
++    }
++
++    pub fn create_device(&self, adapter: &Adapter) -> Result<Device, Error> {
++        Device::new(self, adapter)
++    }
++
++    pub fn from_display_handle(_: raw_window_handle::DisplayHandle) -> Result<Connection, Error> {
++        Err(Error::IncompatibleNativeWidget)
++    }
++
++    pub unsafe fn create_native_widget_from_ptr(
++        &self,
++        _raw: *mut c_void,
++        _size: Size2D<i32>,
++    ) -> NativeWidget {
++        NativeWidget
++    }
++
++    pub fn create_native_widget_from_window_handle(
++        &self,
++        _: raw_window_handle::WindowHandle,
++        _size: Size2D<i32>,
++    ) -> Result<NativeWidget, Error> {
++        Err(Error::IncompatibleNativeWidget)
++    }
++}
+diff -ruN a/src/osmesa/context.rs b/src/osmesa/context.rs
+--- a/src/osmesa/context.rs	1970-01-01 00:00:00.000000000 +0000
++++ b/src/osmesa/context.rs	2026-10-11 23:28:28.359595486 +0000
+@@ -0,0 +1,38 @@
++//! OpenGL contexts on OSMesa.
++use super::ffi::OSMesaContext;
++use super::surface::Surface;
++use crate::context::{ContextAttributes, ContextID};
++
++/// What a context is created with.
++#[derive(Clone, Copy, Debug)]
++pub struct ContextDescriptor {
++    pub(crate) attributes: ContextAttributes,
++}
++
++/// An OpenGL context: an OSMesa context, and the surface bound to it.
++pub struct Context {
++    pub(crate) id: ContextID,
++    pub(crate) osmesa: OSMesaContext,
++    pub(crate) descriptor: ContextDescriptor,
++    pub(crate) surface: Option<Surface>,
++    /// What OSMesa draws into when no surface is bound: one RGBA pixel.
++    #[allow(dead_code)]
++    default_pixels: Vec<u8>,
++    default_pixels_ptr: *mut u8,
++}
++
++impl Context {
++    pub(crate) fn new(id: ContextID, osmesa: OSMesaContext, descriptor: ContextDescriptor) -> Context {
++        let mut default_pixels = vec![0u8; 4];
++        let default_pixels_ptr = default_pixels.as_mut_ptr();
++        Context { id, osmesa, descriptor, surface: None, default_pixels, default_pixels_ptr }
++    }
++
++    /// The buffer OSMesa draws into, and its width and height.
++    pub(crate) fn buffer(&self) -> (*mut u8, i32, i32) {
++        match self.surface {
++            Some(ref surface) => (surface.pixels_ptr, surface.size.width, surface.size.height),
++            None => (self.default_pixels_ptr, 1, 1),
++        }
++    }
++}
+diff -ruN a/src/osmesa/device.rs b/src/osmesa/device.rs
+--- a/src/osmesa/device.rs	1970-01-01 00:00:00.000000000 +0000
++++ b/src/osmesa/device.rs	2026-10-11 23:28:28.359638515 +0000
+@@ -0,0 +1,299 @@
++//! Devices on OSMesa: the one software adapter, and the contexts and surfaces made from it.
++use super::connection::Connection;
++use super::context::{Context, ContextDescriptor};
++use super::ffi::{self, OSMesaContext};
++use super::surface::{NativeWidget, Surface, SurfaceTexture};
++use crate::context::{ContextAttributeFlags, ContextAttributes, ContextID, CREATE_CONTEXT_MUTEX};
++use crate::info::GLApi;
++use crate::{Error, SurfaceAccess, SurfaceInfo, SurfaceType, WindowingApiError};
++use euclid::default::Size2D;
++use glow::Texture;
++use std::ffi::CString;
++use std::os::raw::{c_int, c_void};
++use std::ptr;
++
++/// The adapter. OSMesa has only the software renderer.
++#[derive(Clone, Debug)]
++pub struct Adapter;
++
++/// A device: a connection and its adapter. Contexts and surfaces are made from it.
++#[derive(Clone)]
++pub struct Device {
++    connection: Connection,
++    adapter: Adapter,
++}
++
++impl Device {
++    pub(crate) fn new(connection: &Connection, adapter: &Adapter) -> Result<Device, Error> {
++        Ok(Device { connection: connection.clone(), adapter: adapter.clone() })
++    }
++
++    pub fn connection(&self) -> Connection {
++        self.connection.clone()
++    }
++
++    pub fn adapter(&self) -> Adapter {
++        self.adapter.clone()
++    }
++
++    pub fn gl_api(&self) -> GLApi {
++        GLApi::GL
++    }
++
++    pub fn create_context_descriptor(
++        &self,
++        attributes: &ContextAttributes,
++    ) -> Result<ContextDescriptor, Error> {
++        Ok(ContextDescriptor { attributes: *attributes })
++    }
++
++    /// Creates a context: a core profile unless the descriptor asks for compatibility, at the
++    /// descriptor's version if it has one.
++    pub fn create_context(
++        &self,
++        descriptor: &ContextDescriptor,
++        share_with: Option<&Context>,
++    ) -> Result<Context, Error> {
++        let attributes = descriptor.attributes;
++        let flags = attributes.flags;
++        let profile = if flags.contains(ContextAttributeFlags::COMPATIBILITY_PROFILE) {
++            ffi::OSMESA_COMPAT_PROFILE
++        } else {
++            ffi::OSMESA_CORE_PROFILE
++        };
++        let mut list: Vec<c_int> = vec![
++            ffi::OSMESA_FORMAT,
++            ffi::GL_RGBA,
++            ffi::OSMESA_DEPTH_BITS,
++            if flags.contains(ContextAttributeFlags::DEPTH) { 24 } else { 0 },
++            ffi::OSMESA_STENCIL_BITS,
++            if flags.contains(ContextAttributeFlags::STENCIL) { 8 } else { 0 },
++            ffi::OSMESA_ACCUM_BITS,
++            0,
++            ffi::OSMESA_PROFILE,
++            profile,
++        ];
++        if attributes.version.major > 0 {
++            list.extend_from_slice(&[
++                ffi::OSMESA_CONTEXT_MAJOR_VERSION,
++                attributes.version.major as c_int,
++                ffi::OSMESA_CONTEXT_MINOR_VERSION,
++                attributes.version.minor as c_int,
++            ]);
++        }
++        list.push(0);
++
++        let sharelist: OSMesaContext = match share_with {
++            Some(context) => context.osmesa,
++            None => ptr::null_mut(),
++        };
++        let osmesa = unsafe { ffi::OSMesaCreateContextAttribs(list.as_ptr(), sharelist) };
++        if osmesa.is_null() {
++            return Err(Error::ContextCreationFailed(WindowingApiError::Failed));
++        }
++
++        let id = {
++            let mut next = CREATE_CONTEXT_MUTEX.lock().unwrap();
++            next.0 += 1;
++            *next
++        };
++        Ok(Context::new(id, osmesa, *descriptor))
++    }
++
++    /// Destroys a context. Its surface must be unbound first.
++    pub fn destroy_context(&self, context: &mut Context) -> Result<(), Error> {
++        if context.surface.is_some() {
++            return Err(Error::SurfaceAlreadyBound);
++        }
++        if context.osmesa.is_null() {
++            return Ok(());
++        }
++        unsafe {
++            if ffi::OSMesaGetCurrentContext() == context.osmesa {
++                ffi::OSMesaMakeCurrent(ptr::null_mut(), ptr::null_mut(), 0, 0, 0);
++            }
++            ffi::OSMesaDestroyContext(context.osmesa);
++        }
++        context.osmesa = ptr::null_mut();
++        Ok(())
++    }
++
++    pub fn context_descriptor(&self, context: &Context) -> ContextDescriptor {
++        context.descriptor
++    }
++
++    /// Makes the context current on this thread, drawing into its bound surface.
++    pub fn make_context_current(&self, context: &Context) -> Result<(), Error> {
++        let (buffer, width, height) = context.buffer();
++        let ok = unsafe {
++            ffi::OSMesaMakeCurrent(
++                context.osmesa,
++                buffer as *mut c_void,
++                ffi::GL_UNSIGNED_BYTE,
++                width,
++                height,
++            )
++        };
++        if ok == ffi::GL_TRUE {
++            Ok(())
++        } else {
++            Err(Error::MakeCurrentFailed(WindowingApiError::Failed))
++        }
++    }
++
++    pub fn make_no_context_current(&self) -> Result<(), Error> {
++        unsafe {
++            ffi::OSMesaMakeCurrent(ptr::null_mut(), ptr::null_mut(), 0, 0, 0);
++        }
++        Ok(())
++    }
++
++    pub fn context_descriptor_attributes(
++        &self,
++        context_descriptor: &ContextDescriptor,
++    ) -> ContextAttributes {
++        context_descriptor.attributes
++    }
++
++    /// The address of an OpenGL function, from libOSMesa.
++    pub fn get_proc_address(&self, _: &Context, symbol_name: &str) -> *const c_void {
++        match CString::new(symbol_name) {
++            Ok(name) => unsafe { ffi::OSMesaGetProcAddress(name.as_ptr()) },
++            Err(_) => ptr::null(),
++        }
++    }
++
++    pub fn bind_surface_to_context(
++        &self,
++        context: &mut Context,
++        mut surface: Surface,
++    ) -> Result<(), (Error, Surface)> {
++        if context.surface.is_some() {
++            return Err((Error::SurfaceAlreadyBound, surface));
++        }
++        surface.context_id = Some(context.id);
++        context.surface = Some(surface);
++        self.refresh_current(context);
++        Ok(())
++    }
++
++    pub fn unbind_surface_from_context(
++        &self,
++        context: &mut Context,
++    ) -> Result<Option<Surface>, Error> {
++        let surface = context.surface.take();
++        self.refresh_current(context);
++        Ok(surface.map(|mut surface| {
++            surface.context_id = None;
++            surface
++        }))
++    }
++
++    pub fn context_id(&self, context: &Context) -> ContextID {
++        context.id
++    }
++
++    pub fn context_surface_info(&self, context: &Context) -> Result<Option<SurfaceInfo>, Error> {
++        Ok(context.surface.as_ref().map(|surface| self.surface_info(surface)))
++    }
++
++    /// Creates a surface: a buffer of pixels in memory. Widgets need a window, which OSMesa
++    /// does not have.
++    pub fn create_surface(
++        &self,
++        _: &Context,
++        _: SurfaceAccess,
++        surface_type: SurfaceType<NativeWidget>,
++    ) -> Result<Surface, Error> {
++        match surface_type {
++            SurfaceType::Generic { size } if size.width > 0 && size.height > 0 => {
++                Ok(Surface::new(size))
++            }
++            SurfaceType::Generic { .. } => Err(Error::Failed),
++            SurfaceType::Widget { .. } => Err(Error::UnsupportedOnThisPlatform),
++        }
++    }
++
++    pub fn create_surface_texture(
++        &self,
++        _: &mut Context,
++        surface: Surface,
++    ) -> Result<SurfaceTexture, (Error, Surface)> {
++        Err((Error::Unimplemented, surface))
++    }
++
++    pub fn destroy_surface(&self, _: &mut Context, surface: &mut Surface) -> Result<(), Error> {
++        surface.pixels = Vec::new();
++        surface.pixels_ptr = ptr::null_mut();
++        surface.size = Size2D::new(0, 0);
++        Ok(())
++    }
++
++    pub fn destroy_surface_texture(
++        &self,
++        _: &mut Context,
++        surface_texture: SurfaceTexture,
++    ) -> Result<Surface, (Error, SurfaceTexture)> {
++        Err((Error::Unimplemented, surface_texture))
++    }
++
++    pub fn surface_gl_texture_target(&self) -> u32 {
++        ffi::GL_TEXTURE_2D
++    }
++
++    /// Presenting does nothing: the pixels are already in the surface's buffer.
++    pub fn present_bound_surface(&self, _: &mut Context) -> Result<(), Error> {
++        Ok(())
++    }
++
++    pub fn present_surface(&self, _: &Context, _: &mut Surface) -> Result<(), Error> {
++        Ok(())
++    }
++
++    pub fn resize_bound_surface(
++        &self,
++        context: &mut Context,
++        size: Size2D<i32>,
++    ) -> Result<(), Error> {
++        match context.surface {
++            Some(ref mut surface) if size.width > 0 && size.height > 0 => surface.resize(size),
++            _ => return Err(Error::Failed),
++        }
++        self.refresh_current(context);
++        Ok(())
++    }
++
++    pub fn resize_surface(
++        &self,
++        _: &Context,
++        surface: &mut Surface,
++        size: Size2D<i32>,
++    ) -> Result<(), Error> {
++        if size.width <= 0 || size.height <= 0 {
++            return Err(Error::Failed);
++        }
++        surface.resize(size);
++        Ok(())
++    }
++
++    pub fn surface_info(&self, surface: &Surface) -> SurfaceInfo {
++        SurfaceInfo {
++            size: surface.size,
++            id: surface.id,
++            context_id: surface.context_id.unwrap_or(ContextID(0)),
++            framebuffer_object: None,
++        }
++    }
++
++    pub fn surface_texture_object(&self, _: &SurfaceTexture) -> Option<Texture> {
++        None
++    }
++
++    /// Points the current context at its bound surface's buffer again, after the buffer
++    /// changed. Does nothing if the context is not current on this thread.
++    fn refresh_current(&self, context: &Context) {
++        if unsafe { ffi::OSMesaGetCurrentContext() } == context.osmesa {
++            let _ = self.make_context_current(context);
++        }
++    }
++}
+diff -ruN a/src/osmesa/ffi.rs b/src/osmesa/ffi.rs
+--- a/src/osmesa/ffi.rs	1970-01-01 00:00:00.000000000 +0000
++++ b/src/osmesa/ffi.rs	2026-10-11 23:28:28.359539103 +0000
+@@ -0,0 +1,38 @@
++//! The OSMesa entry points, from Mesa's libOSMesa.so (off-screen OpenGL).
++#![allow(non_snake_case)]
++
++use std::os::raw::{c_char, c_int, c_uint, c_void};
++
++pub type OSMesaContext = *mut c_void;
++pub type GLenum = c_uint;
++pub type GLsizei = c_int;
++
++pub const GL_TRUE: c_int = 1;
++pub const GL_UNSIGNED_BYTE: GLenum = 0x1401;
++pub const GL_TEXTURE_2D: u32 = 0x0DE1;
++pub const GL_RGBA: c_int = 0x1908;
++
++pub const OSMESA_FORMAT: c_int = 0x22;
++pub const OSMESA_DEPTH_BITS: c_int = 0x30;
++pub const OSMESA_STENCIL_BITS: c_int = 0x31;
++pub const OSMESA_ACCUM_BITS: c_int = 0x32;
++pub const OSMESA_PROFILE: c_int = 0x33;
++pub const OSMESA_CORE_PROFILE: c_int = 0x34;
++pub const OSMESA_COMPAT_PROFILE: c_int = 0x35;
++pub const OSMESA_CONTEXT_MAJOR_VERSION: c_int = 0x36;
++pub const OSMESA_CONTEXT_MINOR_VERSION: c_int = 0x37;
++
++#[link(name = "OSMesa")]
++extern "C" {
++    pub fn OSMesaCreateContextAttribs(attribs: *const c_int, sharelist: OSMesaContext) -> OSMesaContext;
++    pub fn OSMesaDestroyContext(ctx: OSMesaContext);
++    pub fn OSMesaMakeCurrent(
++        ctx: OSMesaContext,
++        buffer: *mut c_void,
++        type_: GLenum,
++        width: GLsizei,
++        height: GLsizei,
++    ) -> c_int;
++    pub fn OSMesaGetCurrentContext() -> OSMesaContext;
++    pub fn OSMesaGetProcAddress(name: *const c_char) -> *const c_void;
++}
+diff -ruN a/src/osmesa/mod.rs b/src/osmesa/mod.rs
+--- a/src/osmesa/mod.rs	1970-01-01 00:00:00.000000000 +0000
++++ b/src/osmesa/mod.rs	2026-10-11 23:28:28.359562049 +0000
+@@ -0,0 +1,14 @@
++//! The OSMesa backend: Mesa's software OpenGL (softpipe, on Vexa), drawing into memory.
++//!
++//! A surface is a buffer of pixels that its owner keeps. Binding it to a context gives OSMesa
++//! that buffer to draw into; with no surface bound, a context draws into a single pixel. There
++//! is no window, so presenting does nothing: the program reads the pixels itself.
++
++mod ffi;
++
++pub mod connection;
++pub mod context;
++pub mod device;
++pub mod surface;
++
++crate::implement_interfaces!();
+diff -ruN a/src/osmesa/surface.rs b/src/osmesa/surface.rs
+--- a/src/osmesa/surface.rs	1970-01-01 00:00:00.000000000 +0000
++++ b/src/osmesa/surface.rs	2026-10-11 23:28:28.359578528 +0000
+@@ -0,0 +1,55 @@
++//! Surfaces on OSMesa: buffers of RGBA pixels, kept in memory.
++use crate::context::ContextID;
++use crate::surface::SurfaceID;
++use euclid::default::Size2D;
++use std::sync::atomic::{AtomicUsize, Ordering};
++
++static NEXT_SURFACE_ID: AtomicUsize = AtomicUsize::new(1);
++
++/// A buffer of RGBA pixels that OSMesa draws into while it is bound to a context.
++///
++/// The surface owns its pixels. Binding it moves it into the context, and the pixels stay put
++/// until the surface is resized.
++#[derive(Debug)]
++pub struct Surface {
++    pub(crate) id: SurfaceID,
++    pub(crate) size: Size2D<i32>,
++    pub(crate) pixels: Vec<u8>,
++    /// Where OSMesa draws: `pixels`' buffer, kept up to date by `resize`.
++    pub(crate) pixels_ptr: *mut u8,
++    pub(crate) context_id: Option<ContextID>,
++}
++
++unsafe impl Send for Surface {}
++
++impl Surface {
++    pub(crate) fn new(size: Size2D<i32>) -> Surface {
++        let mut pixels = vec![0u8; Surface::byte_len(size)];
++        let pixels_ptr = pixels.as_mut_ptr();
++        let id = SurfaceID(NEXT_SURFACE_ID.fetch_add(1, Ordering::Relaxed));
++        Surface { id, size, pixels, pixels_ptr, context_id: None }
++    }
++
++    fn byte_len(size: Size2D<i32>) -> usize {
++        size.width.max(0) as usize * size.height.max(0) as usize * 4
++    }
++
++    pub(crate) fn resize(&mut self, size: Size2D<i32>) {
++        self.size = size;
++        self.pixels.resize(Surface::byte_len(size), 0);
++        self.pixels_ptr = self.pixels.as_mut_ptr();
++    }
++
++    /// The surface's RGBA pixels, as OSMesa wrote them.
++    pub fn pixels(&self) -> &[u8] {
++        &self.pixels
++    }
++}
++
++/// A texture that reads a surface. Not supported on OSMesa.
++#[derive(Debug)]
++pub struct SurfaceTexture;
++
++/// A placeholder for a native widget. OSMesa has no windows.
++#[derive(Clone)]
++pub struct NativeWidget;
