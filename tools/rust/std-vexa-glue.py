@@ -6,14 +6,19 @@
 LIBRARY_DIR is the rust-src `library` directory (the one with std/ in it). Each edit
 is a single exact replacement, and the script stops if the text it expects isn't
 there exactly once, so a different toolchain fails loudly instead of being patched
-in the wrong place.
+in the wrong place. An edit whose new text is already present is skipped, so the
+script can run again on a tree it has changed.
 
 What each edit does, and why Vexa can take the Linux or generic Unix path:
 
   os/mod.rs, os/unix/mod.rs   os::linux is the module with the Unix struct layouts and
                               the MetadataExt and raw types; Vexa's libc gives the same
                               names, so the Linux module serves Vexa too.
-  sys/fs/unix.rs              directory entries carry d_ino and d_type, as Linux's do.
+  os/linux/mod.rs             process (pidfds, Linux's own process support) and net
+                              (Linux's socket extensions) stay Linux-only.
+  sys/fs/unix.rs              directory entries carry d_ino and d_name, read through
+                              readdir (as Linux's do), not readdir_r. The lists that pick
+                              that path get Vexa.
   sys/args/unix.rs            argc and argv are stored at startup (as on Linux), not
                               read on demand.
   sys/random/mod.rs           Vexa has no getrandom; /dev/urandom exists, so random
@@ -25,6 +30,17 @@ What each edit does, and why Vexa can take the Linux or generic Unix path:
 import os
 import sys
 
+# The directory-entry lists: each names "wasi" as its last OS, and Vexa goes next to it.
+WASI_LIST_EDITS = [
+    ('        target_os = "wasi",\n    ))]\n    fn next(&mut self) -> Option<io::Result<DirEntry>> {\n'
+     '        use crate::sys::io::{errno, set_errno};\n'),
+    ('        target_os = "wasi",\n    )))]\n    fn next(&mut self) -> Option<io::Result<DirEntry>> {\n'
+     '        if self.end_of_stream {\n'),
+    ('        target_os = "wasi",\n        target_vendor = "apple",\n    ))]\n    pub fn ino(&self) -> u64 {\n'),
+    ('        target_os = "wasi",\n    )))]\n    fn name_cstr(&self) -> &CStr {\n'),
+    ('        target_os = "wasi",\n    ))]\n    fn name_cstr(&self) -> &CStr {\n'),
+]
+
 EDITS = [
     ("os/mod.rs",
      '#[cfg(any(target_os = "linux", doc))]\npub mod linux;\n',
@@ -33,6 +49,12 @@ EDITS = [
      '    #[cfg(target_os = "linux")]\n    pub use crate::os::linux::*;\n',
      '    #[cfg(target_os = "linux")]\n    pub use crate::os::linux::*;\n'
      '    #[cfg(target_os = "vexa")]\n    pub use crate::os::linux::*;\n'),
+    ("os/linux/mod.rs",
+     'pub mod net;\n',
+     '#[cfg(target_os = "linux")]\npub mod net;\n'),
+    ("os/linux/mod.rs",
+     'pub mod process;\n',
+     '#[cfg(target_os = "linux")]\npub mod process;\n'),
     ("sys/fs/unix.rs",
      '    target_os = "wasi",\n))]\nstruct dirent64_min {\n',
      '    target_os = "wasi",\n    target_os = "vexa",\n))]\nstruct dirent64_min {\n'),
@@ -42,12 +64,6 @@ EDITS = [
     ("sys/fs/unix.rs",
      '    target_os = "wasi",\n))]\npub struct DirEntry {\n',
      '    target_os = "wasi",\n    target_os = "vexa",\n))]\npub struct DirEntry {\n'),
-    ("os/linux/mod.rs",
-     'pub mod process;\n',
-     '#[cfg(target_os = "linux")]\npub mod process;\n'),
-    ("os/mod.rs",
-     '#[cfg(any(target_os = "linux", target_os = "android", target_os = "cygwin", doc))]\nmod net;\n',
-     '#[cfg(any(target_os = "linux", target_os = "vexa", target_os = "android", target_os = "cygwin", doc))]\nmod net;\n'),
     ("sys/args/unix.rs",
      '    target_os = "nuttx",\n))]\nmod imp {\n',
      '    target_os = "nuttx",\n    target_os = "vexa",\n))]\nmod imp {\n'),
@@ -65,6 +81,12 @@ EDITS = [
      '#[cfg(any(\n    target_os = "linux",\n    target_os = "freebsd",\n    target_os = "dragonfly",\n'
      '    target_os = "nuttx",\n    target_os = "cygwin"\n))]\npub fn set_name(name: &CStr) {\n'),
 ]
+
+# Each directory-entry edit: Vexa goes right after the "wasi" line, in the list that
+# ends with the given text.
+for old in WASI_LIST_EDITS:
+    new = old.replace('        target_os = "wasi",\n', '        target_os = "wasi",\n        target_os = "vexa",\n', 1)
+    EDITS.append(("sys/fs/unix.rs", old, new))
 
 
 def main():
