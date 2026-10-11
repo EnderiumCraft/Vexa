@@ -54,15 +54,17 @@ lands.
       serial log has no faults. The check program is not in the repo; the build script's
       probe only prints.
 
-- [ ] **M2: Servo's leaf crates (nearly done).** These all run in the VM: `getrandom`
+- [x] **M2: Servo's leaf crates.** These all run in the VM: `getrandom`
       (0.2 and 0.3), `mio` 1.2.4 on its `poll(2)` selector with the pipe waker, `socket2`,
       `tokio` 1.53 (runtime, timer, TCP), `rustls` 0.23 with `ring` 0.17 as the crypto
       provider (a TLS handshake over loopback, with a self-signed certificate made in the
       probe), and `hyper` 1.12's HTTP/1 client and server over loopback. rustls trusts the
       system's CA bundle, `/etc/ssl/certs/ca-certificates.crt` (121 roots): a self-signed
-      server is refused, and a leaf signed by a CA added to those roots is accepted. Still
-      open: a real site (this sandbox gives the VM no DNS answer), the 64-handle `poll`
-      limit, and `dlopen`, which is not probed.
+      server is refused, and a leaf signed by a CA added to those roots is accepted. The
+      `poll` limit is gone (libvexa sizes its handle array to the call, up to the kernel's
+      256), `dlopen` and `dlsym` load and resolve, and `SO_RCVTIMEO` gives a real read
+      timeout. Still open: a real site. This sandbox gives the VM no DNS answer, so the
+      HTTPS probe reports the failed lookup instead of a result.
 
       ```sh
       PATH=$PWD/build/sdk/vexa-sdk/bin:$PATH sh tools/rust/build-std-vexa.sh WORKDIR
@@ -73,7 +75,9 @@ lands.
       The probes are [`crates-probe.rs`](../tools/rust/crates-probe.rs) (mio),
       [`tokio-probe.rs`](../tools/rust/tokio-probe.rs), [`tls-probe.rs`](../tools/rust/tls-probe.rs),
       [`hyper-probe.rs`](../tools/rust/hyper-probe.rs) and
-      [`https-probe.rs`](../tools/rust/https-probe.rs).
+      [`https-probe.rs`](../tools/rust/https-probe.rs) and
+      [`native-probe.rs`](../tools/rust/native-probe.rs) (`poll` over 120 descriptors,
+      `dlopen` and `dlsym`, and a read timeout).
 
 ## What the probes found
 
@@ -87,10 +91,11 @@ lands.
 - **libvexa defines some constants with Linux's values, and not all of them.** Where it lacks
   a value libc needs (`O_NOFOLLOW`, `EWOULDBLOCK`, the `IP_*` options and others), the Vexa
   module uses Linux's value. Those should become Vexa's own values once libvexa defines them.
-- **No `epoll`, and `poll` takes at most 64 handles.** libvexa has `poll` and no `epoll`, so
+- **No `epoll`, and `poll` had a 64-handle limit.** libvexa has `poll` and no `epoll`, so
   mio uses its `poll(2)` selector, with the pipe waker. mio hands `poll` every registered
-  descriptor in one call, so more than 64 registered sockets fail with `EINVAL` until
-  libvexa raises the limit or gets an `epoll` shim.
+  descriptor in one call, and libvexa's `poll` used a fixed 64-slot array, so more than 64
+  registered sockets failed. It now sizes the array to the call, and the kernel's limit of
+  256 handles is the bound.
 - **Pipes had no non-blocking mode.** The kernel's pipes block, and libvexa tracked
   `O_NONBLOCK` only for sockets. A read on an empty pipe therefore blocked where Linux
   returns `EAGAIN`, and mio's waker, which reads its pipe until a read fails, hung on its
@@ -103,8 +108,11 @@ lands.
   `usize` branch, since libvexa's `msg_iovlen` is a `size_t`. `tokio`'s
   `UnixStream::peer_cred` returns `Unsupported`, because libvexa has no `SO_PEERCRED`.
   libvexa's `setsockopt` accepts any option at the socket, IP, IPv6 and TCP levels and
-  ignores it. So these names compile, but options such as `IP_HDRINCL` and the multicast
-  interface have no effect yet.
+  ignores it, so these names compile, but options such as `IP_HDRINCL` and the multicast
+  interface have no effect yet. `SO_RCVTIMEO` and `SO_SNDTIMEO` are real: they go to the
+  kernel through `vx_socket_timeout`, and the read timeout reads back. The others stay
+  accept-and-ignore on purpose. busybox's `ping` and `udhcpc` check that `setsockopt`
+  succeeds, so an error for every unknown option would break them.
 - **Non-blocking listeners blocked in `accept`.** The kernel's `accept` waits for a
   connection even on a non-blocking listener, so an accept loop hung after its first
   connection. libvexa's `accept` now checks readiness first, as its pipe reads do, and
@@ -139,10 +147,9 @@ lands.
 
 1. **M1, `std` on Vexa.** Done. The probe prints, and a `std` program has run threads, a
    file, and an environment variable in the VM.
-2. **M2, Servo's leaf crates.** Nearly done. The crates above all run in the VM, with
-   std's `Instant` for time. rustls trusts `/etc/ssl/certs/ca-certificates.crt`. Still open:
-   a real HTTPS fetch (this sandbox's VM gets no DNS answer, so the probe reports that), the
-   64-handle `poll` limit, and `dlopen`, which libvexa has but nothing has probed.
+2. **M2, Servo's leaf crates.** Done, bar a real HTTPS fetch. The crates above all run in
+   the VM, with std's `Instant` for time and rustls on `/etc/ssl/certs/ca-certificates.crt`.
+   A real site needs a VM that resolves names, and this sandbox does not give one.
 3. **M3, SpiderMonkey on Vexa.** Port the `mozjs_sys` build (a target config for Vexa, and
    the C++ runtime from the libc++ work in Phase 67).
 4. **M4, GL for WebRender.** Give surfman a software GL context on Vexa, from OSMesa
@@ -154,7 +161,4 @@ lands.
 
 ## Next step
 
-Close out M2: probe `dlopen`, fix the 64-handle `poll` limit (a server with more than 64
-connections will fail), and decide what `setsockopt` should do with options it accepts and
-ignores. Then M3, SpiderMonkey, which needs its build read before anything else can be sized.
-A real HTTPS fetch needs a VM that resolves names, and this sandbox can't provide one.
+M3, SpiderMonkey. Its configure step passes for `x86_64-unknown-vexa`; the build is next.
