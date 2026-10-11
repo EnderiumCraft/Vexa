@@ -48,8 +48,11 @@ lands.
         implementation in libvexa yet, so a program that calls it fails to link.
       - **`getpwuid_r`** is built over libvexa's `getpwuid`.
 
-      Not checked yet: threads, files, and environment variables from a `std` program.
-      The probe only prints.
+      Checked in the VM too: a `std` program starts a thread (which returns 42 to its
+      `join`), writes and reads back a file under `/home/vexa`, reads `PATH` from the
+      environment, and counts its arguments. All four print as expected, and the
+      serial log has no faults. The check program is not in the repo; the build script's
+      probe only prints.
 
 ## What the probes found
 
@@ -80,8 +83,8 @@ lands.
 
 ## Milestones
 
-1. **M1, `std` on Vexa.** Done for the probe. Still to check: a thread, a file, and an
-   environment variable from a `std` program, in the VM.
+1. **M1, `std` on Vexa.** Done. The probe prints, and a `std` program has run threads, a
+   file, and an environment variable in the VM.
 2. **M2, Servo's leaf crates.** Build the crates Servo needs below the engine: `getrandom`
    (or its `/dev/urandom` fallback), time, `dlopen`, `mio`/`tokio` (on a `poll` or `epoll`
    backend), `rustls` and `hyper`.
@@ -96,7 +99,5 @@ lands.
 
 ## Next step
 
-M1's last check: a `std` program that starts threads, reads and writes a file, and reads an
-environment variable, run in the VM. Then M2: the leaf crates Servo needs, starting with
-`getrandom` and `mio`, which decide what libvexa has to grow (an `epoll` shim, or a
-`poll`-based backend).
+M2: the leaf crates Servo needs, starting with `getrandom` and `mio`, which decide what
+libvexa has to grow (an `epoll` shim, or a `poll`-based backend).
