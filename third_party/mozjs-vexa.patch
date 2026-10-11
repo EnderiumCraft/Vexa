@@ -333,6 +333,19 @@ diff -ruN -x __pycache__ a/mozjs/js/src/vm/RegExpObject.cpp b/mozjs/js/src/vm/Re
  
  #if defined(DEBUG) || defined(JS_JITSPEW)
  void RegExpObject::dumpOwnFields(js::JSONPrinter& json) const {
+diff -ruN -x __pycache__ a/mozjs/memory/mozalloc/mozalloc_abort.cpp b/mozjs/memory/mozalloc/mozalloc_abort.cpp
+--- a/mozjs/memory/mozalloc/mozalloc_abort.cpp	2006-07-24 01:21:28.000000000 +0000
++++ b/mozjs/memory/mozalloc/mozalloc_abort.cpp	2026-10-11 22:05:09.852594091 +0000
+@@ -62,7 +62,8 @@
+ }
+ #endif
+ 
+-#if defined(XP_UNIX) && !defined(MOZ_ASAN) && !defined(MOZ_TSAN) &&    \
++// Vexa's libc has its own abort(), which sends SIGABRT, so it is not replaced here.
++#if defined(XP_UNIX) && !defined(__vexa__) && !defined(MOZ_ASAN) && !defined(MOZ_TSAN) && \
+     !defined(MOZ_UBSAN) && !defined(LIBFUZZER) && !defined(AFLFUZZ) && \
+     !defined(FUZZING_JS_FUZZILLI)
+ // Define abort() here, so that it is used instead of the system abort(). This
 diff -ruN -x __pycache__ a/mozjs/mfbt/Array.h b/mozjs/mfbt/Array.h
 --- a/mozjs/mfbt/Array.h	2006-07-24 01:21:28.000000000 +0000
 +++ b/mozjs/mfbt/Array.h	2026-10-11 21:13:52.619088233 +0000
