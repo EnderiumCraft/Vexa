@@ -44,17 +44,66 @@ void blend_rect(struct vx_surface *view, struct rect r, uint32_t color, int alph
 
 /* ---- Shadows ---- */
 
-static uint8_t falloff[SHADOW + 1]; /* 255 at the edge, 0 SHADOW pixels away. */
+/* How dark a shadow is, by how far (in sixteenths of a pixel) it is from its
+ * window's edge: 255 at the edge, falling to nothing SHADOW pixels away. */
+static uint8_t falloff[SHADOW * 16 + 1];
 
-void draw_shadow(struct vx_surface *view, struct rect r, int strength) {
+/* The square root of n, rounded down. */
+static uint32_t root(uint32_t n) {
+    uint32_t x = 0, bit = 1u << 30;
+    while (bit > n) {
+        bit >>= 2;
+    }
+    while (bit) {
+        if (n >= x + bit) {
+            n -= x + bit;
+            x = (x >> 1) + bit;
+        } else {
+            x >>= 1;
+        }
+        bit >>= 2;
+    }
+    return x;
+}
+
+/* How far the pixel (x, y) is outside the rectangle r, in sixteenths of a
+ * pixel (0 inside), its top corners round with radius `top` and its bottom
+ * ones with `bottom`. Far away it's SHADOW * 16 (no shadow). */
+static int outside16(struct rect r, int top, int bottom, int x, int y) {
+    int left = r.x, right = r.x + r.width - 1, up = r.y, down = r.y + r.height - 1;
+    int cx, cy, radius;
+    if (y < up + top && x < left + top) {
+        cx = left + top, cy = up + top, radius = top;
+    } else if (y < up + top && x > right - top) {
+        cx = right - top, cy = up + top, radius = top;
+    } else if (y > down - bottom && x < left + bottom) {
+        cx = left + bottom, cy = down - bottom, radius = bottom;
+    } else if (y > down - bottom && x > right - bottom) {
+        cx = right - bottom, cy = down - bottom, radius = bottom;
+    } else { /* Along a side (or a square corner): the distance to the edge. */
+        int dx = x < left ? left - x : x > right ? x - right : 0;
+        int dy = y < up ? up - y : y > down ? y - down : 0;
+        return dx && dy ? (int)root((uint32_t)(dx * dx + dy * dy) * 256) : 16 * (dx + dy);
+    }
+    int ex = x - cx, ey = y - cy;
+    if (ex * ex + ey * ey > 4096) {
+        return SHADOW * 16;
+    }
+    int d = (int)root((uint32_t)(ex * ex + ey * ey) * 256) - 16 * radius;
+    return d < 0 ? 0 : d;
+}
+
+/* A soft shadow round a window (or a note, or a popup): its shape is `r`, with
+ * the top corners round (radius `top`) and the bottom ones (`bottom`), and a
+ * little below it and inside it at the sides. The shadow follows the shape's
+ * curves. What the window itself covers isn't drawn. */
+void draw_shadow(struct vx_surface *view, struct rect r, int top, int bottom, int strength) {
     if (!falloff[0]) {
-        for (int d = 0; d <= SHADOW; d++) {
-            int t = 255 * (SHADOW - d) / SHADOW;
-            falloff[d] = (uint8_t)(t * t / 255);
+        for (int k = 0; k <= SHADOW * 16; k++) {
+            int t = 255 * (SHADOW * 16 - k) / (SHADOW * 16);
+            falloff[k] = (uint8_t)(t * t / 255);
         }
     }
-    /* The shadow's shape: a little below the window, and a little inside it
-     * at the sides. What the window itself covers isn't drawn. */
     struct rect window = r;
     r.y += 4;
     r.x += 2;
@@ -64,22 +113,23 @@ void draw_shadow(struct vx_surface *view, struct rect r, int strength) {
         return;
     }
     for (int y = area.y; y < area.y + area.height; y++) {
-        int dy = y < r.y ? r.y - y : y >= r.y + r.height ? y - (r.y + r.height - 1) : 0;
-        if (dy > SHADOW) {
-            continue;
-        }
-        bool beside = y >= window.y && y < window.y + window.height;
+        /* Rows wholly beside the window's straight sides are covered from end to end
+         * (its corners are only at the top and bottom): skip them quickly. */
+        bool solid = y >= window.y + top && y < window.y + window.height - bottom;
         uint32_t *row = view->pixels + (long)y * view->stride;
         for (int x = area.x; x < area.x + area.width; x++) {
-            if (beside && x >= window.x && x < window.x + window.width) {
+            if (solid && x >= window.x && x < window.x + window.width) {
                 x = window.x + window.width - 1; /* Under the window: skip it. */
                 continue;
             }
-            int dx = x < r.x ? r.x - x : x >= r.x + r.width ? x - (r.x + r.width - 1) : 0;
-            if (dx > SHADOW) {
+            if (outside16(window, top, bottom, x, y) == 0) {
+                continue; /* Under the window, in its curves too. */
+            }
+            int d = outside16(r, top, bottom, x, y);
+            if (d >= SHADOW * 16) {
                 continue;
             }
-            unsigned a = (unsigned)falloff[dx] * falloff[dy] / 255 * (unsigned)strength / 255;
+            unsigned a = (unsigned)falloff[d] * (unsigned)strength / 255;
             if (a) {
                 row[x] = mix_pixel(row[x], 0x000000, a);
             }
@@ -225,7 +275,7 @@ void draw_glass(struct vx_surface *view, struct rect r, int top_radius, int bott
 }
 
 void draw_glass_popup(struct vx_surface *view, struct rect r, int radius, int shadow) {
-    draw_shadow(view, r, shadow);
+    draw_shadow(view, r, radius, radius, shadow);
     draw_glass(view, r, radius, radius, vx_theme.menu, vx_theme.dark ? 205 : 195, 34);
     outline_rounded(view, r, radius, vx_mix(vx_theme.line, 0x000000, vx_theme.dark ? 60 : 30));
     blend_rect(view, (struct rect){r.x + radius, r.y + 1, r.width - 2 * radius, 1}, 0xffffff,

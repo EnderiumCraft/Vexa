@@ -1291,7 +1291,7 @@ static void draw_notes(struct vx_surface *view, int ox, int oy) {
     for (int i = 0; i < note_count; i++) {
         struct rect r = note_rect(i);
         r.x += ox, r.y += oy;
-        draw_shadow(view, r, 140);
+        draw_shadow(view, r, 10, 10, 140);
         fill_rounded(view, r, 10, COLOR_MENU);
         outline_rounded(view, r, 10, COLOR_PANEL_LINE);
         vx_fill(view, r.x + 10, r.y + 12, 3, r.height - 24, COLOR_OUTLINE);
@@ -1569,7 +1569,7 @@ static void compose(struct rect area) {
             }
             struct rect f = frame_rect(w);
             if (!w->popup && !w->undecorated) {
-                draw_shadow(&view, (struct rect){f.x + ox, f.y + oy, f.width, f.height},
+                draw_shadow(&view, (struct rect){f.x + ox, f.y + oy, f.width, f.height}, CORNER + 1, 0,
                             w == focused ? 200 : 130);
             }
             draw_window_at(&view, w, f.x + ox, f.y + oy);

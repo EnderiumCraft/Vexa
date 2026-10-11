@@ -116,8 +116,9 @@ long now_ms(void);
 void want_frames(void);
 
 /* ---- look.c ---- */
-/* A soft shadow around (and a little below) a rectangle. */
-void draw_shadow(struct vx_surface *view, struct rect r, int strength);
+/* A soft shadow round a shape (its top corners round with `top`, its bottom
+ * ones with `bottom`), and a little below it. */
+void draw_shadow(struct vx_surface *view, struct rect r, int top, int bottom, int strength);
 /* Darkens or tints a rectangle: `alpha` (0 to 255) of `color` over it. */
 void blend_rect(struct vx_surface *view, struct rect r, uint32_t color, int alpha);
 /* A rectangle with round corners (radius), filled; and its outline. */
