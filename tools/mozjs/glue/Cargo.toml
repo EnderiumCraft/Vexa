@@ -1,0 +1,17 @@
+[package]
+name = "vexa-js-glue"
+version = "0.0.0"
+edition = "2021"
+
+[lib]
+crate-type = ["staticlib"]
+
+# Vexa has no unwinder yet, so the Rust side aborts on panic (as mozjs_sys's own
+# probe builds do with -Zbuild-std's panic_abort).
+[profile.release]
+panic = "abort"
+
+[dependencies]
+mozjs_normalizer_glue = "=153.4.0"
+encoding_c = "=0.9.8"
+encoding_c_mem = "=0.2.6"
