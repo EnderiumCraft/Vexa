@@ -33,9 +33,53 @@ diff -ruN -x __pycache__ a/mozjs/js/public/RegExpFlags.h b/mozjs/js/public/RegEx
  #include <stdint.h>  // uint8_t
  
  namespace JS {
+diff -ruN -x __pycache__ a/mozjs/js/src/builtin/Number.cpp b/mozjs/js/src/builtin/Number.cpp
+--- a/mozjs/js/src/builtin/Number.cpp	2006-07-24 01:21:28.000000000 +0000
++++ b/mozjs/js/src/builtin/Number.cpp	2026-10-11 21:35:26.865507991 +0000
+@@ -19,7 +19,7 @@
+ #include <charconv>
+ #include <iterator>
+ #include <limits>
+-#ifdef HAVE_LOCALECONV
++#if defined(HAVE_LOCALECONV) && !defined(__vexa__)
+ #  include <locale.h>
+ #endif
+ #include <math.h>
+@@ -1391,7 +1391,7 @@
+   const char* thousandsSeparator;
+   const char* decimalPoint;
+   const char* grouping;
+-#  ifdef HAVE_LOCALECONV
++#  if defined(HAVE_LOCALECONV) && !defined(__vexa__)
+   struct lconv* locale = localeconv();
+   thousandsSeparator = locale->thousands_sep;
+   decimalPoint = locale->decimal_point;
+diff -ruN -x __pycache__ a/mozjs/js/src/gc/Memory.cpp b/mozjs/js/src/gc/Memory.cpp
+--- a/mozjs/js/src/gc/Memory.cpp	2006-07-24 01:21:28.000000000 +0000
++++ b/mozjs/js/src/gc/Memory.cpp	2026-10-11 21:35:26.863502760 +0000
+@@ -972,6 +972,10 @@
+ #if defined(XP_WIN)
+   return VirtualAlloc(region, length, MEM_RESET,
+                       DWORD(PageAccess::ReadWrite)) == region;
++#elif defined(__vexa__)
++  // libvexa has no madvise. Keeping the pages committed is allowed:
++  // their contents are not guaranteed to survive a soft decommit.
++  return true;
+ #elif defined(__wasi__)
+   return 0;
+ #else
+@@ -1043,7 +1047,7 @@
+     return 0;
+   }
+   return pmc.PageFaultCount;
+-#elif defined(__wasi__)
++#elif defined(__wasi__) || defined(__vexa__)
+   return 0;
+ #else
+   struct rusage usage;
 diff -ruN -x __pycache__ a/mozjs/js/src/irregexp/RegExpShim.cpp b/mozjs/js/src/irregexp/RegExpShim.cpp
 --- a/mozjs/js/src/irregexp/RegExpShim.cpp	2006-07-24 01:21:28.000000000 +0000
-+++ b/mozjs/js/src/irregexp/RegExpShim.cpp	2026-10-11 21:13:52.637493547 +0000
++++ b/mozjs/js/src/irregexp/RegExpShim.cpp	2026-10-11 21:35:26.863933191 +0000
 @@ -10,7 +10,9 @@
  
  #include "mozilla/MemoryReporting.h"
@@ -46,7 +90,7 @@ diff -ruN -x __pycache__ a/mozjs/js/src/irregexp/RegExpShim.cpp b/mozjs/js/src/i
  
  #include "irregexp/imported/regexp-macro-assembler.h"
  #include "irregexp/imported/regexp-stack.h"
-@@ -34,7 +36,9 @@
+@@ -34,13 +36,16 @@
    va_end(arguments);
  }
  
@@ -56,6 +100,21 @@ diff -ruN -x __pycache__ a/mozjs/js/src/irregexp/RegExpShim.cpp b/mozjs/js/src/i
  
  // Origin:
  // https://github.com/v8/v8/blob/855591a54d160303349a5f0a32fab15825c708d1/src/utils/ostreams.cc#L120-L169
+ // (This is a hand-simplified version.)
+ // Writes the given character to the output escaping everything outside
+ // of printable ASCII range.
++#if !defined(__vexa__)
+ std::ostream& operator<<(std::ostream& os, const AsUC16& c) {
+   base::uc16 v = c.value;
+   bool isPrint = 0x20 < v && v <= 0x7e;
+@@ -68,6 +73,7 @@
+                  hex.min_width, hex.value);
+   return os << buf;
+ }
++#endif  // !defined(__vexa__)
+ 
+ HandleScope::HandleScope(Isolate* isolate) : isolate_(isolate) {
+   isolate->openHandleScope(*this);
 diff -ruN -x __pycache__ a/mozjs/js/src/irregexp/RegExpShim.h b/mozjs/js/src/irregexp/RegExpShim.h
 --- a/mozjs/js/src/irregexp/RegExpShim.h	2006-07-24 01:21:28.000000000 +0000
 +++ b/mozjs/js/src/irregexp/RegExpShim.h	2026-10-11 21:13:52.636503845 +0000
@@ -83,7 +142,7 @@ diff -ruN -x __pycache__ a/mozjs/js/src/irregexp/RegExpShim.h b/mozjs/js/src/irr
  using mozilla::Maybe;
 diff -ruN -x __pycache__ a/mozjs/js/src/vm/CharacterEncoding.cpp b/mozjs/js/src/vm/CharacterEncoding.cpp
 --- a/mozjs/js/src/vm/CharacterEncoding.cpp	2006-07-24 01:21:28.000000000 +0000
-+++ b/mozjs/js/src/vm/CharacterEncoding.cpp	2026-10-11 21:13:52.635294533 +0000
++++ b/mozjs/js/src/vm/CharacterEncoding.cpp	2026-10-11 21:35:26.862607902 +0000
 @@ -15,7 +15,7 @@
  #include "mozilla/Utf8.h"
  
@@ -103,6 +162,42 @@ diff -ruN -x __pycache__ a/mozjs/js/src/vm/CharacterEncoding.cpp b/mozjs/js/src/
  #include <type_traits>
  
  #include "frontend/FrontendContext.h"
+@@ -715,7 +717,7 @@
+                                                    const wchar_t* chars) {
+   using CheckedSizeT = mozilla::CheckedInt<size_t>;
+ 
+-#ifndef XP_LINUX
++#if !defined(XP_LINUX) && !defined(__vexa__)
+   // Use the standard codecvt facet to convert a wide string to UTF-8.
+   std::codecvt_utf8<wchar_t> cv;
+ 
+@@ -840,7 +842,7 @@
+   // Only valid UTF-8 strings should be passed to this function.
+   MOZ_ASSERT(mozilla::IsUtf8(mozilla::Span(chars, strlen(chars))));
+ 
+-#ifndef XP_LINUX
++#if !defined(XP_LINUX) && !defined(__vexa__)
+   // Use the standard codecvt facet to convert from UTF-8 to a wide string.
+   std::codecvt_utf8<wchar_t> cv;
+ 
+diff -ruN -x __pycache__ a/mozjs/js/src/vm/RegExpObject.cpp b/mozjs/js/src/vm/RegExpObject.cpp
+--- a/mozjs/js/src/vm/RegExpObject.cpp	2006-07-24 01:21:28.000000000 +0000
++++ b/mozjs/js/src/vm/RegExpObject.cpp	2026-10-11 21:35:26.864462602 +0000
+@@ -331,12 +331,14 @@
+   }
+ }
+ 
++#if !defined(__vexa__)
+ std::ostream& JS::operator<<(std::ostream& os, RegExpFlags flags) {
+   ForEachRegExpFlag(
+       flags, [&](const char* name, const char* c) { os << c; },
+       [&](uint8_t value) { os << '?'; });
+   return os;
+ }
++#endif  // !defined(__vexa__)
+ 
+ #if defined(DEBUG) || defined(JS_JITSPEW)
+ void RegExpObject::dumpOwnFields(js::JSONPrinter& json) const {
 diff -ruN -x __pycache__ a/mozjs/mfbt/Array.h b/mozjs/mfbt/Array.h
 --- a/mozjs/mfbt/Array.h	2006-07-24 01:21:28.000000000 +0000
 +++ b/mozjs/mfbt/Array.h	2026-10-11 21:13:52.619088233 +0000
