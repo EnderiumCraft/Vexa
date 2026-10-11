@@ -47,6 +47,8 @@ typedef struct
     struct vx_window *window; /* (Made once SDL has given it its title.) */
     unsigned flags;           /* VX_WINDOW_* */
     int buttons;              /* The pointer's buttons, last we heard. */
+    Uint32 *frame;            /* The framebuffer SDL draws in (when it isn't OpenGL). */
+    int frame_width, frame_height;
 } VEXA_WindowData;
 
 typedef struct
@@ -108,6 +110,7 @@ static void VEXA_DestroyWindow(_THIS, SDL_Window *window)
         if (data->window) {
             vx_window_destroy(data->window);
         }
+        SDL_free(data->frame);
         SDL_free(data);
         window->driverdata = NULL;
     }
@@ -161,9 +164,18 @@ static int VEXA_CreateWindowFramebuffer(_THIS, SDL_Window *window, Uint32 *forma
             return SDL_SetError("Vexa: couldn't resize the window to %dx%d", window->w, window->h);
         }
     }
+    /* SDL draws in a frame of its own: the window's surface is a different buffer
+     * after each frame shown (libvexa's double buffering), so Update copies into it. */
+    SDL_free(data->frame);
+    data->frame = (Uint32 *)SDL_calloc((size_t)window->w * window->h, 4);
+    if (!data->frame) {
+        return SDL_OutOfMemory();
+    }
+    data->frame_width = window->w;
+    data->frame_height = window->h;
     *format = SDL_PIXELFORMAT_RGB888;
-    *pixels = s->pixels;
-    *pitch = s->stride * 4;
+    *pixels = data->frame;
+    *pitch = window->w * 4;
     return 0;
 }
 
@@ -172,7 +184,7 @@ static int VEXA_UpdateWindowFramebuffer(_THIS, SDL_Window *window, const SDL_Rec
 {
     VEXA_WindowData *data = (VEXA_WindowData *)window->driverdata;
     struct vx_surface *s = &data->window->surface;
-    int i, x0 = s->width, y0 = s->height, x1 = 0, y1 = 0;
+    int i, y, x0 = s->width, y0 = s->height, x1 = 0, y1 = 0;
     (void)_this;
     /* One rectangle around them all: one message to the desktop. */
     for (i = 0; i < numrects; i++) {
@@ -183,9 +195,14 @@ static int VEXA_UpdateWindowFramebuffer(_THIS, SDL_Window *window, const SDL_Rec
     }
     x0 = SDL_max(x0, 0);
     y0 = SDL_max(y0, 0);
-    x1 = SDL_min(x1, s->width);
-    y1 = SDL_min(y1, s->height);
+    x1 = SDL_min(x1, SDL_min(s->width, data->frame_width));
+    y1 = SDL_min(y1, SDL_min(s->height, data->frame_height));
     if (x1 > x0 && y1 > y0) {
+        /* The surface to show now: the changed part of the frame goes into it. */
+        for (y = y0; y < y1; y++) {
+            SDL_memcpy(s->pixels + (size_t)y * s->stride + x0,
+                       data->frame + (size_t)y * data->frame_width + x0, (size_t)(x1 - x0) * 4);
+        }
         vx_window_present(data->window, x0, y0, x1 - x0, y1 - y0);
     }
     return 0;
@@ -193,8 +210,12 @@ static int VEXA_UpdateWindowFramebuffer(_THIS, SDL_Window *window, const SDL_Rec
 
 static void VEXA_DestroyWindowFramebuffer(_THIS, SDL_Window *window)
 {
+    VEXA_WindowData *data = (VEXA_WindowData *)window->driverdata;
     (void)_this;
-    (void)window; /* The pixels are the window's. */
+    if (data) {
+        SDL_free(data->frame);
+        data->frame = NULL;
+    }
 }
 
 /* ---- Events ---- */

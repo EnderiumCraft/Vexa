@@ -51,7 +51,7 @@ build needs on Vexa.
  SURFACE_HANDLER_$(NSFB_XCB_AVAILABLE) += x.c
 --- a/libnsfb/src/surface/vexa.c
 +++ b/libnsfb/src/surface/vexa.c
-@@ -0,0 +1,308 @@
+@@ -0,0 +1,309 @@
 +/*
 + * Copyright 2026 The Vexa authors
 + *
@@ -316,6 +316,7 @@ build needs on Vexa.
 +    if (box->x1 > box->x0 && box->y1 > box->y0)
 +        vx_window_present(priv->window, box->x0, box->y0, box->x1 - box->x0,
 +                          box->y1 - box->y0);
++    use_window(nsfb, priv); /* (Presenting swaps the window's buffers: draw into the new one.) */
 +    return 0;
 +}
 +
