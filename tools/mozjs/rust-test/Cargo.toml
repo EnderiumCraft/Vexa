@@ -1,0 +1,26 @@
+[package]
+name = "vexa-js-rust"
+version = "0.0.0"
+edition = "2021"
+build = "build.rs"
+
+# Built by build-rust-vexa.sh, which lays out ../mozjs_sys and ../libc next to this crate.
+[dependencies]
+mozjs = { version = "=0.26.8", default-features = false, features = ["libz-sys"] }
+mozjs_sys = { path = "../mozjs_sys", features = ["libz-sys"] }
+
+# Vexa has no unwinder yet, so panics abort.
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+
+# Vexa's libc: the crates.io libc has no Vexa module. ../libc is libc 0.2.190 with
+# third_party/libc-vexa.patch and tools/rust/gen-vexa-libc.py applied.
+[patch.crates-io]
+libc = { path = "../libc" }
+mozjs_sys = { path = "../mozjs_sys" }
+
+# This crate is its own workspace, so the repo's layout does not matter to cargo.
+[workspace]

@@ -1,0 +1,91 @@
+--- a/build.rs
++++ b/build.rs
+@@ -135,6 +135,17 @@
+     }
+ }
+ 
++// Vexa's libc++ has no iostreams (no localization), and cbindgen's normalizer header
++// includes <ostream>. The header only needs the stream names, so a copy with <iosfwd>
++// is enough (the same rewrite the standalone build makes).
++fn vexa_normalizer_include(include: &str) -> String {
++    let out = PathBuf::from(env::var("OUT_DIR").unwrap()).join("vexa-normalizer-include");
++    fs::create_dir_all(&out).unwrap();
++    let text = fs::read_to_string(Path::new(include).join("normalizer_glue.h")).unwrap();
++    fs::write(out.join("normalizer_glue.h"), text.replace("#include <ostream>", "#include <iosfwd>")).unwrap();
++    out.to_str().unwrap().to_string()
++}
++
+ fn build_spidermonkey(build_dir: &Path) {
+     let target = env::var("TARGET").unwrap();
+     let make;
+@@ -219,6 +230,11 @@
+ 
+     let include = env::var("DEP_NORMALIZER_GLUE_INCLUDE")
+         .expect("DEP_NORMALIZER_GLUE_INCLUDE should be set by normalizer_glue");
++    let include = if target.contains("vexa") {
++        vexa_normalizer_include(&include)
++    } else {
++        include
++    };
+     write!(cppflags, "-I{} ", include.replace("\\", "/")).unwrap();
+ 
+     if cfg!(feature = "intl") {
+@@ -418,6 +434,11 @@
+             .clang_arg(env::var("WASI_SYSROOT").unwrap().to_string());
+     }
+ 
++    // vexa-c++ predefines __vexa__; bindgen's clang does not go through that wrapper.
++    if env::var("TARGET").unwrap().contains("vexa") {
++        builder = builder.clang_arg("-D__vexa__=1");
++    }
++
+     if target == BuildTarget::JSGlue {
+         builder = builder
+             .parse_callbacks(Box::new(JSGlueCargoCallbacks::default()))
+@@ -493,6 +514,10 @@
+         println!("cargo:rustc-link-lib=c++");
+     } else if target.contains("windows") && target.contains("gnu") {
+         println!("cargo:rustc-link-lib=stdc++");
++    } else if target.contains("vexa") {
++        // Vexa's C++ runtime is LLVM's libc++. Its libc++abi comes from the binary
++        // crate's link group (rustc orders these libs itself, so a dependency can't).
++        println!("cargo:rustc-link-lib=c++");
+     } else if !target.contains("windows") && !target.contains("wasi") {
+         // The build works without this for WASI, and specifying it means
+         // needing to use the WASI-SDK's clang for linking, which is annoying.
+--- a/makefile.cargo
++++ b/makefile.cargo
+@@ -9,7 +9,8 @@
+ 	--disable-tests \
+ 	--disable-export-js \
+ 	--disable-shared-js \
+-	--build-backends=RecursiveMake
++	--build-backends=RecursiveMake \
++	--disable-wasm-moz-intgemm
+ 
+ ifeq (,$(CARGO_FEATURE_JIT))
+     CONFIGURE_FLAGS += --disable-jit
+--- a/src/jsglue.cpp
++++ b/src/jsglue.cpp
+@@ -894,7 +894,9 @@
+ 
+ void DeleteRootedObjectVector(JS::PersistentRootedObjectVector* v) { delete v; }
+ 
+-#if defined(__linux__) || defined(__wasi__)
++#if defined(__vexa__)
++// Vexa's libc has no malloc.h or malloc_usable_size; MallocSizeOf reports 0.
++#elif defined(__linux__) || defined(__wasi__)
+ #  include <malloc.h>
+ #elif defined(__FreeBSD__)
+ #  include <malloc_np.h>
+@@ -916,7 +918,9 @@
+     return 0;
+   }
+ 
+-#if defined(__linux__) || defined(__wasi__) || defined(__FreeBSD__)
++#if defined(__vexa__)
++  return 0;
++#elif defined(__linux__) || defined(__wasi__) || defined(__FreeBSD__)
+   return malloc_usable_size((void*)aPtr);
+ #elif defined(__APPLE__)
+   return malloc_size((void*)aPtr);

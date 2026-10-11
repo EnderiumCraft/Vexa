@@ -163,9 +163,23 @@ lands.
     stack protection); `fork`, `setsid`, `setpgid`, `chroot`, `mkfifo`, `linkat` and
     `fdopendir`, which fail with `ENOSYS` (Rust's std references them, and a static link pulls
     them in); and an empty-stack `_Unwind_*` set, since Vexa has no unwinder yet.
-  - **Not verified yet:** the `mozjs_sys` Rust side (its bindings, built for Vexa). The test
-    calls the C++ API directly, and `install_rust_hooks` is a stub there. In the real crate
-    that function only installs an optional OOM hook.
+  - **The Rust side runs in the VM.** `mozjs` 0.26.8, the high-level crate, on `mozjs_sys`
+    153.4.0-0 starts a runtime, evaluates the same script as the C++ test, and prints
+    `rust js check: pass`. [`tools/mozjs/rust-test`](../tools/mozjs/rust-test) is the program,
+    and [`tools/mozjs/build-rust-vexa.sh`](../tools/mozjs/build-rust-vexa.sh) builds it from
+    the registry crates with [`third_party/mozjs-sys-vexa.patch`](../third_party/mozjs-sys-vexa.patch)
+    on top of the SpiderMonkey patch. What the Rust side needed:
+    - `libc` 0.2.190 with Vexa's module. The crates.io libc has none, and the sysroot's
+      libc is 0.2.178, so the crates get the 0.2.190 patch.
+    - `-D__vexa__=1` for bindgen, which runs clang directly and misses the define that
+      `vexa-c++` makes.
+    - The build script's configure flags pass `--disable-wasm-moz-intgemm` (as the C++
+      build does), and the normalizer header gets the same `<ostream>` to `<iosfwd>` change.
+    - A `malloc` size stub: libvexa has no `malloc_usable_size`, so the size reports read 0.
+    - `libc++abi` (operator new/delete and the guards) in the binary's link group. Rust
+      orders `libc++` and `libc++abi` the wrong way round for static archives, and a
+      dependency's `rustc-link-arg` does not reach the binary, so the binary's build script
+      adds the group.
 - **Servo's dependencies** (servo 0.7.0): Stylo (CSS), WebRender and surfman (GL), `mozjs`
   (JavaScript), tokio-based networking, and optional GStreamer media (`servo-media-dummy`
   is the stand-in). The `gaol` sandbox is compiled only on platforms it lists, so Vexa needs
@@ -181,10 +195,10 @@ lands.
 2. **M2, Servo's leaf crates.** Done, bar a real HTTPS fetch. The crates above all run in
    the VM, with std's `Instant` for time and rustls on `/etc/ssl/certs/ca-certificates.crt`.
    A real site needs a VM that resolves names, and this sandbox does not give one.
-3. **M3, SpiderMonkey on Vexa.** In progress. The engine builds for `x86_64-unknown-vexa`
+3. **M3, SpiderMonkey on Vexa.** Done. The engine builds for `x86_64-unknown-vexa`
    (`tools/mozjs/build-mozjs-vexa.sh`), links with the Rust glue, and runs a script with a GC
-   in the VM. Still open: the `mozjs_sys` Rust bindings for Vexa, and the decisions about the
-   JIT and intl above.
+   in the VM. The Rust bindings build too (`tools/mozjs/build-rust-vexa.sh`), and the Rust
+   program runs the same script in the VM and passes. The JIT and intl stay off for now.
 4. **M4, GL for WebRender.** Give surfman a software GL context on Vexa, from OSMesa
    (softpipe). Check first that softpipe gives the GL version WebRender requires.
 5. **M5, an embedder.** A Vexa app that hosts Servo: a window through libvexa's GUI, input,
@@ -194,7 +208,6 @@ lands.
 
 ## Next step
 
-M3, the Rust bindings. Build `mozjs_sys`'s Rust side for Vexa (its bindings to the C++ API, and
-its build script, which should run the same configure as `build-mozjs-vexa.sh`), so that Rust
-code can call the engine. Then decide whether the first Servo build keeps the JIT off (the
-current setting) or turns it on.
+M4, GL for WebRender. Find out which GL version WebRender needs, and whether Mesa's softpipe
+(OSMesa) on Vexa gives it. Then give surfman a software GL context. The first Servo build keeps
+the JIT and intl off; revisit that once M5 runs.
