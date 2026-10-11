@@ -140,6 +140,32 @@ diff -ruN -x __pycache__ a/mozjs/js/src/irregexp/RegExpShim.h b/mozjs/js/src/irr
  
  // Reuse existing Maybe implementation
  using mozilla::Maybe;
+diff -ruN -x __pycache__ a/mozjs/js/src/irregexp/imported/regexp-code-generator.cc b/mozjs/js/src/irregexp/imported/regexp-code-generator.cc
+--- a/mozjs/js/src/irregexp/imported/regexp-code-generator.cc	2006-07-24 01:21:28.000000000 +0000
++++ b/mozjs/js/src/irregexp/imported/regexp-code-generator.cc	2026-10-11 21:47:25.948496744 +0000
+@@ -5,7 +5,9 @@
+ #include "irregexp/imported/regexp-code-generator.h"
+ 
+ #include <cstddef>
++#if !defined(__vexa__)
+ #include <iostream>
++#endif
+ #include <tuple>
+ #include <type_traits>
+ #include <utility>
+@@ -503,10 +505,12 @@
+ void CodeGenerator::Visit() {
+   // TODO(437003349): Remove fallback. All bytecodes need to be implemented
+   // from now on.
++#if !defined(__vexa__)
+   if (v8_flags.trace_regexp_assembler) {
+     std::cout << "RegExp Code Generator: Unsupported Bytecode "
+               << Bytecodes::Name(bc) << std::endl;
+   }
++#endif
+   has_unsupported_bytecode_ = true;
+   UNREACHABLE();
+ }
 diff -ruN -x __pycache__ a/mozjs/js/src/vm/CharacterEncoding.cpp b/mozjs/js/src/vm/CharacterEncoding.cpp
 --- a/mozjs/js/src/vm/CharacterEncoding.cpp	2006-07-24 01:21:28.000000000 +0000
 +++ b/mozjs/js/src/vm/CharacterEncoding.cpp	2026-10-11 21:42:01.482931804 +0000
@@ -584,6 +610,41 @@ diff -ruN -x __pycache__ a/mozjs/mozglue/misc/TimeStamp_posix.cpp b/mozjs/mozglu
  
    uint64_t threadJiffies = JiffiesSinceBoot(threadStat);
    uint64_t selfJiffies = JiffiesSinceBoot("/proc/self/stat");
+diff -ruN -x __pycache__ a/mozjs/mozglue/misc/decimal/moz-decimal-utils.h b/mozjs/mozglue/misc/decimal/moz-decimal-utils.h
+--- a/mozjs/mozglue/misc/decimal/moz-decimal-utils.h	2006-07-24 01:21:28.000000000 +0000
++++ b/mozjs/mozglue/misc/decimal/moz-decimal-utils.h	2026-10-11 21:47:25.950026648 +0000
+@@ -16,9 +16,13 @@
+ 
+ #include <cmath>
+ #include <cstring>
++#if !defined(__vexa__)
+ #include <iomanip>
++#endif
+ #include <limits>
++#if !defined(__vexa__)
+ #include <sstream>
++#endif
+ 
+ #ifndef UINT64_C
+ // For Android toolchain
+@@ -68,7 +72,7 @@
+ }
+ 
+ String mozToString(int64_t aNum) {
+-#ifdef _LIBCPP_VERSION
++#if defined(_LIBCPP_VERSION) && !defined(__vexa__)
+   std::ostringstream o;
+   o << std::setprecision(std::numeric_limits<int64_t>::digits10) << aNum;
+   return o.str();
+@@ -78,7 +82,7 @@
+ }
+ 
+ String mozToString(uint64_t aNum) {
+-#ifdef _LIBCPP_VERSION
++#if defined(_LIBCPP_VERSION) && !defined(__vexa__)
+   std::ostringstream o;
+   o << std::setprecision(std::numeric_limits<uint64_t>::digits10) << aNum;
+   return o.str();
 diff -ruN -x __pycache__ a/mozjs/python/mozbuild/mozbuild/configure/constants.py b/mozjs/python/mozbuild/mozbuild/configure/constants.py
 --- a/mozjs/python/mozbuild/mozbuild/configure/constants.py	2006-07-24 01:21:28.000000000 +0000
 +++ b/mozjs/python/mozbuild/mozbuild/configure/constants.py	2026-10-11 21:04:43.086009954 +0000
