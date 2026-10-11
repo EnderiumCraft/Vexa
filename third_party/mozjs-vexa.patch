@@ -1,0 +1,466 @@
+diff -ruN -x __pycache__ a/mozjs/build/autoconf/config.sub b/mozjs/build/autoconf/config.sub
+--- a/mozjs/build/autoconf/config.sub	2006-07-24 01:21:28.000000000 +0000
++++ b/mozjs/build/autoconf/config.sub	2026-10-11 21:04:23.959621280 +0000
+@@ -2013,6 +2013,7 @@
+ 	| gnu* \
+ 	| go32* \
+ 	| haiku* \
++	| vexa* \
+ 	| hcos* \
+ 	| hiux* \
+ 	| hms* \
+diff -ruN -x __pycache__ a/mozjs/build/moz.configure/init.configure b/mozjs/build/moz.configure/init.configure
+--- a/mozjs/build/moz.configure/init.configure	2006-07-24 01:21:28.000000000 +0000
++++ b/mozjs/build/moz.configure/init.configure	2026-10-11 21:04:51.768403707 +0000
+@@ -527,6 +527,8 @@
+         canonical_os = canonical_kernel = "OpenBSD"
+     elif os.startswith("solaris"):
+         canonical_os = canonical_kernel = "SunOS"
++    elif os.startswith("vexa"):
++        canonical_os = canonical_kernel = "Vexa"
+     elif os.startswith("wasi") and allow_wasi:
+         canonical_os = canonical_kernel = "WASI"
+     else:
+diff -ruN -x __pycache__ a/mozjs/js/public/RegExpFlags.h b/mozjs/js/public/RegExpFlags.h
+--- a/mozjs/js/public/RegExpFlags.h	2006-07-24 01:21:28.000000000 +0000
++++ b/mozjs/js/public/RegExpFlags.h	2026-10-11 21:13:52.633951021 +0000
+@@ -10,7 +10,7 @@
+ #include "mozilla/Assertions.h"  // MOZ_ASSERT
+ #include "mozilla/Attributes.h"  // MOZ_IMPLICIT
+ 
+-#include <ostream>   // ostream
++#include <iosfwd>   // ostream
+ #include <stdint.h>  // uint8_t
+ 
+ namespace JS {
+diff -ruN -x __pycache__ a/mozjs/js/src/irregexp/RegExpShim.cpp b/mozjs/js/src/irregexp/RegExpShim.cpp
+--- a/mozjs/js/src/irregexp/RegExpShim.cpp	2006-07-24 01:21:28.000000000 +0000
++++ b/mozjs/js/src/irregexp/RegExpShim.cpp	2026-10-11 21:13:52.637493547 +0000
+@@ -10,7 +10,9 @@
+ 
+ #include "mozilla/MemoryReporting.h"
+ 
++#if !defined(__vexa__)
+ #include <iostream>
++#endif
+ 
+ #include "irregexp/imported/regexp-macro-assembler.h"
+ #include "irregexp/imported/regexp-stack.h"
+@@ -34,7 +36,9 @@
+   va_end(arguments);
+ }
+ 
++#if !defined(__vexa__)
+ StdoutStream::StdoutStream() : std::ostream(std::cerr.rdbuf()) {}
++#endif
+ 
+ // Origin:
+ // https://github.com/v8/v8/blob/855591a54d160303349a5f0a32fab15825c708d1/src/utils/ostreams.cc#L120-L169
+diff -ruN -x __pycache__ a/mozjs/js/src/irregexp/RegExpShim.h b/mozjs/js/src/irregexp/RegExpShim.h
+--- a/mozjs/js/src/irregexp/RegExpShim.h	2006-07-24 01:21:28.000000000 +0000
++++ b/mozjs/js/src/irregexp/RegExpShim.h	2026-10-11 21:13:52.636503845 +0000
+@@ -19,7 +19,7 @@
+ #include <algorithm>
+ #include <bit>
+ #include <optional>
+-#include <ostream>
++#include <iosfwd>
+ 
+ #include "irregexp/RegExpTypes.h"
+ #include "irregexp/util/BitFieldShim.h"
+@@ -670,10 +670,12 @@
+ // print output (ideally to stderr, to match the rest of our tracing
+ // code). This is an empty wrapper that will convert itself to
+ // std::cerr when used.
++#if !defined(__vexa__)
+ class StdoutStream : public std::ostream {
+  public:
+   StdoutStream();
+ };
++#endif
+ 
+ // Reuse existing Maybe implementation
+ using mozilla::Maybe;
+diff -ruN -x __pycache__ a/mozjs/js/src/vm/CharacterEncoding.cpp b/mozjs/js/src/vm/CharacterEncoding.cpp
+--- a/mozjs/js/src/vm/CharacterEncoding.cpp	2006-07-24 01:21:28.000000000 +0000
++++ b/mozjs/js/src/vm/CharacterEncoding.cpp	2026-10-11 21:13:52.635294533 +0000
+@@ -15,7 +15,7 @@
+ #include "mozilla/Utf8.h"
+ 
+ #include <bit>
+-#ifndef XP_LINUX
++#if !defined(XP_LINUX) && !defined(__vexa__)
+ // We still support libstd++ versions without codecvt support on Linux.
+ //
+ // When the minimum supported libstd++ version is bumped to 3.4.21, we can
+@@ -25,7 +25,9 @@
+ #endif
+ #include <cwchar>
+ #include <limits>
++#if !defined(__vexa__)
+ #include <locale>
++#endif
+ #include <type_traits>
+ 
+ #include "frontend/FrontendContext.h"
+diff -ruN -x __pycache__ a/mozjs/mfbt/Array.h b/mozjs/mfbt/Array.h
+--- a/mozjs/mfbt/Array.h	2006-07-24 01:21:28.000000000 +0000
++++ b/mozjs/mfbt/Array.h	2026-10-11 21:13:52.619088233 +0000
+@@ -10,7 +10,7 @@
+ #include <cstddef>
+ 
+ #include <iterator>
+-#include <ostream>
++#include <iosfwd>
+ #include <utility>
+ 
+ #include "mozilla/Assertions.h"
+diff -ruN -x __pycache__ a/mozjs/mfbt/DbgMacro.h b/mozjs/mfbt/DbgMacro.h
+--- a/mozjs/mfbt/DbgMacro.h	2006-07-24 01:21:28.000000000 +0000
++++ b/mozjs/mfbt/DbgMacro.h	2026-10-11 21:13:52.632411547 +0000
+@@ -5,6 +5,9 @@
+ #ifndef mozilla_DbgMacro_h
+ #define mozilla_DbgMacro_h
+ 
++// Vexa's libc++ has no iostreams: MOZ_DBG is not available there.
++#if !defined(__vexa__)
++
+ /* a MOZ_DBG macro that outputs a wrapped value to stderr then returns it */
+ 
+ #include "mozilla/MacroForEach.h"
+@@ -192,4 +195,5 @@
+                 << (MOZ_ARG_COUNT(__VA_ARGS__) == 0 ? "" : " }");            \
+   }
+ 
++#endif  // !defined(__vexa__)
+ #endif  // mozilla_DbgMacro_h
+diff -ruN -x __pycache__ a/mozjs/mfbt/DefineEnum.h b/mozjs/mfbt/DefineEnum.h
+--- a/mozjs/mfbt/DefineEnum.h	2006-07-24 01:21:28.000000000 +0000
++++ b/mozjs/mfbt/DefineEnum.h	2026-10-11 21:13:52.631761095 +0000
+@@ -8,7 +8,7 @@
+ #define mozilla_DefineEnum_h
+ 
+ #include <stddef.h>  // for size_t
+-#include <ostream>   // IWYU pragma: keep(for std::ostream within macro)
++#include <iosfwd>   // IWYU pragma: keep(for std::ostream within macro)
+ 
+ #include "mozilla/MacroArgs.h"     // for MOZ_ARG_COUNT
+ #include "mozilla/MacroForEach.h"  // for MOZ_FOR_EACH
+@@ -162,17 +162,25 @@
+ 
+ #define MOZ_DEFINE_ENUM_TO_ENUM_TEXT(aEnumeratorDecl) #aEnumeratorDecl
+ 
++// Vexa's libc++ has no iostreams: no operator<< for these enums there.
++#if defined(__vexa__)
++#  define MOZ_DEFINE_ENUM_OSTREAM_OP(aFriend, aEnumName)
++#else
++#  define MOZ_DEFINE_ENUM_OSTREAM_OP(aFriend, aEnumName)                     \
++    aFriend inline std::ostream& operator<<(std::ostream& aStream,           \
++                                            const aEnumName& aEnum) {        \
++      aStream << EnumValueToString(aEnum);                                   \
++      return aStream;                                                        \
++    }
++#endif
++
+ #define MOZ_DEFINE_ENUM_TOSTRING_FUNC_IMPL(aEnumName, aEnumerators, aFriend) \
+   inline static const char* EnumValueToString(const aEnumName& aEnum) {      \
+     static constexpr const char* kMappedStrings[] = {MOZ_FOR_EACH_SEPARATED( \
+         MOZ_DEFINE_ENUM_TO_ENUM_TEXT, (, ), (), aEnumerators)};              \
+     return kMappedStrings[static_cast<size_t>(aEnum)];                       \
+   }                                                                          \
+-  aFriend inline std::ostream& operator<<(std::ostream& aStream,             \
+-                                          const aEnumName& aEnum) {          \
+-    aStream << EnumValueToString(aEnum);                                     \
+-    return aStream;                                                          \
+-  }
++  MOZ_DEFINE_ENUM_OSTREAM_OP(aFriend, aEnumName)
+ 
+ #define MOZ_DEFINE_ENUM_TOSTRING_FUNC(aEnumName, aEnumerators) \
+   MOZ_DEFINE_ENUM_TOSTRING_FUNC_IMPL(aEnumName, aEnumerators, )
+diff -ruN -x __pycache__ a/mozjs/mfbt/Maybe.h b/mozjs/mfbt/Maybe.h
+--- a/mozjs/mfbt/Maybe.h	2006-07-24 01:21:28.000000000 +0000
++++ b/mozjs/mfbt/Maybe.h	2026-10-11 21:13:52.620443904 +0000
+@@ -9,7 +9,7 @@
+ 
+ #include <functional>
+ #include <new>  // for placement new
+-#include <ostream>
++#include <iosfwd>
+ #include <type_traits>
+ #include <utility>
+ 
+@@ -882,6 +882,7 @@
+     emplace(aArgs);
+   }
+ 
++#if !defined(__vexa__)
+   friend std::ostream& operator<<(std::ostream& aStream,
+                                   const Maybe<T>& aMaybe) {
+     if (aMaybe) {
+@@ -891,6 +892,7 @@
+     }
+     return aStream;
+   }
++#endif
+ };
+ 
+ template <typename T>
+diff -ruN -x __pycache__ a/mozjs/mfbt/Poison.cpp b/mozjs/mfbt/Poison.cpp
+--- a/mozjs/mfbt/Poison.cpp	2006-07-24 01:21:28.000000000 +0000
++++ b/mozjs/mfbt/Poison.cpp	2026-10-11 21:19:12.553764067 +0000
+@@ -117,6 +117,11 @@
+   munmap(aRegion, aSize);
+ }
+ 
++#  if defined(__vexa__)
++// libvexa has no madvise to probe with. Calling the region in use keeps the
++// reservation, which is PROT_NONE and so still faults.
++static bool ProbeRegion(uintptr_t aRegion, uintptr_t aSize) { return false; }
++#  else
+ static bool ProbeRegion(uintptr_t aRegion, uintptr_t aSize) {
+ #  ifdef XP_SOLARIS
+   if (posix_madvise(reinterpret_cast<void*>(aRegion), aSize,
+@@ -128,6 +133,7 @@
+   }
+   return false;
+ }
++#  endif
+ 
+ static uintptr_t GetDesiredRegionSize() { return sysconf(_SC_PAGESIZE); }
+ 
+diff -ruN -x __pycache__ a/mozjs/mfbt/RefPtr.h b/mozjs/mfbt/RefPtr.h
+--- a/mozjs/mfbt/RefPtr.h	2006-07-24 01:21:28.000000000 +0000
++++ b/mozjs/mfbt/RefPtr.h	2026-10-11 21:19:12.551370508 +0000
+@@ -10,8 +10,11 @@
+ #include "mozilla/Attributes.h"
+ #include "mozilla/DbgMacro.h"  // for mozilla::DebugValue
+ 
+-#include <fmt/ostream.h>
++#if !defined(__vexa__)
++#  include <fmt/ostream.h>
++#endif
+ #include <type_traits>
++#include <utility>
+ 
+ /*****************************************************************************/
+ 
+@@ -571,6 +574,7 @@
+ 
+ // MOZ_DBG support
+ 
++#if !defined(__vexa__)
+ template <class T>
+ std::ostream& operator<<(std::ostream& aOut, const RefPtr<T>& aObj) {
+   return mozilla::DebugValue(aOut, aObj.get());
+@@ -578,6 +582,7 @@
+ 
+ template <typename T>
+ struct fmt::formatter<RefPtr<T>> : fmt::ostream_formatter {};
++#endif
+ 
+ /*****************************************************************************/
+ 
+diff -ruN -x __pycache__ a/mozjs/mozglue/baseprofiler/public/BaseProfileJSONWriter.h b/mozjs/mozglue/baseprofiler/public/BaseProfileJSONWriter.h
+--- a/mozjs/mozglue/baseprofiler/public/BaseProfileJSONWriter.h	2006-07-24 01:21:28.000000000 +0000
++++ b/mozjs/mozglue/baseprofiler/public/BaseProfileJSONWriter.h	2026-10-11 21:19:12.553386762 +0000
+@@ -17,7 +17,7 @@
+ #include "mozilla/Flow.h"
+ 
+ #include <functional>
+-#include <ostream>
++#include <iosfwd>
+ #include <string_view>
+ #include <stdint.h>
+ 
+@@ -225,6 +225,7 @@
+   NotNull<FailureLatch*> mFailureLatch;
+ };
+ 
++#if !defined(__vexa__)
+ struct OStreamJSONWriteFunc final : public JSONWriteFunc {
+   explicit OStreamJSONWriteFunc(std::ostream& aStream) : mStream(aStream) {}
+ 
+@@ -235,6 +236,7 @@
+ 
+   std::ostream& mStream;
+ };
++#endif
+ 
+ class UniqueJSONStrings;
+ 
+diff -ruN -x __pycache__ a/mozjs/mozglue/misc/Debug.cpp b/mozjs/mozglue/misc/Debug.cpp
+--- a/mozjs/mozglue/misc/Debug.cpp	2006-07-24 01:21:28.000000000 +0000
++++ b/mozjs/mozglue/misc/Debug.cpp	2026-10-11 21:23:46.664438966 +0000
+@@ -121,6 +121,7 @@
+   fprintf_stderr(aFile, "%s", aStr.c_str());
+ }
+ 
++#if !defined(__vexa__)
+ MFBT_API void print_stderr(std::stringstream& aStr) {
+ #if defined(ANDROID) || defined(XP_OHOS)
+   // On Android logcat output is truncated to 1024 chars per line, and
+@@ -148,3 +149,4 @@
+     fprint_stderr(aFile, aStr.str());
+   }
+ }
++#endif  // !defined(__vexa__)
+diff -ruN -x __pycache__ a/mozjs/mozglue/misc/Debug.h b/mozjs/mozglue/misc/Debug.h
+--- a/mozjs/mozglue/misc/Debug.h	2006-07-24 01:21:28.000000000 +0000
++++ b/mozjs/mozglue/misc/Debug.h	2026-10-11 21:23:46.663879096 +0000
+@@ -10,7 +10,7 @@
+ #include "fmt/format.h"
+ 
+ #include <cstdarg>
+-#include <sstream>
++#include <iosfwd>
+ 
+ /* This header file intends to supply debugging utilities for use in code
+  * that cannot use XPCOM debugging facilities like nsDebug.h.
+diff -ruN -x __pycache__ a/mozjs/mozglue/misc/MmapFaultHandler.cpp b/mozjs/mozglue/misc/MmapFaultHandler.cpp
+--- a/mozjs/mozglue/misc/MmapFaultHandler.cpp	2006-07-24 01:21:28.000000000 +0000
++++ b/mozjs/mozglue/misc/MmapFaultHandler.cpp	2026-10-11 21:19:12.554086632 +0000
+@@ -16,6 +16,7 @@
+ 
+ static struct sigaction sPrevSIGBUSHandler;
+ 
++#if !defined(__vexa__)
+ static void MmapSIGBUSHandler(int signum, siginfo_t* info, void* context) {
+   MOZ_RELEASE_ASSERT(signum == SIGBUS);
+ 
+@@ -76,6 +77,11 @@
+   }
+ }
+ 
++#else
++// Vexa's signal handlers get no siginfo, so a SIGBUS cannot be routed to the scope.
++// A fault in a mapped file crashes the process instead.
++void InstallMmapFaultHandler() {}
++#endif
+ MmapAccessScope::MmapAccessScope(void* aBuf, uint32_t aBufLen,
+                                  const char* aFilename) {
+   // Install signal handler if it wasn't installed yet.
+diff -ruN -x __pycache__ a/mozjs/mozglue/misc/Printf.cpp b/mozjs/mozglue/misc/Printf.cpp
+--- a/mozjs/mozglue/misc/Printf.cpp	2006-07-24 01:21:28.000000000 +0000
++++ b/mozjs/mozglue/misc/Printf.cpp	2026-10-11 21:19:12.551820590 +0000
+@@ -17,6 +17,7 @@
+ #include <stdarg.h>
+ #include <stdio.h>
+ #include <stdlib.h>
++#include <ctype.h>
+ #include <string.h>
+ 
+ #if defined(XP_WIN)
+diff -ruN -x __pycache__ a/mozjs/mozglue/misc/TimeStamp.h b/mozjs/mozglue/misc/TimeStamp.h
+--- a/mozjs/mozglue/misc/TimeStamp.h	2006-07-24 01:21:28.000000000 +0000
++++ b/mozjs/mozglue/misc/TimeStamp.h	2026-10-11 21:19:12.552527868 +0000
+@@ -10,7 +10,7 @@
+ #include "mozilla/FloatingPoint.h"
+ #include "mozilla/Types.h"
+ #include <algorithm>  // for std::min, std::max
+-#include <ostream>
++#include <iosfwd>
+ #include <stdint.h>
+ #include <type_traits>
+ 
+@@ -218,10 +218,12 @@
+   bool IsZero() const { return mValue == 0; }
+   explicit operator bool() const { return mValue != 0; }
+ 
++#if !defined(__vexa__)
+   friend std::ostream& operator<<(std::ostream& aStream,
+                                   const BaseTimeDuration& aDuration) {
+     return aStream << aDuration.ToMilliseconds() << " ms";
+   }
++#endif
+ 
+   // We could define additional operators here:
+   // -- convert to/from other time units
+diff -ruN -x __pycache__ a/mozjs/mozglue/misc/TimeStamp_posix.cpp b/mozjs/mozglue/misc/TimeStamp_posix.cpp
+--- a/mozjs/mozglue/misc/TimeStamp_posix.cpp	2006-07-24 01:21:28.000000000 +0000
++++ b/mozjs/mozglue/misc/TimeStamp_posix.cpp	2026-10-11 21:19:12.554900050 +0000
+@@ -11,7 +11,9 @@
+ // obtained with this API; see TimeDuration::Resolution;
+ //
+ 
++#if !defined(__vexa__)
+ #include <sys/syscall.h>
++#endif
+ #include <time.h>
+ #include <unistd.h>
+ #include <string.h>
+@@ -194,6 +196,14 @@
+ // process uptime. This value will be stored at the address pointed by aTime;
+ // if an error occurred 0 will be stored instead.
+ 
++#if defined(__vexa__)
++#  include <vexa/syscall.h>
++// libvexa has no gettid system call. Its thread id stands in for the Linux one.
++static pid_t CurrentThreadId() { return (pid_t)vx_thread_id(); }
++#else
++static pid_t CurrentThreadId() { return (pid_t)syscall(__NR_gettid); }
++#endif
++
+ static void* ComputeProcessUptimeThread(void* aTime) {
+   uint64_t* uptime = static_cast<uint64_t*>(aTime);
+   long hz = sysconf(_SC_CLK_TCK);
+@@ -206,7 +216,7 @@
+ 
+   char threadStat[40];
+   SprintfLiteral(threadStat, "/proc/self/task/%d/stat",
+-                 (pid_t)syscall(__NR_gettid));
++                 CurrentThreadId());
+ 
+   uint64_t threadJiffies = JiffiesSinceBoot(threadStat);
+   uint64_t selfJiffies = JiffiesSinceBoot("/proc/self/stat");
+diff -ruN -x __pycache__ a/mozjs/python/mozbuild/mozbuild/configure/constants.py b/mozjs/python/mozbuild/mozbuild/configure/constants.py
+--- a/mozjs/python/mozbuild/mozbuild/configure/constants.py	2006-07-24 01:21:28.000000000 +0000
++++ b/mozjs/python/mozbuild/mozbuild/configure/constants.py	2026-10-11 21:04:43.086009954 +0000
+@@ -43,6 +43,7 @@
+         "SunOS",
+         "WINNT",
+         "WASI",
++        "Vexa",
+     )
+ 
+ 
+@@ -58,6 +59,7 @@
+         "SunOS",
+         "WINNT",
+         "WASI",
++        "Vexa",
+     )
+ 
+ 
+@@ -147,6 +149,7 @@
+     "SunOS": "__sun__",
+     "WINNT": "_WIN32 || __CYGWIN__",
+     "WASI": "__wasi__",
++    "Vexa": "__vexa__",
+ }
+ 
+ assert sorted(kernel_preprocessor_checks.keys()) == sorted(Kernel.POSSIBLE_VALUES)
+diff -ruN -x __pycache__ a/mozjs/third_party/fmt/include/fmt/base.h b/mozjs/third_party/fmt/include/fmt/base.h
+--- a/mozjs/third_party/fmt/include/fmt/base.h	2006-07-24 01:21:28.000000000 +0000
++++ b/mozjs/third_party/fmt/include/fmt/base.h	2026-10-11 21:19:12.550632256 +0000
+@@ -2217,7 +2217,7 @@
+     : std::true_type {};
+ 
+ #ifndef FMT_USE_LOCALE
+-#  define FMT_USE_LOCALE (FMT_OPTIMIZE_SIZE <= 1)
++#  define FMT_USE_LOCALE (FMT_OPTIMIZE_SIZE <= 1 && !__vexa__)
+ #endif
+ 
+ // A type-erased reference to an std::locale to avoid a heavy <locale> include.
+diff -ruN -x __pycache__ a/mozjs/third_party/fmt/include/fmt/format.h b/mozjs/third_party/fmt/include/fmt/format.h
+--- a/mozjs/third_party/fmt/include/fmt/format.h	2006-07-24 01:21:28.000000000 +0000
++++ b/mozjs/third_party/fmt/include/fmt/format.h	2026-10-11 21:13:52.638732824 +0000
+@@ -1425,7 +1425,9 @@
+   }
+   inline auto size() const -> size_t { return buffer_.size() - 1; }
+   inline auto c_str() const -> const wchar_t* { return &buffer_[0]; }
++#  if !defined(__vexa__)
+   inline auto str() const -> std::wstring { return {&buffer_[0], size()}; }
++#  endif
+ };
+ 
+ enum class to_utf8_error_policy { abort, replace };
