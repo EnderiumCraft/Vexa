@@ -133,8 +133,29 @@ lands.
 - **No `getrandom(2)`, no unwinder.** `getrandom` is covered by `/dev/urandom`, the same as
   in M1. The libc shims and the std edits in the script are the workarounds, not the end
   state.
-- **SpiderMonkey has no Vexa target.** `mozjs_sys` (version 153) configures SpiderMonkey per
-  OS, and Vexa is not one of them. Its port is the biggest unknown.
+- **SpiderMonkey compiles for Vexa, with guards.** `mozjs_sys` (version 153) configures
+  SpiderMonkey per OS, and Vexa was not one of them. The patch in
+  [`third_party/mozjs-vexa.patch`](../third_party/mozjs-vexa.patch) adds the target, and the
+  build (`libjs_static.a`, x86-64 ELF) runs from the script on a clean tree. What it needed:
+  - **No iostreams, locales, wide characters or `<locale.h>` in the SDK's libc++, by design**
+    ([`docs/SDK.md`](SDK.md)). Declaration-only uses take `<iosfwd>`; bodies that write to a
+    stream, and the trace printers, are left out on Vexa. Conversions that went through the
+    C library's locale use UTF-8, which is what Vexa's only locale is. Default locale is `"und"`.
+  - **Clang 19 on the host.** Configure rejects clang 18. Set `HOST_CC`/`HOST_CXX` (the
+    script's defaults are clang-19), and `VEXA_HOST_CC`/`VEXA_HOST_CXX`: without them the SDK's
+    `vexa-cc` falls back to the system `cc`, which is gcc here.
+  - **Headers from the crates and the repo**, put on `CPPFLAGS` the way `mozjs_sys` does:
+    `encoding_c_mem`, `mozjs_normalizer_glue` (its header is made by cbindgen, and its
+    `<ostream>` include is changed to `<iosfwd>`), and zlib from `build/zlib-native`.
+  - **Off on purpose:** the JIT (`--disable-jit`), the intl API (`--without-intl-api`), and
+    the wasm integer-GEMM feature (`--disable-wasm-moz-intgemm`, which Mozilla keeps out of
+    release builds without a security review).
+  - **Platform stand-ins:** the GC's soft decommit keeps the pages and reports success (libvexa
+    has no `madvise`); the page-fault count is zero (no `getrusage`); the mozglue SIGBUS
+    handler is a no-op (Vexa's signals carry no `siginfo`); `gettid` is libvexa's thread id;
+    and `NativeStack` gets its stack bounds from `pthread_getattr_np`, which libvexa now has.
+  - **Not verified yet:** linking, and running any JavaScript. The `mozjs_sys` Rust side
+    (its bindings and the link) is not built for Vexa.
 - **Servo's dependencies** (servo 0.7.0): Stylo (CSS), WebRender and surfman (GL), `mozjs`
   (JavaScript), tokio-based networking, and optional GStreamer media (`servo-media-dummy`
   is the stand-in). The `gaol` sandbox is compiled only on platforms it lists, so Vexa needs
@@ -150,8 +171,10 @@ lands.
 2. **M2, Servo's leaf crates.** Done, bar a real HTTPS fetch. The crates above all run in
    the VM, with std's `Instant` for time and rustls on `/etc/ssl/certs/ca-certificates.crt`.
    A real site needs a VM that resolves names, and this sandbox does not give one.
-3. **M3, SpiderMonkey on Vexa.** Port the `mozjs_sys` build (a target config for Vexa, and
-   the C++ runtime from the libc++ work in Phase 67).
+3. **M3, SpiderMonkey on Vexa.** In progress. The C++ builds and archives for
+   `x86_64-unknown-vexa` (`tools/mozjs/build-mozjs-vexa.sh`). Still open: linking it with the
+   Rust side of `mozjs_sys`, a runtime test in the VM that evaluates a script, and the
+   decisions about the JIT and intl above.
 4. **M4, GL for WebRender.** Give surfman a software GL context on Vexa, from OSMesa
    (softpipe). Check first that softpipe gives the GL version WebRender requires.
 5. **M5, an embedder.** A Vexa app that hosts Servo: a window through libvexa's GUI, input,
@@ -161,4 +184,6 @@ lands.
 
 ## Next step
 
-M3, SpiderMonkey. Its configure step passes for `x86_64-unknown-vexa`; the build is next.
+M3, the link. Build the `mozjs_sys` Rust side for Vexa (its bindings, and the normalizer and
+encoding libraries it links), link it with `libjs_static.a`, and run a script in the VM. Then
+decide whether the first Servo build keeps the JIT off (the current setting) or turns it on.
