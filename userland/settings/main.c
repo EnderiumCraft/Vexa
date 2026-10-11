@@ -226,10 +226,6 @@ static int big_text(int x, int y, const char *t, int size, uint32_t color) {
     return vx_text(S(), vx_font(VX_FACE_BOLD, size), x, y, t, color, VX_TRANSPARENT);
 }
 
-static void rounded(int x, int y, int w, int h, uint32_t color) {
-    vx_fill_rounded(S(), x, y, w, h, h / 2 < 8 ? h / 2 : 8, color, 255);
-}
-
 /* A sunken track (switches, sliders, bars): darker at the top. */
 static void track(int x, int y, int w, int h, uint32_t color) {
     vx_fill_rounded(S(), x, y, w, h, h / 2, vx_mix(color, 0x000000, 60), 255);
@@ -1419,59 +1415,210 @@ static void draw_sound(void) {
     note(y + 36, "on the panel, which also has the volume (and the volume keys change it).");
 }
 
-static void draw_display(void) {
-    int y = 64;
-    read_display();
-    if (revert_at) {
-        long left = (revert_at - vx_uptime() + 999) / 1000;
-        rounded(LEFT, y, window->surface.width - LEFT - 24, 48, VX_COLOR_SELECTED);
-        char line[96];
-        snprintf(line, sizeof(line), "Keep this? It goes back in %ld second%s.", left,
-                 left == 1 ? "" : "s");
-        text(LEFT + 14, y + 16, line, VX_COLOR_TEXT);
-        int bx = window->surface.width - 24 - 200;
-        vx_draw_button(S(), bx, y + 11, 90, 26, "Keep", false);
-        add_hit(bx, y + 11, 90, 26, H_KEEP);
-        vx_draw_button(S(), bx + 98, y + 11, 90, 26, "Go back", false);
-        add_hit(bx + 98, y + 11, 90, 26, H_REVERT);
-        y += 64;
-    }
-    heading("Resolution", y);
-    y += 28;
-    if (!have_display) {
-        note(y, "No display.");
+/* A size's ratio, named if it's a usual one ("16:10", "4:3"), else reduced
+ * (within a percent: 1366 x 768 is 16:9). */
+static void aspect_name(unsigned w, unsigned h, char *out, size_t size) {
+    static const struct {
+        unsigned a, b;
+    } usual[] = {{4, 3}, {5, 4}, {16, 10}, {16, 9}, {1, 1}};
+    if (!w || !h) {
+        out[0] = '\0';
         return;
     }
-    int cols = 3, w = 170;
-    for (unsigned i = 0; i < modes.count; i++) {
-        int x = LEFT + (int)(i % cols) * (w + 8), ry = y + (int)(i / cols) * 32;
-        bool on = modes.modes[i].width == display_info.width &&
-                  modes.modes[i].height == display_info.height;
-        char name[32];
-        snprintf(name, sizeof(name), "%u x %u", modes.modes[i].width, modes.modes[i].height);
-        vx_draw_button(S(), x, ry, w, 26, name, on);
-        struct hit *h = add_hit(x, ry, w, 26, H_MODE);
-        h->index = (int)i;
+    for (unsigned i = 0; i < sizeof(usual) / sizeof(usual[0]); i++) {
+        unsigned long left = (unsigned long)w * usual[i].b, right = (unsigned long)h * usual[i].a;
+        unsigned long diff = left > right ? left - right : right - left;
+        if (diff * 100 <= right) {
+            snprintf(out, size, "%u:%u", usual[i].a, usual[i].b);
+            return;
+        }
     }
-    y += (int)((modes.count + cols - 1) / cols) * 32 + 8;
-    if (modes.count <= 1) {
-        note(y, "This display's size is the one the firmware set (Vexa can change it on QEMU's");
-        note(y + 18, "and Bochs's standard VGA). For another, choose \"Vexa at 1024x768\" or");
-        note(y + 36, "\"Vexa at 1280x720\" in the boot menu.");
-        y += 62;
+    unsigned a = w, b = h;
+    while (b) {
+        unsigned t = a % b;
+        a = b;
+        b = t;
     }
-    heading("Size of everything", y);
-    y += 28;
-    static const struct option scales[] = {{"1", "Normal"}, {"2", "Twice as big"}};
-    segments(y, "Scale", "display_scale", scales, 2, "1");
-    y += ROW + 8;
-    char line[128];
+    snprintf(out, size, "%u:%u", w / a, h / a);
+}
+
+/* The screen: a picture of it with the desktop on it at the size it works in,
+ * and what the display is. Returns its height. */
+static int draw_screen_card(int y) {
+    int w, h;
+    screen_size(&w, &h);
+    int sh = SCREEN_W * h / w, height = sh + 48;
+    card(y, height);
+    draw_screen_preview(LEFT + CARD_PAD + 6, y + 24, sh);
+    int tx = LEFT + CARD_PAD + SCREEN_W + 36, right = LEFT + CONTENT_W - CARD_PAD;
+    if (!have_display) {
+        text(tx, y + 24, "No display.", VX_COLOR_DIM);
+        return height;
+    }
+    char line[96], ratio[16];
+    aspect_name(display_info.width, display_info.height, ratio, sizeof(ratio));
+    snprintf(line, sizeof(line), "%u × %u", display_info.width, display_info.height);
+    big_text(tx, y + 20, line, 26, VX_COLOR_TEXT);
+    snprintf(line, sizeof(line), "%s, %u bits of colour a pixel", ratio, display_info.bits_per_pixel);
+    vx_draw_text_fit(S(), tx, y + 60, right - tx, line, VX_COLOR_DIM, VX_TRANSPARENT);
+    snprintf(line, sizeof(line), "The desktop works in %d × %d.", w, h);
+    vx_draw_text_fit(S(), tx, y + 92, right - tx, line, VX_COLOR_TEXT, VX_TRANSPARENT);
+    vx_draw_text_fit(S(), tx, y + 114, right - tx, "Change the size under Resolution below.",
+                     VX_COLOR_DIM, VX_TRANSPARENT);
+    vx_draw_text_fit(S(), tx, y + 132, right - tx, "It goes back if you don't keep it.",
+                     VX_COLOR_DIM, VX_TRANSPARENT);
+    return height;
+}
+
+/* One of the two sizes of everything: a sample of the text at that size, the
+ * name and what it does. */
+static void scale_option(int x, int y, int w, int h, int scale, const char *title, const char *about,
+                         bool on) {
+    if (on) {
+        chosen_ring(x, y, w, h, 10);
+    } else {
+        uint32_t edge = vx_theme.dark ? vx_mix(card_color(), 0xffffff, 40) : 0xc9ced8;
+        vx_fill_rounded(S(), x - 1, y - 1, w + 2, h + 2, 11, edge, 255);
+        vx_fill_rounded(S(), x, y, w, h, 10, card_color(), 255);
+    }
+    vx_text(S(), vx_font(VX_FACE_SANS, scale == 2 ? 26 : 13), x + 14, y + 10, "Sample text",
+            VX_COLOR_TEXT, VX_TRANSPARENT);
+    vx_text(S(), vx_font(on ? VX_FACE_BOLD : VX_FACE_SANS, 14), x + 14, y + 50, title, VX_COLOR_TEXT,
+            VX_TRANSPARENT);
+    vx_draw_text_fit(S(), x + 14, y + 68, w - 28, about, VX_COLOR_DIM, VX_TRANSPARENT);
+    if (on) {
+        chosen_badge(x, y, w);
+    }
+    struct hit *hit = add_hit(x, y, w, h, H_SEGMENT);
+    hit->key = "display_scale";
+    hit->value = scale == 2 ? "2" : "1";
+}
+
+static int draw_scale_card(int y) {
+    int height = 198;
+    card(y, height);
+    card_title(y + 14, "Size of everything", "Bigger text, buttons and icons: for a big screen, or to read from further away.");
     int scale = vx_settings_int(&desk, "display_scale", 1) == 2 ? 2 : 1;
-    snprintf(line, sizeof(line), "The display: %u x %u, %u bits a pixel; the desktop works in %u x %u.",
-             display_info.width, display_info.height, display_info.bits_per_pixel,
-             display_info.width / scale, display_info.height / scale);
-    note(y, line);
-    note(y + 20, "X programs keep the size they started with until they're started again.");
+    int w = (CONTENT_W - 2 * CARD_PAD - 12) / 2;
+    scale_option(LEFT + CARD_PAD, y + 62, w, 88, 1, "Normal", "Text and buttons as they are.", scale == 1);
+    scale_option(LEFT + CARD_PAD + w + 12, y + 62, w, 88, 2, "Twice as big",
+                 "Easier to read on a big screen.", scale == 2);
+    vx_draw_text_fit(S(), LEFT + CARD_PAD, y + 164, CONTENT_W - 2 * CARD_PAD,
+                     "X programs keep the size they started with until they're started again.",
+                     VX_COLOR_DIM, VX_TRANSPARENT);
+    return height;
+}
+
+/* A size, as a tile: its shape to scale (in a small box), its name and ratio,
+ * and that it's the one in use. */
+static void mode_tile(int x, int y, int w, int h, unsigned mw, unsigned mh, bool on, int index) {
+    if (on) {
+        chosen_ring(x, y, w, h, 10);
+    } else {
+        uint32_t edge = vx_theme.dark ? vx_mix(card_color(), 0xffffff, 40) : 0xc9ced8;
+        vx_fill_rounded(S(), x - 1, y - 1, w + 2, h + 2, 11, edge, 255);
+        vx_fill_rounded(S(), x, y, w, h, 10, card_color(), 255);
+    }
+    int bw = 46, bh = 32, sw = bw, sh = bh;
+    if (mw && mh) {
+        if (mw * bh >= mh * bw) {
+            sh = mh * bw / mw;
+        } else {
+            sw = mw * bh / mh;
+        }
+    }
+    int bx = x + 14 + (bw - sw) / 2, by = y + (h - sh) / 2;
+    vx_fill_rounded(S(), bx, by, sw, sh, 3, on ? VX_COLOR_ACCENT : vx_mix(card_color(), VX_COLOR_DIM, 90), 255);
+    char name[24], ratio[16], about[32];
+    snprintf(name, sizeof(name), "%u × %u", mw, mh);
+    aspect_name(mw, mh, ratio, sizeof(ratio));
+    snprintf(about, sizeof(about), on ? "%s, in use" : "%s", ratio);
+    vx_text(S(), vx_font(on ? VX_FACE_BOLD : VX_FACE_SANS, 14), x + 74, y + 14, name, VX_COLOR_TEXT,
+            VX_TRANSPARENT);
+    vx_text(S(), vx_font(VX_FACE_SANS, 12), x + 74, y + 38, about, on ? VX_COLOR_ACCENT : VX_COLOR_DIM,
+            VX_TRANSPARENT);
+    if (on) {
+        chosen_badge(x, y, w);
+    }
+    struct hit *hit = add_hit(x, y, w, h, H_MODE);
+    hit->index = index;
+}
+
+static int draw_resolution_card(int y) {
+    int cols = 3, gap = 8, tw = (CONTENT_W - 2 * CARD_PAD - (cols - 1) * gap) / cols, th = 66;
+    int rows = have_display && modes.count > 1 ? ((int)modes.count + cols - 1) / cols : 1;
+    bool single = have_display && modes.count <= 1;
+    int height = 62 + rows * th + (rows - 1) * gap + 16 + (single ? 58 : 0);
+    card(y, height);
+    char about[120];
+    snprintf(about, sizeof(about), "The size the screen shows. It changes at once, and you have %d seconds to keep it.",
+             REVERT_SECONDS);
+    card_title(y + 14, "Resolution", about);
+    if (!have_display) {
+        text(LEFT + CARD_PAD, y + 62, "No display.", VX_COLOR_DIM);
+        return height;
+    }
+    for (unsigned i = 0; i < modes.count; i++) {
+        int x = LEFT + CARD_PAD + ((int)i % cols) * (tw + gap);
+        int ty = y + 62 + ((int)i / cols) * (th + gap);
+        bool on = modes.modes[i].width == display_info.width && modes.modes[i].height == display_info.height;
+        mode_tile(x, ty, tw, th, modes.modes[i].width, modes.modes[i].height, on, (int)i);
+    }
+    if (single) {
+        int ny = y + 62 + th + 16, nw = CONTENT_W - 2 * CARD_PAD;
+        vx_draw_text_fit(S(), LEFT + CARD_PAD, ny, nw,
+                         "This display's size is the one the firmware set (Vexa can change it on QEMU's",
+                         VX_COLOR_DIM, VX_TRANSPARENT);
+        vx_draw_text_fit(S(), LEFT + CARD_PAD, ny + 18, nw,
+                         "and Bochs's standard VGA). For another, choose \"Vexa at 1024x768\" or",
+                         VX_COLOR_DIM, VX_TRANSPARENT);
+        vx_draw_text_fit(S(), LEFT + CARD_PAD, ny + 36, nw,
+                         "\"Vexa at 1280x720\" in the boot menu.", VX_COLOR_DIM, VX_TRANSPARENT);
+    }
+    return height;
+}
+
+/* The change in progress: what's to keep, the seconds left (a bar that empties),
+ * and Keep and Go back. */
+static int draw_revert(int y) {
+    int height = 74;
+    long remaining = revert_at - (long)vx_uptime();
+    long left = (remaining + 999) / 1000;
+    left = left < 0 ? 0 : left;
+    vx_fill_rounded(S(), LEFT, y, CONTENT_W, height, 12, VX_COLOR_ACCENT, 255);
+    vx_fill_rounded(S(), LEFT + 1, y + 1, CONTENT_W - 2, height - 2, 11,
+                    vx_mix(card_color(), VX_COLOR_ACCENT, 26), 255);
+    vx_text(S(), vx_font(VX_FACE_BOLD, 14), LEFT + CARD_PAD, y + 12, "Keep this screen?", VX_COLOR_TEXT,
+            VX_TRANSPARENT);
+    char line[96];
+    snprintf(line, sizeof(line), "It goes back to what it was in %ld second%s if you don't.", left,
+             left == 1 ? "" : "s");
+    text(LEFT + CARD_PAD, y + 34, line, VX_COLOR_DIM);
+    int bx = LEFT + CONTENT_W - CARD_PAD - 188;
+    vx_draw_button_flags(S(), bx, y + 12, 90, 28, "Keep", VX_BUTTON_HOT);
+    add_hit(bx, y + 12, 90, 28, H_KEEP);
+    vx_draw_button(S(), bx + 98, y + 12, 90, 28, "Go back", false);
+    add_hit(bx + 98, y + 12, 90, 28, H_REVERT);
+    int bar = CONTENT_W - 2 * CARD_PAD;
+    long total = (long)REVERT_SECONDS * 1000;
+    int filled = remaining > 0 ? (int)(bar * (remaining > total ? total : remaining) / total) : 0;
+    track(LEFT + CARD_PAD, y + 56, bar, 8, VX_COLOR_BUTTON);
+    if (filled >= 8) {
+        vx_draw_gel(S(), LEFT + CARD_PAD, y + 56, filled, 8, 4, VX_COLOR_ACCENT);
+    }
+    return height;
+}
+
+static void draw_display(void) {
+    int y = 60;
+    read_display();
+    if (revert_at) {
+        y += draw_revert(y) + 14;
+    }
+    y += draw_screen_card(y) + 14;
+    y += draw_scale_card(y) + 14;
+    y += draw_resolution_card(y);
+    page_bottom = y + 24; /* (A long page scrolls with the wheel.) */
 }
 
 /* ---- Default Apps ---- */
