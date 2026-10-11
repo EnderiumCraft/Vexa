@@ -19,6 +19,11 @@ What each edit does, and why Vexa can take the generic path:
                           names that version has.
   socket2-0.6.5           Its IovLen (the msg_iovlen type) is defined only for some OSes;
                           Vexa's is size_t, as on glibc, so it takes the usize branch.
+  tokio-1.53.2            UnixStream::peer_cred needs a per-OS helper; Vexa's returns
+                          Unsupported, as libvexa has no SO_PEERCRED.
+  ring-0.17.14            Its SystemRandom takes the OS's entropy through getrandom, on
+                          the OSes it lists; Vexa is added, and its getrandom reads
+                          /dev/urandom.
   getrandom-0.2.17        Vexa has no getrandom(2). It has /dev/urandom, and the kernel
   getrandom-0.3.4         seeds it from RDRAND, so the crates read it, as they do on the
                           other systems in the use_file list. getrandom 0.3 declares its
@@ -82,6 +87,23 @@ EDITS = [
     ("tokio-1.53.2/src/net/unix/ucred.rs",
      '#[cfg(any(\n    target_os = "linux",\n    target_os = "redox",\n    target_os = "android",\n    target_os = "openbsd",\n    target_os = "haiku",\n    target_os = "cygwin"\n))]\npub(crate) use self::impl_linux::get_peer_cred;\n',
      '#[cfg(target_os = "vexa")]\npub(crate) fn get_peer_cred(_sock: &crate::net::UnixStream) -> std::io::Result<UCred> {\n    Err(std::io::Error::new(\n        std::io::ErrorKind::Unsupported,\n        "Vexa\'s Unix sockets have no peer credentials",\n    ))\n}\n\n#[cfg(any(\n    target_os = "linux",\n    target_os = "redox",\n    target_os = "android",\n    target_os = "openbsd",\n    target_os = "haiku",\n    target_os = "cygwin"\n))]\npub(crate) use self::impl_linux::get_peer_cred;\n'),
+    # ring: its SystemRandom takes the OS's entropy through the getrandom crate, but only on
+    # the OSes listed here, and Vexa has no implementation without this. The getrandom crate
+    # is patched to read /dev/urandom, so Vexa's random bytes come from the same place.
+    ("ring-0.17.14/src/rand.rs",
+     '    target_os = "vita",\n    target_os = "windows",\n',
+     '    target_os = "vita",\n    target_os = "vexa",\n    target_os = "windows",\n'),
+    # mio's new_socket makes a socket non-blocking with SOCK_NONBLOCK on Linux-like systems,
+    # and with fcntl on the systems in the list below. Without Vexa there, a client socket
+    # stays blocking, and a single-threaded runtime hangs in its first read.
+    ("mio-1.2.4/src/sys/unix/net.rs",
+     '        target_os = "nto",\n    ))]\n    {\n        if let Err(err) = syscall!(fcntl(socket, libc::F_SETFL, libc::O_NONBLOCK)) {',
+     '        target_os = "nto",\n        target_os = "vexa",\n    ))]\n    {\n        if let Err(err) = syscall!(fcntl(socket, libc::F_SETFL, libc::O_NONBLOCK)) {'),
+    # ring's assembly (its pregenerated ELF sources) is used only for the OSes in LINUX_ABI;
+    # without Vexa there the crypto routines are never built and the link fails.
+    ("ring-0.17.14/build.rs",
+     'const LINUX_ABI: &[&str] = &[\n    "android",\n',
+     'const LINUX_ABI: &[&str] = &[\n    "android",\n    "vexa",\n'),
     # getrandom 0.2: the use_file backend, which reads /dev/urandom.
     ("getrandom-0.2.17/src/lib.rs",
      '    if #[cfg(any(target_os = "haiku", target_os = "redox", target_os = "nto", target_os = "aix"))] {\n',

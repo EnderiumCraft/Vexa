@@ -54,19 +54,22 @@ lands.
       serial log has no faults. The check program is not in the repo; the build script's
       probe only prints.
 
-- [ ] **M2: Servo's leaf crates (in progress).** `getrandom` (0.2 and 0.3), `mio` 1.2.4
-      on its `poll(2)` selector with the pipe waker, `socket2`, and TCP over loopback
-      through `mio` all run in the VM. `tokio` 1.53 (its runtime, a timer, and TCP over
-      loopback) runs too. `rustls` and `hyper` are not built yet.
+- [ ] **M2: Servo's leaf crates (nearly done).** These all run in the VM: `getrandom`
+      (0.2 and 0.3), `mio` 1.2.4 on its `poll(2)` selector with the pipe waker, `socket2`,
+      `tokio` 1.53 (runtime, timer, TCP), `rustls` 0.23 with `ring` 0.17 as the crypto
+      provider (a TLS handshake over loopback, with a self-signed certificate made in the
+      probe), and `hyper` 1.12's HTTP/1 client and server over loopback. Still open: how
+      rustls trusts real sites, the 64-handle `poll` limit, and `dlopen`, which is not probed.
 
       ```sh
       PATH=$PWD/build/sdk/vexa-sdk/bin:$PATH sh tools/rust/build-std-vexa.sh WORKDIR
       sh tools/rust/build-crates-vexa.sh WORKDIR
       ```
 
-      The crates get their Vexa edits from [`tools/rust/crates-vexa-glue.py`](../tools/rust/crates-vexa-glue.py),
-      and the probes are [`tools/rust/crates-probe.rs`](../tools/rust/crates-probe.rs) and
-      [`tools/rust/tokio-probe.rs`](../tools/rust/tokio-probe.rs).
+      The crates get their Vexa edits from [`tools/rust/crates-vexa-glue.py`](../tools/rust/crates-vexa-glue.py).
+      The probes are [`crates-probe.rs`](../tools/rust/crates-probe.rs) (mio),
+      [`tokio-probe.rs`](../tools/rust/tokio-probe.rs), [`tls-probe.rs`](../tools/rust/tls-probe.rs)
+      and [`hyper-probe.rs`](../tools/rust/hyper-probe.rs).
 
 ## What the probes found
 
@@ -98,9 +101,26 @@ lands.
   libvexa's `setsockopt` accepts any option at the socket, IP, IPv6 and TCP levels and
   ignores it. So these names compile, but options such as `IP_HDRINCL` and the multicast
   interface have no effect yet.
-- **No `getrandom(2)`, no unwinder, no `readv`/`writev`/`ioctl`.** `getrandom` is covered by
-  `/dev/urandom`, the same as in M1. The other gaps are covered above. The libc shims and
-  the std edits in the script are the workarounds, not the end state.
+- **Non-blocking listeners blocked in `accept`.** The kernel's `accept` waits for a
+  connection even on a non-blocking listener, so an accept loop hung after its first
+  connection. libvexa's `accept` now checks readiness first, as its pipe reads do, and
+  returns `EAGAIN` when no connection is waiting.
+- **`ioctl(FIOCLEX)` reached the device layer.** `std`'s socket code sets close-on-exec with
+  it, and libvexa answered `ENOTTY`, so `TcpListener::bind` failed. libvexa now takes
+  `FIOCLEX` and `FIONCLEX` as no-ops, as it does `F_SETFD`: descriptors have no
+  close-on-exec flag yet. Its other `ioctl` requests are `FIONBIO`, `FIONREAD` and
+  `SIOCGIFCONF`; the rest go to the device.
+- **mio left client sockets blocking.** Its socket setup makes a socket non-blocking with
+  `SOCK_NONBLOCK` on Linux-like systems and with `fcntl` on the systems in a second list.
+  Vexa was in neither, so a client's first read blocked the single-threaded runtime. The
+  glue adds Vexa to the second list.
+- **ring needs three edits for Vexa.** Its `SystemRandom` takes entropy through `getrandom`
+  only on the systems it lists, its assembly is built only for the systems in `LINUX_ABI`,
+  and both lists now include Vexa. Without the assembly, its crypto routines are missing
+  at link time.
+- **No `getrandom(2)`, no unwinder.** `getrandom` is covered by `/dev/urandom`, the same as
+  in M1. The libc shims and the std edits in the script are the workarounds, not the end
+  state.
 - **SpiderMonkey has no Vexa target.** `mozjs_sys` (version 153) configures SpiderMonkey per
   OS, and Vexa is not one of them. Its port is the biggest unknown.
 - **Servo's dependencies** (servo 0.7.0): Stylo (CSS), WebRender and surfman (GL), `mozjs`
@@ -115,10 +135,12 @@ lands.
 
 1. **M1, `std` on Vexa.** Done. The probe prints, and a `std` program has run threads, a
    file, and an environment variable in the VM.
-2. **M2, Servo's leaf crates.** In progress. Done: `getrandom`, `mio` on `poll(2)` with the
-   pipe waker, `socket2`, and `tokio`'s runtime, timer and TCP over loopback. Time is std's
-   `Instant`, which the probes use. Still to do: `rustls` (it needs a crypto provider that
-   builds for Vexa) and `hyper`. `dlopen` exists in libvexa and is not probed yet.
+2. **M2, Servo's leaf crates.** Nearly done. The crates above all run in the VM, with
+   std's `Instant` for time. Still open: rustls needs a trust store for real sites (a
+   `webpki-roots` build embeds Mozilla's roots, so no file read is needed; or read
+   `/etc/ssl/certs/ca-certificates.crt`, which the TLS phase installs), the 64-handle `poll`
+   limit, and `dlopen`, which libvexa
+   has but nothing has probed.
 3. **M3, SpiderMonkey on Vexa.** Port the `mozjs_sys` build (a target config for Vexa, and
    the C++ runtime from the libc++ work in Phase 67).
 4. **M4, GL for WebRender.** Give surfman a software GL context on Vexa, from OSMesa
@@ -130,6 +152,7 @@ lands.
 
 ## Next step
 
-M2's next steps: `rustls`, with a crypto provider that builds for Vexa, then `hyper`. Two
-things to settle before real traffic: the 64-handle `poll` limit (a server with more than 64
-connections will fail), and `setsockopt` silently accepting options it does not apply.
+Close out M2: choose the trust store for rustls, probe `dlopen`, and fix the 64-handle `poll`
+limit (a server with more than 64 connections will fail). Also decide what `setsockopt`
+should do with options it accepts and ignores. Then M3, SpiderMonkey, which needs its build
+read before anything else can be sized.
