@@ -54,6 +54,18 @@ lands.
       serial log has no faults. The check program is not in the repo; the build script's
       probe only prints.
 
+- [ ] **M2: Servo's leaf crates (in progress).** `getrandom` (0.2 and 0.3), `mio` 1.2.4
+      on its `poll(2)` selector with the pipe waker, and TCP over loopback through `mio`
+      all run in the VM. `tokio`, `rustls` and `hyper` are not built yet.
+
+      ```sh
+      PATH=$PWD/build/sdk/vexa-sdk/bin:$PATH sh tools/rust/build-std-vexa.sh WORKDIR
+      sh tools/rust/build-crates-vexa.sh WORKDIR
+      ```
+
+      The crates get their Vexa edits from [`tools/rust/crates-vexa-glue.py`](../tools/rust/crates-vexa-glue.py),
+      and the probe is [`tools/rust/crates-probe.rs`](../tools/rust/crates-probe.rs).
+
 ## What the probes found
 
 - **libc had no `vexa` module.** The libc crate (0.2.178, what `std` depends on) failed with
@@ -66,11 +78,24 @@ lands.
 - **libvexa defines some constants with Linux's values, and not all of them.** Where it lacks
   a value libc needs (`O_NOFOLLOW`, `EWOULDBLOCK`, the `IP_*` options and others), the Vexa
   module uses Linux's value. Those should become Vexa's own values once libvexa defines them.
-- **No `epoll`.** libvexa has `poll` only, and `vx_poll` takes at most 64 handles per call.
-  Servo's networking (tokio, and mio underneath it) needs an event backend, so either a
-  `poll`-based backend or an `epoll` shim in libvexa.
-- **No `getrandom`, no unwinder, no `readv`/`writev`/`ioctl`.** Covered above. The libc
-  shims and the std edits in the script are the workarounds, not the end state.
+- **No `epoll`, and `poll` takes at most 64 handles.** libvexa has `poll` and no `epoll`, so
+  mio uses its `poll(2)` selector, with the pipe waker. mio hands `poll` every registered
+  descriptor in one call, so more than 64 registered sockets fail with `EINVAL` until
+  libvexa raises the limit or gets an `epoll` shim.
+- **Pipes had no non-blocking mode.** The kernel's pipes block, and libvexa tracked
+  `O_NONBLOCK` only for sockets. A read on an empty pipe therefore blocked where Linux
+  returns `EAGAIN`, and mio's waker, which reads its pipe until a read fails, hung on its
+  first wake. libvexa now checks readiness with a zero-timeout `poll` before a non-blocking
+  read or write on a pipe. The check can race if two threads read one pipe; mio has one
+  reader, so it is enough for now.
+- **libc's Vexa module lacks names that `socket2` uses.** `socket2` (under `tokio`) needs
+  `IP_HDRINCL`, `IPV6_RECVTCLASS`, `IP_RECVTOS`, `IP_MULTICAST_IF`, `IPV6_MULTICAST_IF`,
+  `IP_ADD_SOURCE_MEMBERSHIP`, `IP_DROP_SOURCE_MEMBERSHIP`, `ip_mreq_source`, `ip_mreqn`,
+  `SOCK_RDM`, `MSG_EOR` and `TCP_MAXSEG`, and `tokio` won't build until they exist. It
+  also names a helper type, `IovLen`, that it defines only for some OSes.
+- **No `getrandom(2)`, no unwinder, no `readv`/`writev`/`ioctl`.** `getrandom` is covered by
+  `/dev/urandom`, the same as in M1. The other gaps are covered above. The libc shims and
+  the std edits in the script are the workarounds, not the end state.
 - **SpiderMonkey has no Vexa target.** `mozjs_sys` (version 153) configures SpiderMonkey per
   OS, and Vexa is not one of them. Its port is the biggest unknown.
 - **Servo's dependencies** (servo 0.7.0): Stylo (CSS), WebRender and surfman (GL), `mozjs`
@@ -85,9 +110,10 @@ lands.
 
 1. **M1, `std` on Vexa.** Done. The probe prints, and a `std` program has run threads, a
    file, and an environment variable in the VM.
-2. **M2, Servo's leaf crates.** Build the crates Servo needs below the engine: `getrandom`
-   (or its `/dev/urandom` fallback), time, `dlopen`, `mio`/`tokio` (on a `poll` or `epoll`
-   backend), `rustls` and `hyper`.
+2. **M2, Servo's leaf crates.** In progress. Done: `getrandom`, `mio` on `poll(2)` with the
+   pipe waker, and TCP over loopback. Time is std's `Instant`, which the probe uses. Still
+   to do: `tokio` (blocked on `socket2`, above), `rustls` (it needs a crypto provider that
+   builds for Vexa) and `hyper`. `dlopen` exists in libvexa and is not probed yet.
 3. **M3, SpiderMonkey on Vexa.** Port the `mozjs_sys` build (a target config for Vexa, and
    the C++ runtime from the libc++ work in Phase 67).
 4. **M4, GL for WebRender.** Give surfman a software GL context on Vexa, from OSMesa
@@ -99,5 +125,7 @@ lands.
 
 ## Next step
 
-M2: the leaf crates Servo needs, starting with `getrandom` and `mio`, which decide what
-libvexa has to grow (an `epoll` shim, or a `poll`-based backend).
+M2's next blocker is `socket2`, under `tokio`. Its missing names can come from libc's Vexa
+module, with Linux's values where libvexa has none (as for other names), or `socket2`'s cfgs
+can leave out the options Vexa lacks. Then `tokio`, the 64-handle `poll` limit, `rustls`
+and `hyper`.
