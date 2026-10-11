@@ -18,15 +18,38 @@ lands.
       vexa-cc -static libhello.a -o hello
       ```
 
-- [ ] **M1: Rust `std` for Vexa.** The target definition is in
+- [ ] **M1: Rust `std` for Vexa, in progress.** The target definition is in
       [`tools/rust/x86_64-unknown-vexa.json`](../tools/rust/x86_64-unknown-vexa.json)
-      (`os` = `vexa`, `target-family` = `unix`, `panic` = `abort`). Building `std` for it
-      with `-Zbuild-std` gets as far as libc and stops there (see below).
+      (`os` = `vexa`, `target-family` = `unix`, `panic` = `abort`).
+  - [x] **libc compiles for Vexa.** libc 0.2.178 with our changes builds for the target.
+        The hand-written changes are [`third_party/libc-vexa.patch`](../third_party/libc-vexa.patch)
+        (a `vexa` branch in libc's two OS routers, plus the Vexa module's hand-written
+        parts). The declarations are generated from libvexa's headers by
+        [`tools/rust/gen-vexa-libc.py`](../tools/rust/gen-vexa-libc.py): 477 constants,
+        the typedefs and structs, and the prototypes that libc's common code doesn't define.
+        To rebuild libc's Vexa tree:
+
+        ```sh
+        cp -r ~/.cargo/registry/src/*/libc-0.2.178 libc
+        patch -p2 -d libc < third_party/libc-vexa.patch
+        python3 tools/rust/gen-vexa-libc.py libvexa/include libc/src/unix/vexa libc/src/unix/mod.rs
+        ```
+  - [ ] **`std` builds for Vexa, not yet.** `-Zbuild-std` now gets through libc and into
+        `std` with 93 errors. Most are `std`'s own OS glue, which Vexa doesn't have yet:
+        platform modules (`sys::platform`, `imp`), thread naming, random bytes (`fill_bytes`),
+        and the Unix `Metadata` methods, which `std` only provides for the OSes it knows.
+        Some are libc items the generator can't read: `ioctl` (variadic), `writev`/`readv`,
+        `utimensat`/`futimens`. The rest are the mismatches those cause.
+  - The build needs a linked toolchain whose `rust-src` library tree is patched (cargo's
+    build-std ignores a `[patch]` in the user's project, and `rustc` picks its sysroot from
+    its real path, so the linked `bin/rustc` must pass `--sysroot`). Its `Cargo.lock` must
+    also treat libc as a local package, and every sysroot crate's `libc` dependency must
+    point at the patched copy. Scripting that is the next step.
 
 ## What the probes found
 
-- **libc has no `vexa` module.** The libc crate (0.2.178, what `std` depends on) fails with
-  `unresolved import unistd` for an unknown OS. This is the first real gap.
+- **libc had no `vexa` module.** The libc crate (0.2.178, what `std` depends on) failed with
+  `unresolved import unistd` for an unknown OS. That is now solved (see M1 above).
 - **libvexa's ABI is only partly Linux's.** errno values and the `O_*` flags match Linux
   x86_64 (`ENOENT` 2, `EAGAIN` 11, `O_CREAT` 0100, `O_NONBLOCK` 04000), so constants can
   be shared. `struct stat` does not match: libvexa orders the fields differently from Linux's
@@ -63,5 +86,15 @@ lands.
 
 ## Next step
 
-M1. Start with the `vexa` libc module. It is the first thing the `std` build needs, and it
-can be checked by building `std` for the target and running a small program in the VM.
+M1, finishing `std`. Two parts remain:
+
+1. The libc items `std` needs that the generator skips: `ioctl`, `writev`/`readv`,
+   `utimensat`/`futimens`, `getpwuid_r`. Add them to the hand-written part, or teach the
+   generator to read them.
+2. `std`'s OS glue for Vexa: a `sys::platform` module for thread naming, the random source
+   (libvexa has no `getrandom`, so `fill_bytes` needs a Vexa source), and the Unix `Metadata`
+   methods. Those belong in our copy of `std`, with a script that applies them, the same
+   way the libc changes are applied.
+
+Then build `std` with `-Zbuild-std` and run a `println!`, a thread, a file and an
+environment variable on Vexa, in the VM.

@@ -1,0 +1,353 @@
+diff -ruN -x .cargo-ok -x consts.rs -x types.rs -x fns.rs -x '*.orig' a/libc/src/new/mod.rs b/libc/src/new/mod.rs
+--- a/libc/src/new/mod.rs	2026-10-11 19:32:53.756525051 +0000
++++ b/libc/src/new/mod.rs	2026-10-11 19:32:53.784124710 +0000
+@@ -125,6 +125,9 @@
+     } else if #[cfg(target_os = "vxworks")] {
+         mod vxworks;
+         pub(crate) use vxworks::*;
++    } else if #[cfg(target_os = "vexa")] {
++        mod vexa;
++        pub(crate) use vexa::*;
+     } else if #[cfg(target_os = "wasi")] {
+         mod wasi;
+         // pub(crate) use wasi::*;
+diff -ruN -x .cargo-ok -x consts.rs -x types.rs -x fns.rs -x '*.orig' a/libc/src/new/vexa/mod.rs b/libc/src/new/vexa/mod.rs
+--- a/libc/src/new/vexa/mod.rs	1970-01-01 00:00:00.000000000 +0000
++++ b/libc/src/new/vexa/mod.rs	2026-10-11 19:32:53.788268296 +0000
+@@ -0,0 +1,2 @@
++//! Vexa's C library (libvexa), as libc's Rust declarations.
++pub(crate) use super::common::posix::unistd;
+diff -ruN -x .cargo-ok -x consts.rs -x types.rs -x fns.rs -x '*.orig' a/libc/src/unix/mod.rs b/libc/src/unix/mod.rs
+--- a/libc/src/unix/mod.rs	2026-10-11 19:32:53.771102787 +0000
++++ b/libc/src/unix/mod.rs	2026-10-11 19:32:53.800524731 +0000
+@@ -1923,6 +1923,9 @@
+     } else if #[cfg(target_os = "nuttx")] {
+         mod nuttx;
+         pub use self::nuttx::*;
++    } else if #[cfg(target_os = "vexa")] {
++        mod vexa;
++        pub use self::vexa::*;
+     } else {
+         // Unknown target_os
+     }
+diff -ruN -x .cargo-ok -x consts.rs -x types.rs -x fns.rs -x '*.orig' a/libc/src/unix/vexa/mod.rs b/libc/src/unix/vexa/mod.rs
+--- a/libc/src/unix/vexa/mod.rs	1970-01-01 00:00:00.000000000 +0000
++++ b/libc/src/unix/vexa/mod.rs	2026-10-11 19:32:53.802522974 +0000
+@@ -0,0 +1,317 @@
++//! Vexa (libvexa): the types and functions of Vexa's C library, as libc declares them.
++//!
++//! The layouts here follow libvexa's own headers (`libvexa/include`), not Linux's: libvexa
++//! orders `struct stat` and `struct dirent` its own way, and its pthread and semaphore types
++//! are its own. The integer constants are generated from those headers (see `consts.rs`).
++use crate::prelude::*;
++use super::{gid_t, sighandler_t, uid_t};
++
++mod consts;
++mod fns;
++mod types;
++pub use self::consts::*;
++pub use self::fns::*;
++pub use self::types::*;
++
++pub type time_t = c_long;
++pub type suseconds_t = c_long;
++pub type clock_t = c_long;
++pub type clockid_t = c_int;
++pub type off_t = c_long;
++pub type mode_t = c_uint;
++pub type dev_t = c_ulong;
++pub type ino_t = c_ulong;
++pub type nlink_t = c_ulong;
++pub type blksize_t = c_long;
++pub type blkcnt_t = c_long;
++pub type fsblkcnt_t = c_ulong;
++pub type fsfilcnt_t = c_ulong;
++pub type nfds_t = c_ulong;
++pub type rlim_t = c_ulong;
++pub type sigset_t = c_ulong;
++pub type socklen_t = c_uint;
++pub type sa_family_t = c_ushort;
++pub type wchar_t = c_int;
++pub type speed_t = c_uint;
++pub type tcflag_t = c_uint;
++pub type cc_t = c_uchar;
++
++pub type pthread_t = *mut c_void;
++pub type pthread_key_t = c_uint;
++pub type pthread_once_t = c_int;
++pub type pthread_spinlock_t = c_uint;
++
++#[repr(C)]
++pub struct sem_t {
++    pub value: c_uint,
++    pub waiters: c_uint,
++}
++
++#[repr(C)]
++pub struct pthread_attr_t {
++    pub stack_size: size_t,
++    pub detached: c_int,
++}
++
++#[repr(C)]
++pub struct pthread_mutex_t {
++    pub state: c_uint,
++    pub type_: c_int,
++    pub owner: pthread_t,
++    pub count: c_uint,
++}
++
++#[repr(C)]
++pub struct pthread_mutexattr_t {
++    pub type_: c_int,
++}
++
++#[repr(C)]
++pub struct pthread_cond_t {
++    pub sequence: c_uint,
++}
++
++#[repr(C)]
++pub struct pthread_condattr_t {
++    pub clock: c_int,
++}
++
++#[repr(C)]
++pub struct pthread_rwlock_t {
++    pub lock: pthread_mutex_t,
++    pub changed: pthread_cond_t,
++    pub readers: c_int,
++    pub writer: c_int,
++    pub writers_waiting: c_int,
++}
++
++#[repr(C)]
++pub struct pthread_rwlockattr_t {
++    pub unused: c_int,
++}
++
++#[repr(C)]
++pub struct pthread_barrier_t {
++    pub lock: pthread_mutex_t,
++    pub done: pthread_cond_t,
++    pub count: c_uint,
++    pub waiting: c_uint,
++    pub round: c_uint,
++}
++
++#[repr(C)]
++pub struct pthread_barrierattr_t {
++    pub unused: c_int,
++}
++
++#[repr(C)]
++pub struct stat {
++    pub st_dev: dev_t,
++    pub st_ino: ino_t,
++    pub st_mode: mode_t,
++    pub st_nlink: nlink_t,
++    pub st_uid: uid_t,
++    pub st_gid: gid_t,
++    pub st_rdev: dev_t,
++    pub st_size: off_t,
++    pub st_blksize: blksize_t,
++    pub st_blocks: blkcnt_t,
++    pub st_atime: time_t,
++    pub st_atime_nsec: c_long,
++    pub st_mtime: time_t,
++    pub st_mtime_nsec: c_long,
++    pub st_ctime: time_t,
++    pub st_ctime_nsec: c_long,
++}
++
++#[repr(C)]
++pub struct dirent {
++    pub d_ino: ino_t,
++    pub d_type: c_uchar,
++    pub d_name: [c_char; 256],
++}
++
++#[repr(C)]
++pub struct passwd {
++    pub pw_name: *mut c_char,
++    pub pw_passwd: *mut c_char,
++    pub pw_uid: uid_t,
++    pub pw_gid: gid_t,
++    pub pw_gecos: *mut c_char,
++    pub pw_dir: *mut c_char,
++    pub pw_shell: *mut c_char,
++}
++
++#[repr(C)]
++pub struct tm {
++    pub tm_sec: c_int,
++    pub tm_min: c_int,
++    pub tm_hour: c_int,
++    pub tm_mday: c_int,
++    pub tm_mon: c_int,
++    pub tm_year: c_int,
++    pub tm_wday: c_int,
++    pub tm_yday: c_int,
++    pub tm_isdst: c_int,
++    pub tm_gmtoff: c_long,
++    pub tm_zone: *const c_char,
++}
++
++#[repr(C)]
++pub struct lconv {
++    pub decimal_point: *mut c_char,
++    pub thousands_sep: *mut c_char,
++    pub grouping: *mut c_char,
++    pub int_curr_symbol: *mut c_char,
++    pub currency_symbol: *mut c_char,
++    pub mon_decimal_point: *mut c_char,
++    pub mon_thousands_sep: *mut c_char,
++    pub mon_grouping: *mut c_char,
++    pub positive_sign: *mut c_char,
++    pub negative_sign: *mut c_char,
++    pub int_frac_digits: c_char,
++    pub frac_digits: c_char,
++    pub p_cs_precedes: c_char,
++    pub p_sep_by_space: c_char,
++    pub n_cs_precedes: c_char,
++    pub n_sep_by_space: c_char,
++    pub p_sign_posn: c_char,
++    pub n_sign_posn: c_char,
++}
++
++#[repr(C)]
++pub struct sockaddr {
++    pub sa_family: sa_family_t,
++    pub sa_data: [c_char; 14],
++}
++
++#[repr(C)]
++pub struct sockaddr_storage {
++    pub ss_family: sa_family_t,
++    pub __data: [c_char; 126],
++}
++
++#[repr(C)]
++pub struct addrinfo {
++    pub ai_flags: c_int,
++    pub ai_family: c_int,
++    pub ai_socktype: c_int,
++    pub ai_protocol: c_int,
++    pub ai_addrlen: socklen_t,
++    pub ai_addr: *mut sockaddr,
++    pub ai_canonname: *mut c_char,
++    pub ai_next: *mut addrinfo,
++}
++
++#[repr(C)]
++pub struct fd_set {
++    pub fds_bits: [c_ulong; 16],
++}
++
++#[repr(C)]
++pub struct sigaction {
++    pub sa_sigaction: sighandler_t,
++    pub sa_mask: sigset_t,
++    pub sa_flags: c_int,
++}
++
++#[repr(C)]
++pub struct termios {
++    pub c_iflag: tcflag_t,
++    pub c_oflag: tcflag_t,
++    pub c_cflag: tcflag_t,
++    pub c_lflag: tcflag_t,
++    pub c_line: cc_t,
++    pub c_cc: [cc_t; 32],
++    pub c_ispeed: speed_t,
++    pub c_ospeed: speed_t,
++}
++
++#[repr(C)]
++pub struct Dl_info {
++    pub dli_fname: *const c_char,
++    pub dli_fbase: *mut c_void,
++    pub dli_sname: *const c_char,
++    pub dli_saddr: *mut c_void,
++}
++
++#[repr(C)]
++pub struct statvfs {
++    pub f_bsize: c_ulong,
++    pub f_frsize: c_ulong,
++    pub f_blocks: fsblkcnt_t,
++    pub f_bfree: fsblkcnt_t,
++    pub f_bavail: fsblkcnt_t,
++    pub f_files: fsfilcnt_t,
++    pub f_ffree: fsfilcnt_t,
++    pub f_favail: fsfilcnt_t,
++    pub f_fsid: c_ulong,
++    pub f_flag: c_ulong,
++    pub f_namemax: c_ulong,
++}
++
++// Constants and macros libvexa's headers don't define, with Linux's values for them. Vexa's
++// own values would go here once libvexa defines them.
++pub const EDQUOT: c_int = 122;
++pub const ENETDOWN: c_int = 100;
++pub const ESTALE: c_int = 116;
++pub const ETXTBSY: c_int = 26;
++pub const EWOULDBLOCK: c_int = EAGAIN;
++pub const O_NOFOLLOW: c_int = 0o400000;
++pub const FIOCLEX: c_ulong = 0x5451;
++pub const UTIME_OMIT: c_long = 1073741822;
++pub const IP_MULTICAST_LOOP: c_int = 34;
++pub const IP_DROP_MEMBERSHIP: c_int = 36;
++pub const IPV6_MULTICAST_LOOP: c_int = 19;
++pub const IPV6_ADD_MEMBERSHIP: c_int = 20;
++pub const IPV6_DROP_MEMBERSHIP: c_int = 21;
++pub const _SC_HOST_NAME_MAX: c_int = 180;
++pub const _SC_GETPW_R_SIZE_MAX: c_int = 70;
++
++pub const PTHREAD_MUTEX_INITIALIZER: pthread_mutex_t = pthread_mutex_t {
++    state: 0,
++    type_: PTHREAD_MUTEX_NORMAL,
++    owner: 0 as pthread_t,
++    count: 0,
++};
++pub const PTHREAD_COND_INITIALIZER: pthread_cond_t = pthread_cond_t { sequence: 0 };
++
++#[repr(C)]
++pub struct sockaddr_un {
++    pub sun_family: sa_family_t,
++    pub sun_path: [c_char; 108],
++}
++
++// The wait status macros of <sys/wait.h>, as functions.
++#[allow(non_snake_case)]
++pub const fn WIFEXITED(status: c_int) -> bool {
++    (status & 0x7f) == 0
++}
++#[allow(non_snake_case)]
++pub const fn WEXITSTATUS(status: c_int) -> c_int {
++    (status & 0xff00) >> 8
++}
++#[allow(non_snake_case)]
++pub const fn WIFSIGNALED(status: c_int) -> bool {
++    (status & 0x7f) != 0 && (status & 0x7f) != 0x7f
++}
++#[allow(non_snake_case)]
++pub const fn WTERMSIG(status: c_int) -> c_int {
++    status & 0x7f
++}
++#[allow(non_snake_case)]
++pub const fn WIFSTOPPED(status: c_int) -> bool {
++    (status & 0xff) == 0x7f
++}
++#[allow(non_snake_case)]
++pub const fn WSTOPSIG(status: c_int) -> c_int {
++    WEXITSTATUS(status)
++}
++#[allow(non_snake_case)]
++pub const fn WIFCONTINUED(status: c_int) -> bool {
++    status == 0xffff
++}
++#[allow(non_snake_case)]
++pub const fn WCOREDUMP(status: c_int) -> bool {
++    (status & 0x80) != 0
++}
