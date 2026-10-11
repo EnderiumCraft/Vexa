@@ -198,6 +198,15 @@ def check_names(rust_ty, known):
         raise ValueError("undefined type " + name)
 
 
+def const_type(name, n):
+    """The Rust type libc gives a Vexa constant: mode bits and poll events have their own."""
+    if re.match(r"^S_(IF|I[RWX]|ISUID|ISGID|ISVTX)", name):
+        return "mode_t"
+    if re.match(r"^POLL[A-Z]+$", name):
+        return "c_short"
+    return "c_int" if -2**31 <= n < 2**31 else "c_ulong"
+
+
 def fix_name(name):
     return name + "_" if name in RUST_KEYWORDS else name
 
@@ -243,7 +252,7 @@ def parse_struct(head, body, trailing, consts, known):
                 ty = "[%s; %d]" % (ty, eval_dim(dim, consts))
             check_names(ty, known)
             fields.append("    pub %s: %s," % (fix_name(fname), ty))
-    return name, "#[repr(C)]\npub struct %s {\n%s\n}\n" % (name, "\n".join(fields))
+    return name, "#[repr(C)]\n#[derive(Copy, Clone)]\npub struct %s {\n%s\n}\n" % (name, "\n".join(fields))
 
 
 def parse_function(stmt, known):
@@ -305,7 +314,7 @@ def main():
         if name in consts:
             continue
         consts[name] = n
-        ty = "c_int" if -2**31 <= n < 2**31 else "c_ulong"
+        ty = const_type(name, n)
         const_lines.append("pub const %s: %s = %d;" % (name, ty, n))
 
     types, fns = [], []

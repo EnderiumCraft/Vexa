@@ -1,6 +1,6 @@
 diff -ruN -x .cargo-ok -x consts.rs -x types.rs -x fns.rs -x '*.orig' a/libc/src/new/mod.rs b/libc/src/new/mod.rs
---- a/libc/src/new/mod.rs	2026-10-11 19:32:53.756525051 +0000
-+++ b/libc/src/new/mod.rs	2026-10-11 19:32:53.784124710 +0000
+--- a/libc/src/new/mod.rs	2026-10-11 19:37:48.955856511 +0000
++++ b/libc/src/new/mod.rs	2026-10-11 19:37:48.977547543 +0000
 @@ -125,6 +125,9 @@
      } else if #[cfg(target_os = "vxworks")] {
          mod vxworks;
@@ -13,13 +13,13 @@ diff -ruN -x .cargo-ok -x consts.rs -x types.rs -x fns.rs -x '*.orig' a/libc/src
          // pub(crate) use wasi::*;
 diff -ruN -x .cargo-ok -x consts.rs -x types.rs -x fns.rs -x '*.orig' a/libc/src/new/vexa/mod.rs b/libc/src/new/vexa/mod.rs
 --- a/libc/src/new/vexa/mod.rs	1970-01-01 00:00:00.000000000 +0000
-+++ b/libc/src/new/vexa/mod.rs	2026-10-11 19:32:53.788268296 +0000
++++ b/libc/src/new/vexa/mod.rs	2026-10-11 19:37:48.979627505 +0000
 @@ -0,0 +1,2 @@
 +//! Vexa's C library (libvexa), as libc's Rust declarations.
 +pub(crate) use super::common::posix::unistd;
 diff -ruN -x .cargo-ok -x consts.rs -x types.rs -x fns.rs -x '*.orig' a/libc/src/unix/mod.rs b/libc/src/unix/mod.rs
---- a/libc/src/unix/mod.rs	2026-10-11 19:32:53.771102787 +0000
-+++ b/libc/src/unix/mod.rs	2026-10-11 19:32:53.800524731 +0000
+--- a/libc/src/unix/mod.rs	2026-10-11 19:37:48.969348468 +0000
++++ b/libc/src/unix/mod.rs	2026-10-11 19:37:48.985789403 +0000
 @@ -1923,6 +1923,9 @@
      } else if #[cfg(target_os = "nuttx")] {
          mod nuttx;
@@ -32,15 +32,15 @@ diff -ruN -x .cargo-ok -x consts.rs -x types.rs -x fns.rs -x '*.orig' a/libc/src
      }
 diff -ruN -x .cargo-ok -x consts.rs -x types.rs -x fns.rs -x '*.orig' a/libc/src/unix/vexa/mod.rs b/libc/src/unix/vexa/mod.rs
 --- a/libc/src/unix/vexa/mod.rs	1970-01-01 00:00:00.000000000 +0000
-+++ b/libc/src/unix/vexa/mod.rs	2026-10-11 19:32:53.802522974 +0000
-@@ -0,0 +1,317 @@
++++ b/libc/src/unix/vexa/mod.rs	2026-10-11 19:37:48.986746116 +0000
+@@ -0,0 +1,413 @@
 +//! Vexa (libvexa): the types and functions of Vexa's C library, as libc declares them.
 +//!
 +//! The layouts here follow libvexa's own headers (`libvexa/include`), not Linux's: libvexa
 +//! orders `struct stat` and `struct dirent` its own way, and its pthread and semaphore types
 +//! are its own. The integer constants are generated from those headers (see `consts.rs`).
 +use crate::prelude::*;
-+use super::{gid_t, sighandler_t, uid_t};
++use super::{gid_t, getpwuid, iovec, read, sighandler_t, size_t, ssize_t, strlen, timespec, uid_t, write};
 +
 +mod consts;
 +mod fns;
@@ -350,4 +350,100 @@ diff -ruN -x .cargo-ok -x consts.rs -x types.rs -x fns.rs -x '*.orig' a/libc/src
 +#[allow(non_snake_case)]
 +pub const fn WCOREDUMP(status: c_int) -> bool {
 +    (status & 0x80) != 0
++}
++
++// Calls libc declares that libvexa doesn't have (yet). Vectored I/O is done as a loop over
++// read and write; the times calls report ENOSYS; ioctl has no implementation here, so
++// programs that call it fail to link until libvexa provides it.
++extern "C" {
++    pub fn ioctl(fd: c_int, request: c_ulong, ...) -> c_int;
++}
++
++pub unsafe fn writev(fd: c_int, iov: *const iovec, iovcnt: c_int) -> ssize_t {
++    let mut total: ssize_t = 0;
++    for i in 0..iovcnt as isize {
++        let v = *iov.offset(i);
++        let n = write(fd, v.iov_base, v.iov_len);
++        if n < 0 {
++            return if total > 0 { total } else { n };
++        }
++        total += n;
++        if (n as size_t) < v.iov_len {
++            break;
++        }
++    }
++    total
++}
++
++pub unsafe fn readv(fd: c_int, iov: *const iovec, iovcnt: c_int) -> ssize_t {
++    let mut total: ssize_t = 0;
++    for i in 0..iovcnt as isize {
++        let v = *iov.offset(i);
++        let n = read(fd, v.iov_base, v.iov_len);
++        if n < 0 {
++            return if total > 0 { total } else { n };
++        }
++        total += n;
++        if (n as size_t) < v.iov_len {
++            break;
++        }
++    }
++    total
++}
++
++unsafe fn enosys() -> c_int {
++    *__errno_location() = ENOSYS;
++    -1
++}
++
++pub unsafe fn futimens(_fd: c_int, _times: *const timespec) -> c_int {
++    enosys()
++}
++
++pub unsafe fn utimensat(_dirfd: c_int, _path: *const c_char, _times: *const timespec, _flags: c_int) -> c_int {
++    enosys()
++}
++
++/// getpwuid_r over libvexa's getpwuid: the record and its strings are copied into `buf`.
++pub unsafe fn getpwuid_r(
++    uid: uid_t,
++    pwd: *mut passwd,
++    buf: *mut c_char,
++    buflen: size_t,
++    result: *mut *mut passwd,
++) -> c_int {
++    *result = core::ptr::null_mut();
++    let found = getpwuid(uid);
++    if found.is_null() {
++        return 0;
++    }
++    let fields = [(*found).pw_name, (*found).pw_passwd, (*found).pw_gecos, (*found).pw_dir, (*found).pw_shell];
++    let mut total = 0;
++    let mut i = 0;
++    while i < fields.len() {
++        total += strlen(fields[i]) + 1;
++        i += 1;
++    }
++    if total > buflen {
++        return ERANGE;
++    }
++    let mut at = buf;
++    let mut copied = [core::ptr::null_mut::<c_char>(); 5];
++    let mut i = 0;
++    while i < fields.len() {
++        let n = strlen(fields[i]) + 1;
++        core::ptr::copy_nonoverlapping(fields[i], at, n);
++        copied[i] = at;
++        at = at.add(n);
++        i += 1;
++    }
++    (*pwd).pw_name = copied[0];
++    (*pwd).pw_passwd = copied[1];
++    (*pwd).pw_uid = (*found).pw_uid;
++    (*pwd).pw_gid = (*found).pw_gid;
++    (*pwd).pw_gecos = copied[2];
++    (*pwd).pw_dir = copied[3];
++    (*pwd).pw_shell = copied[4];
++    *result = pwd;
++    0
 +}
