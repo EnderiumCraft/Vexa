@@ -12,6 +12,13 @@ extern "C" {
 #define POLLHUP 0x010
 #define POLLNVAL 0x020
 
+/* The normal and band variants, with Linux's values. libvexa reports only the events
+ * above; these are accepted so that programs which name them (mio does) build and run. */
+#define POLLRDNORM 0x040
+#define POLLRDBAND 0x080
+#define POLLWRNORM 0x100
+#define POLLWRBAND 0x200
+
 typedef unsigned long nfds_t;
 
 struct pollfd {

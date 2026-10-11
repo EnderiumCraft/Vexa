@@ -167,10 +167,23 @@ int fcntl(int fd, int command, ...) {
     }
 }
 
+/* Whether a read (VX_POLL_READ) or write (VX_POLL_WRITE) on `fd` would wait now: a
+ * zero-timeout poll finds it not ready. The kernel has no non-blocking mode for pipes,
+ * so this is how they honour O_NONBLOCK. A handle the poll rejects is left to the read
+ * or write itself, which reports the error. */
+static bool would_wait(int fd, unsigned events) {
+    struct vx_poll handle = {.handle = fd, .events = events, .ready = 0};
+    return vx_poll(&handle, 1, 0) == 0;
+}
+
 ssize_t read(int fd, void *buffer, size_t size) {
     if (__vx_nonblocking(fd) && __vx_is_socket(fd)) {
         struct vx_message m = {.data = buffer, .size = size, .flags = VX_MSG_DONTWAIT};
         return __vx_errno_result(vx_receive(fd, &m));
+    }
+    if (__vx_nonblocking(fd) && would_wait(fd, VX_POLL_READ)) {
+        errno = EAGAIN;
+        return -1;
     }
     return __vx_errno_result(vx_read(fd, buffer, size));
 }
@@ -179,6 +192,10 @@ ssize_t write(int fd, const void *buffer, size_t size) {
     if (__vx_nonblocking(fd) && __vx_is_socket(fd)) {
         struct vx_message m = {.data = (void *)buffer, .size = size, .flags = VX_MSG_DONTWAIT};
         return __vx_errno_result(vx_send(fd, &m));
+    }
+    if (__vx_nonblocking(fd) && would_wait(fd, VX_POLL_WRITE)) {
+        errno = EAGAIN;
+        return -1;
     }
     return __vx_errno_result(vx_write(fd, buffer, size));
 }
