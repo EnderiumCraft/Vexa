@@ -30,6 +30,14 @@ What each edit does, and why Vexa can take the Linux or generic Unix path:
 import os
 import sys
 
+EDITS_BUILD = [
+    # std/build.rs marks std "restricted" (unstable, for platforms it doesn't know) unless
+    # the target OS is on its list. Vexa is on it: its libc is the one this build patches in.
+    ("../build.rs",
+     '        || target_os == "vexos"\n',
+     '        || target_os == "vexos"\n        || target_os == "vexa"\n'),
+]
+
 # The directory-entry lists: each names "wasi" as its last OS, and Vexa goes next to it.
 WASI_LIST_EDITS = [
     ('        target_os = "wasi",\n    ))]\n    fn next(&mut self) -> Option<io::Result<DirEntry>> {\n'
@@ -97,7 +105,7 @@ for old in WASI_LIST_EDITS:
 
 def main():
     library = sys.argv[1]
-    for rel, old, new in EDITS:
+    for rel, old, new in EDITS + EDITS_BUILD:
         path = os.path.join(library, "std", "src", rel)
         text = open(path).read()
         if text.count(new) >= 1:
