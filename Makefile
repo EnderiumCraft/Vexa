@@ -515,6 +515,14 @@ $(CXX_TEST_STATIC): tests/cxx/cxx-test.cpp $(SDK_DIR)/.complete
 # the SDK, linked to libOSMesa.so for its gl* calls).
 SDL_GL_TEST := $(BUILD)/sdl-gl-test/sdl-gl-test
 SDL_GL_TEST_PROGRAM ?= $(SDL_GL_TEST)
+# core-gl-test: OpenGL 3.2 core through OSMesa, the profile WebRender needs (built with
+# the SDK, linked to libOSMesa.so).
+CORE_GL_TEST := $(BUILD)/core-gl-test/core-gl-test
+CORE_GL_TEST_PROGRAM ?= $(CORE_GL_TEST)
+$(CORE_GL_TEST): tests/gl/core-gl-test.c $(SDK_DIR)/.complete
+	@mkdir -p $(dir $@)
+	$(SDK_DIR)/bin/vexa-cc -O2 -Wall -Wextra -Werror $< -o $@ -lOSMesa
+
 $(SDL_GL_TEST): tests/gl/sdl-gl-test.c $(SDK_DIR)/.complete
 	@mkdir -p $(dir $@)
 	$(SDK_DIR)/bin/vexa-cc -O2 -Wall -Wextra $$($(SDK_DIR)/bin/sdl2-config --cflags) $< -o $@ \
@@ -645,14 +653,15 @@ LINUX_ON_CD := bin lib sbin usr
 # builds are reproducible).
 $(INITRAMFS): $(PROGRAM_BINS) $(LIBVEXA_SO) $(VEXA_LD) $(DLTEST_SO) $(ROOTFS_FILES) $(APP_FILES) $(LINUX_TREE) \
 		docs/USER-GUIDE.md $(DOOM_PROGRAM) $(CXX_TEST_PROGRAM) $(SDL_GL_TEST_PROGRAM) \
-		$(NETSURF_PROGRAM)
+		$(CORE_GL_TEST_PROGRAM) $(NETSURF_PROGRAM)
 	rm -rf $(BUILD)/rootfs
 	mkdir -p $(BUILD)/rootfs/bin $(BUILD)/rootfs/lib
 	cp -R rootfs/. $(BUILD)/rootfs/
 	# The Help app's book: the user guide.
 	mkdir -p $(BUILD)/rootfs/share/help
 	cp docs/USER-GUIDE.md $(BUILD)/rootfs/share/help/
-	cp $(PROGRAM_BINS) $(DOOM_PROGRAM) $(CXX_TEST_PROGRAM) $(SDL_GL_TEST_PROGRAM) $(NETSURF_PROGRAM) \
+	cp $(PROGRAM_BINS) $(DOOM_PROGRAM) $(CXX_TEST_PROGRAM) $(SDL_GL_TEST_PROGRAM) \
+		$(CORE_GL_TEST_PROGRAM) $(NETSURF_PROGRAM) \
 		$(BUILD)/rootfs/bin/
 	cp $(LIBVEXA_SO) $(VEXA_LD) $(DLTEST_SO) $(BUILD)/rootfs/lib/
 	# The standard root certificates, for native programs (fetch's HTTPS).
@@ -1104,11 +1113,12 @@ test-safe:
 		--usb ehci
 
 # Vexa must work without the Linux subsystem: build and boot a kernel without it.
-native-iso: $(DOOM) $(CXX_TEST) $(CXX_TEST_STATIC) $(MESA_VEXA) $(SDL_GL_TEST) $(NETSURF) \
+native-iso: $(DOOM) $(CXX_TEST) $(CXX_TEST_STATIC) $(MESA_VEXA) $(SDL_GL_TEST) $(CORE_GL_TEST) $(NETSURF) \
 		$(BUILD)/freedoom/freedoom1.wad
 	$(MAKE) BUILD=$(BUILD)/native LINUX_COMPAT=0 DOOM_PROGRAM=$(abspath $(DOOM)) \
 		CXX_TEST_PROGRAM="$(abspath $(CXX_TEST) $(CXX_TEST_STATIC))" \
 		MESA_VEXA_LIB=$(abspath $(MESA_VEXA)) SDL_GL_TEST_PROGRAM=$(abspath $(SDL_GL_TEST)) \
+		CORE_GL_TEST_PROGRAM=$(abspath $(CORE_GL_TEST)) \
 		NETSURF_PROGRAM=$(abspath $(NETSURF)) NETSURF_RES=$(abspath $(NETSURF_DIR)/res) \
 		FREEDOOM_DIR=$(abspath $(BUILD)/freedoom) iso
 # Installing on a disk (the Installer app), then starting from it.

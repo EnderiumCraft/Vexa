@@ -382,6 +382,8 @@ TYPED_COMMANDS = ([
     # OpenGL in a native program: SDL's window with a context (Mesa's
     # softpipe, loaded from the boot CD), checked with glReadPixels.
     ("@type sdl-gl-test > /dev/console 2> /dev/console", "sdl-gl-test: passed", 300),
+    # OpenGL 3.2 core through OSMesa, the profile WebRender needs (Servo's renderer).
+    ("@type core-gl-test > /dev/console 2> /dev/console", "core-gl-test: passed", 300),
     # The web browser (NetSurf, a native app): a page from the test's server
     # (its title becomes the window's), then Alt+F4 closes it.
     ("@type netsurf @URL@/page.html > /dev/console 2> /dev/console &",
