@@ -1,6 +1,6 @@
 diff -ruN -x .cargo-ok -x consts.rs -x types.rs -x fns.rs -x '*.orig' a/libc/src/new/mod.rs b/libc/src/new/mod.rs
---- a/libc/src/new/mod.rs	2026-10-11 19:37:48.955856511 +0000
-+++ b/libc/src/new/mod.rs	2026-10-11 19:37:48.977547543 +0000
+--- a/libc/src/new/mod.rs	2026-10-11 19:39:51.321711891 +0000
++++ b/libc/src/new/mod.rs	2026-10-11 19:39:51.340316866 +0000
 @@ -125,6 +125,9 @@
      } else if #[cfg(target_os = "vxworks")] {
          mod vxworks;
@@ -13,13 +13,13 @@ diff -ruN -x .cargo-ok -x consts.rs -x types.rs -x fns.rs -x '*.orig' a/libc/src
          // pub(crate) use wasi::*;
 diff -ruN -x .cargo-ok -x consts.rs -x types.rs -x fns.rs -x '*.orig' a/libc/src/new/vexa/mod.rs b/libc/src/new/vexa/mod.rs
 --- a/libc/src/new/vexa/mod.rs	1970-01-01 00:00:00.000000000 +0000
-+++ b/libc/src/new/vexa/mod.rs	2026-10-11 19:37:48.979627505 +0000
++++ b/libc/src/new/vexa/mod.rs	2026-10-11 19:39:51.342965117 +0000
 @@ -0,0 +1,2 @@
 +//! Vexa's C library (libvexa), as libc's Rust declarations.
 +pub(crate) use super::common::posix::unistd;
 diff -ruN -x .cargo-ok -x consts.rs -x types.rs -x fns.rs -x '*.orig' a/libc/src/unix/mod.rs b/libc/src/unix/mod.rs
---- a/libc/src/unix/mod.rs	2026-10-11 19:37:48.969348468 +0000
-+++ b/libc/src/unix/mod.rs	2026-10-11 19:37:48.985789403 +0000
+--- a/libc/src/unix/mod.rs	2026-10-11 19:39:51.330542147 +0000
++++ b/libc/src/unix/mod.rs	2026-10-11 19:39:51.351894589 +0000
 @@ -1923,6 +1923,9 @@
      } else if #[cfg(target_os = "nuttx")] {
          mod nuttx;
@@ -32,8 +32,8 @@ diff -ruN -x .cargo-ok -x consts.rs -x types.rs -x fns.rs -x '*.orig' a/libc/src
      }
 diff -ruN -x .cargo-ok -x consts.rs -x types.rs -x fns.rs -x '*.orig' a/libc/src/unix/vexa/mod.rs b/libc/src/unix/vexa/mod.rs
 --- a/libc/src/unix/vexa/mod.rs	1970-01-01 00:00:00.000000000 +0000
-+++ b/libc/src/unix/vexa/mod.rs	2026-10-11 19:37:48.986746116 +0000
-@@ -0,0 +1,413 @@
++++ b/libc/src/unix/vexa/mod.rs	2026-10-11 19:39:51.353419614 +0000
+@@ -0,0 +1,443 @@
 +//! Vexa (libvexa): the types and functions of Vexa's C library, as libc declares them.
 +//!
 +//! The layouts here follow libvexa's own headers (`libvexa/include`), not Linux's: libvexa
@@ -78,18 +78,21 @@ diff -ruN -x .cargo-ok -x consts.rs -x types.rs -x fns.rs -x '*.orig' a/libc/src
 +pub type pthread_spinlock_t = c_uint;
 +
 +#[repr(C)]
++#[derive(Copy, Clone)]
 +pub struct sem_t {
 +    pub value: c_uint,
 +    pub waiters: c_uint,
 +}
 +
 +#[repr(C)]
++#[derive(Copy, Clone)]
 +pub struct pthread_attr_t {
 +    pub stack_size: size_t,
 +    pub detached: c_int,
 +}
 +
 +#[repr(C)]
++#[derive(Copy, Clone)]
 +pub struct pthread_mutex_t {
 +    pub state: c_uint,
 +    pub type_: c_int,
@@ -98,21 +101,25 @@ diff -ruN -x .cargo-ok -x consts.rs -x types.rs -x fns.rs -x '*.orig' a/libc/src
 +}
 +
 +#[repr(C)]
++#[derive(Copy, Clone)]
 +pub struct pthread_mutexattr_t {
 +    pub type_: c_int,
 +}
 +
 +#[repr(C)]
++#[derive(Copy, Clone)]
 +pub struct pthread_cond_t {
 +    pub sequence: c_uint,
 +}
 +
 +#[repr(C)]
++#[derive(Copy, Clone)]
 +pub struct pthread_condattr_t {
 +    pub clock: c_int,
 +}
 +
 +#[repr(C)]
++#[derive(Copy, Clone)]
 +pub struct pthread_rwlock_t {
 +    pub lock: pthread_mutex_t,
 +    pub changed: pthread_cond_t,
@@ -122,11 +129,13 @@ diff -ruN -x .cargo-ok -x consts.rs -x types.rs -x fns.rs -x '*.orig' a/libc/src
 +}
 +
 +#[repr(C)]
++#[derive(Copy, Clone)]
 +pub struct pthread_rwlockattr_t {
 +    pub unused: c_int,
 +}
 +
 +#[repr(C)]
++#[derive(Copy, Clone)]
 +pub struct pthread_barrier_t {
 +    pub lock: pthread_mutex_t,
 +    pub done: pthread_cond_t,
@@ -136,11 +145,13 @@ diff -ruN -x .cargo-ok -x consts.rs -x types.rs -x fns.rs -x '*.orig' a/libc/src
 +}
 +
 +#[repr(C)]
++#[derive(Copy, Clone)]
 +pub struct pthread_barrierattr_t {
 +    pub unused: c_int,
 +}
 +
 +#[repr(C)]
++#[derive(Copy, Clone)]
 +pub struct stat {
 +    pub st_dev: dev_t,
 +    pub st_ino: ino_t,
@@ -161,6 +172,7 @@ diff -ruN -x .cargo-ok -x consts.rs -x types.rs -x fns.rs -x '*.orig' a/libc/src
 +}
 +
 +#[repr(C)]
++#[derive(Copy, Clone)]
 +pub struct dirent {
 +    pub d_ino: ino_t,
 +    pub d_type: c_uchar,
@@ -168,6 +180,7 @@ diff -ruN -x .cargo-ok -x consts.rs -x types.rs -x fns.rs -x '*.orig' a/libc/src
 +}
 +
 +#[repr(C)]
++#[derive(Copy, Clone)]
 +pub struct passwd {
 +    pub pw_name: *mut c_char,
 +    pub pw_passwd: *mut c_char,
@@ -179,6 +192,7 @@ diff -ruN -x .cargo-ok -x consts.rs -x types.rs -x fns.rs -x '*.orig' a/libc/src
 +}
 +
 +#[repr(C)]
++#[derive(Copy, Clone)]
 +pub struct tm {
 +    pub tm_sec: c_int,
 +    pub tm_min: c_int,
@@ -194,6 +208,7 @@ diff -ruN -x .cargo-ok -x consts.rs -x types.rs -x fns.rs -x '*.orig' a/libc/src
 +}
 +
 +#[repr(C)]
++#[derive(Copy, Clone)]
 +pub struct lconv {
 +    pub decimal_point: *mut c_char,
 +    pub thousands_sep: *mut c_char,
@@ -216,18 +231,21 @@ diff -ruN -x .cargo-ok -x consts.rs -x types.rs -x fns.rs -x '*.orig' a/libc/src
 +}
 +
 +#[repr(C)]
++#[derive(Copy, Clone)]
 +pub struct sockaddr {
 +    pub sa_family: sa_family_t,
 +    pub sa_data: [c_char; 14],
 +}
 +
 +#[repr(C)]
++#[derive(Copy, Clone)]
 +pub struct sockaddr_storage {
 +    pub ss_family: sa_family_t,
 +    pub __data: [c_char; 126],
 +}
 +
 +#[repr(C)]
++#[derive(Copy, Clone)]
 +pub struct addrinfo {
 +    pub ai_flags: c_int,
 +    pub ai_family: c_int,
@@ -240,11 +258,13 @@ diff -ruN -x .cargo-ok -x consts.rs -x types.rs -x fns.rs -x '*.orig' a/libc/src
 +}
 +
 +#[repr(C)]
++#[derive(Copy, Clone)]
 +pub struct fd_set {
 +    pub fds_bits: [c_ulong; 16],
 +}
 +
 +#[repr(C)]
++#[derive(Copy, Clone)]
 +pub struct sigaction {
 +    pub sa_sigaction: sighandler_t,
 +    pub sa_mask: sigset_t,
@@ -252,6 +272,7 @@ diff -ruN -x .cargo-ok -x consts.rs -x types.rs -x fns.rs -x '*.orig' a/libc/src
 +}
 +
 +#[repr(C)]
++#[derive(Copy, Clone)]
 +pub struct termios {
 +    pub c_iflag: tcflag_t,
 +    pub c_oflag: tcflag_t,
@@ -264,6 +285,7 @@ diff -ruN -x .cargo-ok -x consts.rs -x types.rs -x fns.rs -x '*.orig' a/libc/src
 +}
 +
 +#[repr(C)]
++#[derive(Copy, Clone)]
 +pub struct Dl_info {
 +    pub dli_fname: *const c_char,
 +    pub dli_fbase: *mut c_void,
@@ -272,6 +294,7 @@ diff -ruN -x .cargo-ok -x consts.rs -x types.rs -x fns.rs -x '*.orig' a/libc/src
 +}
 +
 +#[repr(C)]
++#[derive(Copy, Clone)]
 +pub struct statvfs {
 +    pub f_bsize: c_ulong,
 +    pub f_frsize: c_ulong,
@@ -313,6 +336,7 @@ diff -ruN -x .cargo-ok -x consts.rs -x types.rs -x fns.rs -x '*.orig' a/libc/src
 +pub const PTHREAD_COND_INITIALIZER: pthread_cond_t = pthread_cond_t { sequence: 0 };
 +
 +#[repr(C)]
++#[derive(Copy, Clone)]
 +pub struct sockaddr_un {
 +    pub sun_family: sa_family_t,
 +    pub sun_path: [c_char; 108],
@@ -357,6 +381,12 @@ diff -ruN -x .cargo-ok -x consts.rs -x types.rs -x fns.rs -x '*.orig' a/libc/src
 +// programs that call it fail to link until libvexa provides it.
 +extern "C" {
 +    pub fn ioctl(fd: c_int, request: c_ulong, ...) -> c_int;
++    pub fn pthread_create(
++        thread: *mut pthread_t,
++        attr: *const pthread_attr_t,
++        start: extern "C" fn(*mut c_void) -> *mut c_void,
++        arg: *mut c_void,
++    ) -> c_int;
 +}
 +
 +pub unsafe fn writev(fd: c_int, iov: *const iovec, iovcnt: c_int) -> ssize_t {

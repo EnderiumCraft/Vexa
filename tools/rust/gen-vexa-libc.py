@@ -204,6 +204,10 @@ def const_type(name, n):
         return "mode_t"
     if re.match(r"^POLL[A-Z]+$", name):
         return "c_short"
+    if re.match(r"^(FIO[A-Z]+|SIOC[A-Z]+|TIOC[A-Z]+|TCGET[A-Z]*|TCSET[A-Z]*)$", name):
+        return "c_ulong"  # ioctl requests are unsigned long
+    if name == "PTHREAD_STACK_MIN":
+        return "size_t"
     return "c_int" if -2**31 <= n < 2**31 else "c_ulong"
 
 
