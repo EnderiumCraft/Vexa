@@ -142,7 +142,7 @@ diff -ruN -x __pycache__ a/mozjs/js/src/irregexp/RegExpShim.h b/mozjs/js/src/irr
  using mozilla::Maybe;
 diff -ruN -x __pycache__ a/mozjs/js/src/vm/CharacterEncoding.cpp b/mozjs/js/src/vm/CharacterEncoding.cpp
 --- a/mozjs/js/src/vm/CharacterEncoding.cpp	2006-07-24 01:21:28.000000000 +0000
-+++ b/mozjs/js/src/vm/CharacterEncoding.cpp	2026-10-11 21:35:26.862607902 +0000
++++ b/mozjs/js/src/vm/CharacterEncoding.cpp	2026-10-11 21:42:01.482931804 +0000
 @@ -15,7 +15,7 @@
  #include "mozilla/Utf8.h"
  
@@ -152,9 +152,13 @@ diff -ruN -x __pycache__ a/mozjs/js/src/vm/CharacterEncoding.cpp b/mozjs/js/src/
  // We still support libstd++ versions without codecvt support on Linux.
  //
  // When the minimum supported libstd++ version is bumped to 3.4.21, we can
-@@ -25,7 +25,9 @@
+@@ -23,9 +23,13 @@
+ // support for CentOS 7 is removed.
+ #  include <codecvt>
  #endif
++#if !defined(__vexa__)
  #include <cwchar>
++#endif
  #include <limits>
 +#if !defined(__vexa__)
  #include <locale>
@@ -162,7 +166,51 @@ diff -ruN -x __pycache__ a/mozjs/js/src/vm/CharacterEncoding.cpp b/mozjs/js/src/
  #include <type_traits>
  
  #include "frontend/FrontendContext.h"
-@@ -715,7 +717,7 @@
+@@ -675,6 +679,24 @@
+ 
+ bool JS::StringIsASCII(Span<const char> s) { return IsAscii(s); }
+ 
++// Vexa's narrow encoding is UTF-8 and its locale has no wide characters to convert
++// through, so a narrow string is its own UTF-8.
++static JS::UniqueChars CopyUtf8ForVexa(JSContext* cx, const char* chars) {
++  size_t len = strlen(chars);
++  auto copy = cx->make_pod_array<char>(len + 1);
++  if (!copy) {
++    return nullptr;
++  }
++  memcpy(copy.get(), chars, len + 1);
++  return copy;
++}
++
++#if defined(__vexa__)
++JS_PUBLIC_API JS::UniqueChars JS::EncodeNarrowToUtf8(JSContext* cx,
++                                                     const char* chars) {
++  return CopyUtf8ForVexa(cx, chars);
++}
++#else
+ JS_PUBLIC_API JS::UniqueChars JS::EncodeNarrowToUtf8(JSContext* cx,
+                                                      const char* chars) {
+   // Convert the narrow multibyte character string to a wide string and then
+@@ -710,12 +732,26 @@
+ 
+   return EncodeWideToUtf8(cx, wideChars.get());
+ }
++#endif  // __vexa__
++
++// Vexa's libc++ has no wide characters, so the length is counted here.
++static size_t WideLength(const wchar_t* chars) {
++#if defined(__vexa__)
++  size_t len = 0;
++  while (chars[len]) {
++    len++;
++  }
++  return len;
++#else
++  return std::wcslen(chars);
++#endif
++}
+ 
+ JS_PUBLIC_API JS::UniqueChars JS::EncodeWideToUtf8(JSContext* cx,
                                                     const wchar_t* chars) {
    using CheckedSizeT = mozilla::CheckedInt<size_t>;
  
@@ -171,7 +219,36 @@ diff -ruN -x __pycache__ a/mozjs/js/src/vm/CharacterEncoding.cpp b/mozjs/js/src/
    // Use the standard codecvt facet to convert a wide string to UTF-8.
    std::codecvt_utf8<wchar_t> cv;
  
-@@ -840,7 +842,7 @@
+@@ -772,7 +808,7 @@
+ 
+   constexpr size_t MaxUtf8CharLength = 4;
+ 
+-  size_t len = std::wcslen(chars);
++  size_t len = WideLength(chars);
+   CheckedSizeT utf8MaxLen = CheckedSizeT(len) * MaxUtf8CharLength;
+   CheckedSizeT utf8BufLen = utf8MaxLen + 1;
+   if (!utf8BufLen.isValid()) {
+@@ -798,6 +834,12 @@
+ #endif
+ }
+ 
++#if defined(__vexa__)
++JS_PUBLIC_API JS::UniqueChars JS::EncodeUtf8ToNarrow(JSContext* cx,
++                                                     const char* chars) {
++  return CopyUtf8ForVexa(cx, chars);
++}
++#else
+ JS_PUBLIC_API JS::UniqueChars JS::EncodeUtf8ToNarrow(JSContext* cx,
+                                                      const char* chars) {
+   // Convert the UTF-8 string to a wide string via EncodeUtf8ToWide() and
+@@ -834,13 +876,14 @@
+ 
+   return narrow;
+ }
++#endif  // __vexa__
+ 
+ JS_PUBLIC_API JS::UniqueWideChars JS::EncodeUtf8ToWide(JSContext* cx,
+                                                        const char* chars) {
    // Only valid UTF-8 strings should be passed to this function.
    MOZ_ASSERT(mozilla::IsUtf8(mozilla::Span(chars, strlen(chars))));
  

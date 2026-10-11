@@ -55,7 +55,12 @@ mozjs_normalizer_glue = "=153.4.0"
 EOF2
 echo 'fn main() {}' > "$work/normhdr/src/main.rs"
 (cd "$work/normhdr" && cargo build -q)
-normalizer=$(ls -d "$work"/normhdr/target/debug/build/mozjs_normalizer_glue-*/out/include | head -1)
+normalizer_out=$(ls -d "$work"/normhdr/target/debug/build/mozjs_normalizer_glue-*/out/include | head -1)
+# cbindgen writes #include <ostream> into the header. Its declarations need only <iosfwd>,
+# and <ostream> is not available on Vexa, so the copy we put on the include path has that include changed.
+normalizer="$work/normalizer-include"
+mkdir -p "$normalizer"
+sed "s|#include <ostream>|#include <iosfwd>|" "$normalizer_out/normalizer_glue.h" > "$normalizer/normalizer_glue.h"
 
 registry=$(ls -d "${CARGO_HOME:-$HOME/.cargo}"/registry/src/*/ | head -1)
 mozjs_sys=$registry/mozjs_sys-153.4.0-0
