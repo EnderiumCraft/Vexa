@@ -166,6 +166,38 @@ diff -ruN -x __pycache__ a/mozjs/js/src/irregexp/imported/regexp-code-generator.
    has_unsupported_bytecode_ = true;
    UNREACHABLE();
  }
+diff -ruN -x __pycache__ a/mozjs/js/src/util/DefaultLocale.cpp b/mozjs/js/src/util/DefaultLocale.cpp
+--- a/mozjs/js/src/util/DefaultLocale.cpp	2006-07-24 01:21:28.000000000 +0000
++++ b/mozjs/js/src/util/DefaultLocale.cpp	2026-10-11 21:48:43.185295809 +0000
+@@ -11,7 +11,9 @@
+ #endif
+ #include "mozilla/Span.h"
+ 
++#if !defined(__vexa__)
+ #include <clocale>
++#endif
+ #include <cstring>
+ #include <string_view>
+ 
+@@ -26,6 +28,10 @@
+   // default locale matches our default locale.
+   return mozilla::intl::Locale::GetDefaultLocale();
+ #else
++#  if defined(__vexa__)
++  // libc++ on Vexa has no <clocale>. Its only locale is "C", which is undetermined.
++  return "und";
++#  else
+   const char* loc = std::setlocale(LC_ALL, nullptr);
+ 
+   // Convert to a well-formed BCP 47 language tag.
+@@ -37,6 +43,7 @@
+ 
+   // Remove optional code page from the locale string.
+   return locale.substr(0, locale.find('.'));
++#  endif
+ #endif
+ }
+ 
 diff -ruN -x __pycache__ a/mozjs/js/src/vm/CharacterEncoding.cpp b/mozjs/js/src/vm/CharacterEncoding.cpp
 --- a/mozjs/js/src/vm/CharacterEncoding.cpp	2006-07-24 01:21:28.000000000 +0000
 +++ b/mozjs/js/src/vm/CharacterEncoding.cpp	2026-10-11 21:42:01.482931804 +0000
