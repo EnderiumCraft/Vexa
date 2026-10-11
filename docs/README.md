@@ -7,6 +7,7 @@
 | [API reference](API.md) | libvexa, Vexa's C library: the system calls, threads, networking, windows and drawing, images, widgets, app bundles, file operations |
 | [Architecture](ARCHITECTURE.md) | how the kernel, the native interface and the Linux subsystem fit together, and how each part works |
 | [Roadmap](ROADMAP.md) | what's done, phase by phase, and the plan from here to Firefox |
+| [Servo plan](SERVO.md) | porting Servo, the web engine, to Vexa natively: status, what the probes found, and the milestones |
 
 The [README](../README.md) is the short tour: what Vexa is, what it can do, how to
 download or build it, and the licenses of what's in the ISO.
