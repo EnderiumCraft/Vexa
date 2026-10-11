@@ -17,6 +17,8 @@ What each edit does, and why Vexa can take the generic path:
                           the other poll(2) systems are. The libc requirement is lowered
                           to the 0.2.178 this build patches in: mio's selector uses only
                           names that version has.
+  socket2-0.6.5           Its IovLen (the msg_iovlen type) is defined only for some OSes;
+                          Vexa's is size_t, as on glibc, so it takes the usize branch.
   getrandom-0.2.17        Vexa has no getrandom(2). It has /dev/urandom, and the kernel
   getrandom-0.3.4         seeds it from RDRAND, so the crates read it, as they do on the
                           other systems in the use_file list. getrandom 0.3 declares its
@@ -71,6 +73,15 @@ EDITS = [
     ("mio-1.2.4/src/sys/unix/tcp.rs",
      '                target_os = "wasi",\n            ))]\n            syscall!(fcntl(s.as_raw_fd(), libc::F_SETFL, libc::O_NONBLOCK))?;',
      '                target_os = "wasi",\n                target_os = "vexa",\n            ))]\n            syscall!(fcntl(s.as_raw_fd(), libc::F_SETFL, libc::O_NONBLOCK))?;'),
+    # socket2: msg_iovlen is a size_t in libvexa's headers, as in glibc's, so IovLen is usize.
+    ("socket2-0.6.5/src/sys/unix.rs",
+     '    target_os = "android",\n))]\ntype IovLen = usize;\n',
+     '    target_os = "android",\n    target_os = "vexa",\n))]\ntype IovLen = usize;\n'),
+    # tokio: UnixStream::peer_cred calls the per-OS get_peer_cred, and only the listed OSes
+    # have one. libvexa has no SO_PEERCRED, so Vexa's Unix sockets report it as unsupported.
+    ("tokio-1.53.2/src/net/unix/ucred.rs",
+     '#[cfg(any(\n    target_os = "linux",\n    target_os = "redox",\n    target_os = "android",\n    target_os = "openbsd",\n    target_os = "haiku",\n    target_os = "cygwin"\n))]\npub(crate) use self::impl_linux::get_peer_cred;\n',
+     '#[cfg(target_os = "vexa")]\npub(crate) fn get_peer_cred(_sock: &crate::net::UnixStream) -> std::io::Result<UCred> {\n    Err(std::io::Error::new(\n        std::io::ErrorKind::Unsupported,\n        "Vexa\'s Unix sockets have no peer credentials",\n    ))\n}\n\n#[cfg(any(\n    target_os = "linux",\n    target_os = "redox",\n    target_os = "android",\n    target_os = "openbsd",\n    target_os = "haiku",\n    target_os = "cygwin"\n))]\npub(crate) use self::impl_linux::get_peer_cred;\n'),
     # getrandom 0.2: the use_file backend, which reads /dev/urandom.
     ("getrandom-0.2.17/src/lib.rs",
      '    if #[cfg(any(target_os = "haiku", target_os = "redox", target_os = "nto", target_os = "aix"))] {\n',

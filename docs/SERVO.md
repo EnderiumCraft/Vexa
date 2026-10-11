@@ -55,8 +55,9 @@ lands.
       probe only prints.
 
 - [ ] **M2: Servo's leaf crates (in progress).** `getrandom` (0.2 and 0.3), `mio` 1.2.4
-      on its `poll(2)` selector with the pipe waker, and TCP over loopback through `mio`
-      all run in the VM. `tokio`, `rustls` and `hyper` are not built yet.
+      on its `poll(2)` selector with the pipe waker, `socket2`, and TCP over loopback
+      through `mio` all run in the VM. `tokio` 1.53 (its runtime, a timer, and TCP over
+      loopback) runs too. `rustls` and `hyper` are not built yet.
 
       ```sh
       PATH=$PWD/build/sdk/vexa-sdk/bin:$PATH sh tools/rust/build-std-vexa.sh WORKDIR
@@ -64,7 +65,8 @@ lands.
       ```
 
       The crates get their Vexa edits from [`tools/rust/crates-vexa-glue.py`](../tools/rust/crates-vexa-glue.py),
-      and the probe is [`tools/rust/crates-probe.rs`](../tools/rust/crates-probe.rs).
+      and the probes are [`tools/rust/crates-probe.rs`](../tools/rust/crates-probe.rs) and
+      [`tools/rust/tokio-probe.rs`](../tools/rust/tokio-probe.rs).
 
 ## What the probes found
 
@@ -88,11 +90,14 @@ lands.
   first wake. libvexa now checks readiness with a zero-timeout `poll` before a non-blocking
   read or write on a pipe. The check can race if two threads read one pipe; mio has one
   reader, so it is enough for now.
-- **libc's Vexa module lacks names that `socket2` uses.** `socket2` (under `tokio`) needs
-  `IP_HDRINCL`, `IPV6_RECVTCLASS`, `IP_RECVTOS`, `IP_MULTICAST_IF`, `IPV6_MULTICAST_IF`,
-  `IP_ADD_SOURCE_MEMBERSHIP`, `IP_DROP_SOURCE_MEMBERSHIP`, `ip_mreq_source`, `ip_mreqn`,
-  `SOCK_RDM`, `MSG_EOR` and `TCP_MAXSEG`, and `tokio` won't build until they exist. It
-  also names a helper type, `IovLen`, that it defines only for some OSes.
+- **libc's Vexa module lacked names that `socket2` uses, and `tokio` needed a `peer_cred`
+  fallback.** The names are in the hand part of the libc patch, with Linux's values, and
+  `ip_mreqn` and `ip_mreq_source` have Linux's layouts. `socket2`'s `IovLen` takes its
+  `usize` branch, since libvexa's `msg_iovlen` is a `size_t`. `tokio`'s
+  `UnixStream::peer_cred` returns `Unsupported`, because libvexa has no `SO_PEERCRED`.
+  libvexa's `setsockopt` accepts any option at the socket, IP, IPv6 and TCP levels and
+  ignores it. So these names compile, but options such as `IP_HDRINCL` and the multicast
+  interface have no effect yet.
 - **No `getrandom(2)`, no unwinder, no `readv`/`writev`/`ioctl`.** `getrandom` is covered by
   `/dev/urandom`, the same as in M1. The other gaps are covered above. The libc shims and
   the std edits in the script are the workarounds, not the end state.
@@ -111,8 +116,8 @@ lands.
 1. **M1, `std` on Vexa.** Done. The probe prints, and a `std` program has run threads, a
    file, and an environment variable in the VM.
 2. **M2, Servo's leaf crates.** In progress. Done: `getrandom`, `mio` on `poll(2)` with the
-   pipe waker, and TCP over loopback. Time is std's `Instant`, which the probe uses. Still
-   to do: `tokio` (blocked on `socket2`, above), `rustls` (it needs a crypto provider that
+   pipe waker, `socket2`, and `tokio`'s runtime, timer and TCP over loopback. Time is std's
+   `Instant`, which the probes use. Still to do: `rustls` (it needs a crypto provider that
    builds for Vexa) and `hyper`. `dlopen` exists in libvexa and is not probed yet.
 3. **M3, SpiderMonkey on Vexa.** Port the `mozjs_sys` build (a target config for Vexa, and
    the C++ runtime from the libc++ work in Phase 67).
@@ -125,7 +130,6 @@ lands.
 
 ## Next step
 
-M2's next blocker is `socket2`, under `tokio`. Its missing names can come from libc's Vexa
-module, with Linux's values where libvexa has none (as for other names), or `socket2`'s cfgs
-can leave out the options Vexa lacks. Then `tokio`, the 64-handle `poll` limit, `rustls`
-and `hyper`.
+M2's next steps: `rustls`, with a crypto provider that builds for Vexa, then `hyper`. Two
+things to settle before real traffic: the 64-handle `poll` limit (a server with more than 64
+connections will fail), and `setsockopt` silently accepting options it does not apply.
