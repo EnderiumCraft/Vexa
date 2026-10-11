@@ -106,6 +106,7 @@ struct desktop_message {
  *
  *     wallpaper=image         one of desktop_wallpapers[], or "image"
  *     wallpaper_image=/path   a PNG, BMP or PPM file (for wallpaper=image)
+ *     display_scale=125       the scale, in percent (see desktop_scales[])
  *     clock=24                24 or 12 (hours)
  *     utc_offset=120          minutes east of UTC
  *
@@ -117,6 +118,25 @@ struct desktop_message {
  * read, the first gradient). It stands for the default wallpaper in the
  * theme's colors, which the desktop shows (see vx_theme_wallpaper()). */
 #define DESKTOP_DEFAULT_WALLPAPER "/share/pictures/glass.png"
+
+/* The scale, as Windows has it: the desktop is composed at 100 / scale of the
+ * display's size and each of the display's pixels takes the nearest one of
+ * the desktop's, so it comes out that much bigger. (Settings written before
+ * the percentages said 1 for 100 and 2 for 200.) */
+#define DESKTOP_SCALE_COUNT 5
+static const int desktop_scales[DESKTOP_SCALE_COUNT] = {100, 125, 150, 175, 200};
+
+static inline int desktop_scale_percent(int value) {
+    if (value == 1 || value == 2) {
+        return value * 100;
+    }
+    for (int i = 0; i < DESKTOP_SCALE_COUNT; i++) {
+        if (value == desktop_scales[i]) {
+            return value;
+        }
+    }
+    return 100;
+}
 
 struct desktop_wallpaper {
     const char *name, *label;

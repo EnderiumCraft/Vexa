@@ -350,8 +350,9 @@ starts that account's shell through `sudo -u`.
 - **The display** (`/dev/display0`) is the boot frame buffer; on QEMU's and Bochs's
   standard VGA (PCI 1234:1111) the holder can also set its mode (`VX_DISPLAY_MODES`,
   `VX_DISPLAY_SET_MODE`, through the card's DISPI registers), and the first mode comes
-  back when it lets go. The desktop can also draw everything twice as big: it composes
-  at half the size and doubles the pixels as it copies them out.
+  back when it lets go. The desktop can also draw everything bigger, at Windows' scales
+  (100, 125, 150, 175 or 200 percent): it composes at 100 / scale of the display's size,
+  and each of the display's pixels takes the nearest one of the desktop's as it's copied out.
 - **ACPI's namespace** (`core/aml.c`) comes from [uACPI](https://github.com/uACPI/uACPI)
   (`third_party/uacpi`, MIT), an AML interpreter: at boot it loads the DSDT and SSDTs
   and runs their initialization (`_INI`, `_STA`), with `\_PIC(1)` telling the firmware

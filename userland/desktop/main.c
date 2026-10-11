@@ -92,7 +92,7 @@ static bool setting_natural_scroll, setting_left_handed;
 char setting_layout[16] = "us";         /* The keyboard layout. */
 static int setting_key_delay = 500, setting_key_rate = 20;
 static int setting_width, setting_height; /* The display's mode (0: as it started). */
-static int setting_scale = 1;           /* 2: everything twice as big. */
+static int setting_scale = 100;         /* In percent: the desktop is composed at 100 / this of the display. */
 
 struct client {
     int handle;
@@ -707,7 +707,7 @@ static void read_config(void) {
     setting_key_rate = vx_settings_int(&config, "key_rate", 20);
     setting_width = vx_settings_int(&config, "display_width", 0);
     setting_height = vx_settings_int(&config, "display_height", 0);
-    setting_scale = vx_settings_int(&config, "display_scale", 1) == 2 ? 2 : 1;
+    setting_scale = desktop_scale_percent(vx_settings_int(&config, "display_scale", 100));
     lock_settings();
 }
 
@@ -1629,6 +1629,57 @@ static void compose(struct rect area) {
     }
 }
 
+/* For each column of the display, the column of the desktop it shows (a scale
+ * other than 100): the nearest, so each desktop pixel comes out as one or more
+ * of the display's, and nothing blurs. */
+static uint32_t *column_map;
+static unsigned column_map_count, column_map_desktop;
+
+static void map_columns(int desktop_width) {
+    if (column_map && column_map_count == display.width && column_map_desktop == (unsigned)desktop_width) {
+        return;
+    }
+    free(column_map);
+    column_map = malloc((size_t)display.width * sizeof(uint32_t));
+    column_map_count = column_map ? display.width : 0;
+    column_map_desktop = (unsigned)desktop_width;
+    for (unsigned x = 0; column_map && x < display.width; x++) {
+        column_map[x] = (uint32_t)((unsigned long)x * (unsigned)desktop_width / display.width);
+    }
+}
+
+/* Copies the part of the desktop in `area` (its pixels) to the display, at a
+ * scale other than 100: each display pixel is the desktop's nearest one, and
+ * only the display's pixels that show the area are written. */
+static void show_scaled(struct rect area) {
+    bool native = display.red_shift == 16 && display.green_shift == 8 && display.blue_shift == 0;
+    int dw = (int)display.width, dh = (int)display.height;
+    int x0 = area.x * dw / screen.width, x1 = (area.x + area.width) * dw / screen.width + 1;
+    int y0 = area.y * dh / screen.height, y1 = (area.y + area.height) * dh / screen.height + 1;
+    x1 = x1 > dw ? dw : x1;
+    y1 = y1 > dh ? dh : y1;
+    for (int dy = y0; dy < y1; dy++) {
+        int sy = dy * screen.height / dh;
+        if (sy < area.y || sy >= area.y + area.height) {
+            continue;
+        }
+        const uint32_t *from = screen.pixels + (long)sy * screen.stride;
+        uint32_t *to = (uint32_t *)((char *)frame + (long)dy * display.pitch);
+        for (int dx = x0; dx < x1; dx++) {
+            int sx = (int)column_map[dx];
+            if (sx < area.x || sx >= area.x + area.width) {
+                continue;
+            }
+            uint32_t p = from[sx];
+            if (!native) {
+                p = ((p >> 16) & 0xff) << display.red_shift | ((p >> 8) & 0xff) << display.green_shift |
+                    (p & 0xff) << display.blue_shift;
+            }
+            to[dx] = p;
+        }
+    }
+}
+
 /* Copies the composed area to the display, converting the pixel format if
  * the display isn't 0xRRGGBB. */
 static void show(struct rect area) {
@@ -1645,20 +1696,8 @@ static void show(struct rect area) {
         area.height = screen.height - area.y;
     }
     bool native = display.red_shift == 16 && display.green_shift == 8 && display.blue_shift == 0;
-    if (setting_scale == 2) { /* Each pixel as four. */
-        for (int row = area.y; row < area.y + area.height; row++) {
-            uint32_t *from = screen.pixels + (long)row * screen.stride + area.x;
-            uint32_t *to = (uint32_t *)((char *)frame + (long)row * 2 * display.pitch) + area.x * 2;
-            for (int i = 0; i < area.width; i++) {
-                uint32_t p = from[i];
-                if (!native) {
-                    p = ((p >> 16) & 0xff) << display.red_shift |
-                        ((p >> 8) & 0xff) << display.green_shift | (p & 0xff) << display.blue_shift;
-                }
-                to[2 * i] = to[2 * i + 1] = p;
-            }
-            memcpy((char *)to + display.pitch, to, (size_t)area.width * 8);
-        }
+    if (setting_scale != 100 && column_map) {
+        show_scaled(area);
         return;
     }
     for (int row = area.y; row < area.y + area.height; row++) {
@@ -3675,10 +3714,12 @@ static int display_handle = -1;
 static unsigned boot_width, boot_height; /* The mode the desktop started in. */
 static size_t frame_size;
 
-/* The screen buffers, for the size the desktop works in (the display's,
- * or half of it when everything is twice as big). */
+/* The screen buffers, for the size the desktop works in (the display's, at
+ * 100 percent, or that over the scale). */
 static bool size_buffers(void) {
-    int w = (int)display.width / setting_scale, h = (int)display.height / setting_scale;
+    int w = (int)(display.width * 100 / (unsigned)setting_scale);
+    int h = (int)(display.height * 100 / (unsigned)setting_scale);
+    map_columns(w);
     if (screen.pixels && w == screen.width && h == screen.height) {
         return true;
     }

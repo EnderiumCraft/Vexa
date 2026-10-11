@@ -89,12 +89,12 @@ static char account_message[160]; /* What the last change to an account said. */
 
 enum hit_kind {
     H_SECTION, H_SEGMENT, H_TOGGLE, H_SLIDER, H_ACCENT, H_PICTURE, H_GRADIENT, H_PICTURE_FIELD,
-    H_USE_PICTURE, H_ICON_APP, H_STARTUP_APP, H_ZONE, H_MODE, H_DEFAULT_APP, H_NAME_FIELD,
+    H_USE_PICTURE, H_ICON_APP, H_STARTUP_APP, H_ZONE, H_DEFAULT_APP, H_NAME_FIELD,
     H_SAVE_NAME, H_POWER, H_KEEP, H_REVERT, H_SEARCH_FIELD, H_TEST_AREA, H_PASSWORD_FIELD,
     H_SET_PASSWORD, H_REMOVE_PASSWORD, H_LOCK_NOW, H_OUTPUT, H_TEST_SOUND, H_OLD_PASSWORD_FIELD,
     H_NEW_LOGIN_FIELD, H_NEW_FULL_FIELD, H_NEW_PASSWORD_FIELD, H_NEW_ADMIN, H_ADD_ACCOUNT,
     H_REMOVE_ACCOUNT, H_ADMIN_ACCOUNT, H_GO_WALLPAPER, H_ADD_PICTURE, H_WALLPAPER_MODE,
-    H_WELCOME,
+    H_WELCOME, H_DISPLAY_SCALE, H_RESOLUTION,
 };
 
 struct hit {
@@ -345,6 +345,8 @@ static void bar(int x, int y, int w, unsigned long long used, unsigned long long
 
 #define MAX_MENU 40
 static struct vx_menu_item menu[MAX_MENU];
+static char scale_labels[DESKTOP_SCALE_COUNT][24];
+static char resolution_labels[VX_DISPLAY_MAX_MODES][40], resolution_keys[VX_DISPLAY_MAX_MODES][16];
 static int menu_values[MAX_MENU];
 static int menu_count, menu_x, menu_y, menu_hot = -1;
 static bool menu_open;
@@ -956,10 +958,9 @@ static void draw_add_tile(int x, int y) {
 
 /* The screen's size (pictures are shown as on it). */
 static void screen_size(int *w, int *h) {
-    int scale = vx_settings_int(&desk, "display_scale", 1);
-    scale = scale < 1 ? 1 : scale;
-    *w = have_display && display_info.width ? (int)display_info.width / scale : 1280;
-    *h = have_display && display_info.height ? (int)display_info.height / scale : 800;
+    int scale = desktop_scale_percent(vx_settings_int(&desk, "display_scale", 100));
+    *w = have_display && display_info.width ? (int)(display_info.width * 100 / (unsigned)scale) : 1280;
+    *h = have_display && display_info.height ? (int)(display_info.height * 100 / (unsigned)scale) : 800;
 }
 
 #define SCREEN_W 272
@@ -1463,109 +1464,66 @@ static int draw_screen_card(int y) {
     vx_draw_text_fit(S(), tx, y + 60, right - tx, line, VX_COLOR_DIM, VX_TRANSPARENT);
     snprintf(line, sizeof(line), "The desktop works in %d × %d.", w, h);
     vx_draw_text_fit(S(), tx, y + 92, right - tx, line, VX_COLOR_TEXT, VX_TRANSPARENT);
-    vx_draw_text_fit(S(), tx, y + 114, right - tx, "Change the size under Resolution below.",
+    vx_draw_text_fit(S(), tx, y + 114, right - tx, "Change them below.",
                      VX_COLOR_DIM, VX_TRANSPARENT);
-    vx_draw_text_fit(S(), tx, y + 132, right - tx, "It goes back if you don't keep it.",
+    vx_draw_text_fit(S(), tx, y + 132, right - tx, "A change goes back unless you keep it.",
                      VX_COLOR_DIM, VX_TRANSPARENT);
     return height;
 }
 
-/* One of the two sizes of everything: a sample of the text at that size, the
- * name and what it does. */
-static void scale_option(int x, int y, int w, int h, int scale, const char *title, const char *about,
-                         bool on) {
-    if (on) {
-        chosen_ring(x, y, w, h, 10);
-    } else {
-        uint32_t edge = vx_theme.dark ? vx_mix(card_color(), 0xffffff, 40) : 0xc9ced8;
-        vx_fill_rounded(S(), x - 1, y - 1, w + 2, h + 2, 11, edge, 255);
-        vx_fill_rounded(S(), x, y, w, h, 10, card_color(), 255);
+/* A drop-down: the value it shows, and a chevron, in a white box with an edge.
+ * A click opens its list (see click()). */
+static void dropdown(int x, int y, int w, const char *value, enum hit_kind kind) {
+    uint32_t edge = vx_theme.dark ? vx_mix(card_color(), 0xffffff, 60) : 0xa9b0bc;
+    vx_fill_rounded(S(), x, y, w, 30, 6, edge, 255);
+    vx_fill_rounded(S(), x + 1, y + 1, w - 2, 28, 5, card_color(), 255);
+    text(x + 12, y + 8, value, VX_COLOR_TEXT);
+    int cx = x + w - 18, cy = y + 12;
+    for (int i = 0; i < 5; i++) { /* A small triangle, pointing down. */
+        vx_fill(S(), cx - 4 + i, cy + i, 9 - 2 * i, 1, VX_COLOR_DIM);
     }
-    vx_text(S(), vx_font(VX_FACE_SANS, scale == 2 ? 26 : 13), x + 14, y + 10, "Sample text",
-            VX_COLOR_TEXT, VX_TRANSPARENT);
-    vx_text(S(), vx_font(on ? VX_FACE_BOLD : VX_FACE_SANS, 14), x + 14, y + 50, title, VX_COLOR_TEXT,
-            VX_TRANSPARENT);
-    vx_draw_text_fit(S(), x + 14, y + 68, w - 28, about, VX_COLOR_DIM, VX_TRANSPARENT);
-    if (on) {
-        chosen_badge(x, y, w);
-    }
-    struct hit *hit = add_hit(x, y, w, h, H_SEGMENT);
-    hit->key = "display_scale";
-    hit->value = scale == 2 ? "2" : "1";
+    add_hit(x, y, w, 30, kind);
+}
+
+/* The scale, as a percentage (Windows' choices), chosen from a drop-down. */
+static int display_scale_setting(void) {
+    return desktop_scale_percent(vx_settings_int(&desk, "display_scale", 100));
 }
 
 static int draw_scale_card(int y) {
-    int height = 198;
+    int height = 132;
     card(y, height);
-    card_title(y + 14, "Size of everything", "Bigger text, buttons and icons: for a big screen, or to read from further away.");
-    int scale = vx_settings_int(&desk, "display_scale", 1) == 2 ? 2 : 1;
-    int w = (CONTENT_W - 2 * CARD_PAD - 12) / 2;
-    scale_option(LEFT + CARD_PAD, y + 62, w, 88, 1, "Normal", "Text and buttons as they are.", scale == 1);
-    scale_option(LEFT + CARD_PAD + w + 12, y + 62, w, 88, 2, "Twice as big",
-                 "Easier to read on a big screen.", scale == 2);
-    vx_draw_text_fit(S(), LEFT + CARD_PAD, y + 164, CONTENT_W - 2 * CARD_PAD,
-                     "X programs keep the size they started with until they're started again.",
+    card_title(y + 14, "Scale", "Makes the text, apps and other items bigger or smaller.");
+    int scale = display_scale_setting();
+    char value[24];
+    snprintf(value, sizeof(value), scale == 100 ? "100%%  (Recommended)" : "%d%%", scale);
+    text(LEFT + CARD_PAD, y + 70, "Size of text, apps and other items", VX_COLOR_TEXT);
+    dropdown(LEFT + CONTENT_W - CARD_PAD - 230, y + 62, 230, value, H_DISPLAY_SCALE);
+    vx_draw_text_fit(S(), LEFT + CARD_PAD, y + 104, CONTENT_W - 2 * CARD_PAD,
+                     "Vexa works in a smaller desktop and enlarges it, so 100% is the sharpest.",
                      VX_COLOR_DIM, VX_TRANSPARENT);
     return height;
 }
 
-/* A size, as a tile: its shape to scale (in a small box), its name and ratio,
- * and that it's the one in use. */
-static void mode_tile(int x, int y, int w, int h, unsigned mw, unsigned mh, bool on, int index) {
-    if (on) {
-        chosen_ring(x, y, w, h, 10);
-    } else {
-        uint32_t edge = vx_theme.dark ? vx_mix(card_color(), 0xffffff, 40) : 0xc9ced8;
-        vx_fill_rounded(S(), x - 1, y - 1, w + 2, h + 2, 11, edge, 255);
-        vx_fill_rounded(S(), x, y, w, h, 10, card_color(), 255);
-    }
-    int bw = 46, bh = 32, sw = bw, sh = bh;
-    if (mw && mh) {
-        if (mw * bh >= mh * bw) {
-            sh = mh * bw / mw;
-        } else {
-            sw = mw * bh / mh;
-        }
-    }
-    int bx = x + 14 + (bw - sw) / 2, by = y + (h - sh) / 2;
-    vx_fill_rounded(S(), bx, by, sw, sh, 3, on ? VX_COLOR_ACCENT : vx_mix(card_color(), VX_COLOR_DIM, 90), 255);
-    char name[24], ratio[16], about[32];
-    snprintf(name, sizeof(name), "%u × %u", mw, mh);
-    aspect_name(mw, mh, ratio, sizeof(ratio));
-    snprintf(about, sizeof(about), on ? "%s, in use" : "%s", ratio);
-    vx_text(S(), vx_font(on ? VX_FACE_BOLD : VX_FACE_SANS, 14), x + 74, y + 14, name, VX_COLOR_TEXT,
-            VX_TRANSPARENT);
-    vx_text(S(), vx_font(VX_FACE_SANS, 12), x + 74, y + 38, about, on ? VX_COLOR_ACCENT : VX_COLOR_DIM,
-            VX_TRANSPARENT);
-    if (on) {
-        chosen_badge(x, y, w);
-    }
-    struct hit *hit = add_hit(x, y, w, h, H_MODE);
-    hit->index = index;
-}
-
+/* The resolution, as a drop-down of the sizes the display can show. */
 static int draw_resolution_card(int y) {
-    int cols = 3, gap = 8, tw = (CONTENT_W - 2 * CARD_PAD - (cols - 1) * gap) / cols, th = 66;
-    int rows = have_display && modes.count > 1 ? ((int)modes.count + cols - 1) / cols : 1;
     bool single = have_display && modes.count <= 1;
-    int height = 62 + rows * th + (rows - 1) * gap + 16 + (single ? 58 : 0);
+    int height = single ? 186 : 132;
     card(y, height);
     char about[120];
-    snprintf(about, sizeof(about), "The size the screen shows. It changes at once, and you have %d seconds to keep it.",
+    snprintf(about, sizeof(about), "The size the screen shows. It changes at once; you have %d seconds to keep it.",
              REVERT_SECONDS);
     card_title(y + 14, "Resolution", about);
     if (!have_display) {
-        text(LEFT + CARD_PAD, y + 62, "No display.", VX_COLOR_DIM);
+        text(LEFT + CARD_PAD, y + 70, "No display.", VX_COLOR_DIM);
         return height;
     }
-    for (unsigned i = 0; i < modes.count; i++) {
-        int x = LEFT + CARD_PAD + ((int)i % cols) * (tw + gap);
-        int ty = y + 62 + ((int)i / cols) * (th + gap);
-        bool on = modes.modes[i].width == display_info.width && modes.modes[i].height == display_info.height;
-        mode_tile(x, ty, tw, th, modes.modes[i].width, modes.modes[i].height, on, (int)i);
-    }
+    char value[32];
+    snprintf(value, sizeof(value), "%u × %u", display_info.width, display_info.height);
+    text(LEFT + CARD_PAD, y + 70, "Resolution", VX_COLOR_TEXT);
+    dropdown(LEFT + CONTENT_W - CARD_PAD - 230, y + 62, 230, value, H_RESOLUTION);
     if (single) {
-        int ny = y + 62 + th + 16, nw = CONTENT_W - 2 * CARD_PAD;
+        int ny = y + 104, nw = CONTENT_W - 2 * CARD_PAD;
         vx_draw_text_fit(S(), LEFT + CARD_PAD, ny, nw,
                          "This display's size is the one the firmware set (Vexa can change it on QEMU's",
                          VX_COLOR_DIM, VX_TRANSPARENT);
@@ -2200,14 +2158,14 @@ static void set_display(int width, int height, int scale) {
     if (!revert_at) {
         revert_width = vx_settings_int(&desk, "display_width", 0);
         revert_height = vx_settings_int(&desk, "display_height", 0);
-        revert_scale = vx_settings_int(&desk, "display_scale", 1);
+        revert_scale = desktop_scale_percent(vx_settings_int(&desk, "display_scale", 100));
     }
     vx_settings_set_int(&desk, "display_width", width);
     vx_settings_set_int(&desk, "display_height", height);
     vx_settings_set_int(&desk, "display_scale", scale);
     vx_settings_save(&desk);
     char value[32];
-    snprintf(value, sizeof(value), "%dx%d, scale %d", width, height, scale);
+    snprintf(value, sizeof(value), "%dx%d, scale %d%%", width, height, scale);
     changed("display", value);
     vx_desktop_reload();
     revert_at = vx_uptime() + REVERT_SECONDS * 1000;
@@ -2264,6 +2222,16 @@ static void menu_chosen(int item) {
     if (item < 0) {
         return;
     }
+    if (!strcmp(menu_key, "display_scale")) {
+        read_display();
+        set_display((int)display_info.width, (int)display_info.height, menu_values[item]);
+        return;
+    }
+    if (!strcmp(menu_key, "resolution")) {
+        set_display((int)modes.modes[menu_values[item]].width, (int)modes.modes[menu_values[item]].height,
+                    display_scale_setting());
+        return;
+    }
     if (!strcmp(menu_key, "wallpaper_mode")) {
         set("wallpaper_mode", wallpaper_modes[menu_values[item]].value);
         return;
@@ -2292,14 +2260,7 @@ static void click(struct hit *h, int px) {
     switch (h->kind) {
     case H_SECTION: show_section(h->index); break;
     case H_SEARCH_FIELD: field = FIELD_SEARCH; break;
-    case H_SEGMENT:
-        if (!strcmp(h->key, "display_scale")) {
-            read_display();
-            set_display((int)display_info.width, (int)display_info.height, atoi(h->value));
-        } else {
-            set(h->key, h->value);
-        }
-        break;
+    case H_SEGMENT: set(h->key, h->value); break;
     case H_TOGGLE: set_bool(h->key, !vx_settings_bool(&desk, h->key, h->index)); break;
     case H_SLIDER: {
         int value = h->min + (int)((long)(px - h->x - 8) * (h->max - h->min) / (h->w - 16));
@@ -2361,9 +2322,30 @@ static void click(struct hit *h, int px) {
         break;
     }
     case H_ZONE: set("time_zone", h->index < 0 ? "UTC" : vx_zones[h->index].city); break;
-    case H_MODE:
-        set_display((int)modes.modes[h->index].width, (int)modes.modes[h->index].height,
-                    vx_settings_int(&desk, "display_scale", 1));
+    case H_DISPLAY_SCALE:
+        menu_count = 0;
+        for (int i = 0; i < DESKTOP_SCALE_COUNT; i++) {
+            bool on = desktop_scales[i] == display_scale_setting();
+            snprintf(scale_labels[i], sizeof(scale_labels[0]), "%s%d%%", on ? "\u2713  " : "   ", desktop_scales[i]);
+            menu[menu_count] = (struct vx_menu_item){scale_labels[i], desktop_scales[i] == 100 ? "Recommended" : NULL,
+                                                     false};
+            menu_values[menu_count++] = desktop_scales[i];
+        }
+        menu_key = "display_scale";
+        open_menu(h->x, h->y + h->h + 2);
+        break;
+    case H_RESOLUTION:
+        menu_count = 0;
+        for (unsigned i = 0; i < modes.count && menu_count < MAX_MENU; i++) {
+            unsigned w = modes.modes[i].width, hgt = modes.modes[i].height;
+            bool on = w == display_info.width && hgt == display_info.height;
+            snprintf(resolution_labels[i], sizeof(resolution_labels[0]), "%s%u \u00d7 %u", on ? "\u2713  " : "   ", w, hgt);
+            aspect_name(w, hgt, resolution_keys[i], sizeof(resolution_keys[0]));
+            menu[menu_count] = (struct vx_menu_item){resolution_labels[i], resolution_keys[i], false};
+            menu_values[menu_count++] = (int)i;
+        }
+        menu_key = "resolution";
+        open_menu(h->x, h->y + h->h + 2);
         break;
     case H_KEEP:
         revert_at = 0;
