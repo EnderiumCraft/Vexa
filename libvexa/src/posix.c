@@ -735,9 +735,10 @@ int mprotect(void *address, size_t size, int protection) {
 /* ---- poll ---- */
 
 int poll(struct pollfd *fds, nfds_t count, int timeout_ms) {
-    struct vx_poll handles[64];
-    if (count > 64) {
-        errno = EINVAL;
+    /* One handle per descriptor, however many: the kernel refuses more than a process has. */
+    struct vx_poll *handles = malloc((count ? count : 1) * sizeof(*handles));
+    if (!handles) {
+        errno = ENOMEM;
         return -1;
     }
     for (nfds_t i = 0; i < count; i++) {
@@ -748,6 +749,7 @@ int poll(struct pollfd *fds, nfds_t count, int timeout_ms) {
     }
     long n = vx_poll(handles, count, timeout_ms < 0 ? -1 : timeout_ms);
     if (n < 0) {
+        free(handles);
         return (int)__vx_errno_result(n);
     }
     int ready = 0;
@@ -759,6 +761,7 @@ int poll(struct pollfd *fds, nfds_t count, int timeout_ms) {
                                  (r & VX_POLL_ERROR ? POLLERR : 0));
         ready += fds[i].revents != 0;
     }
+    free(handles);
     return ready;
 }
 
