@@ -44,6 +44,12 @@ bool __vx_is_socket(int fd) {
     return fd >= 0 && fd < TRACKED && socket_types[fd];
 }
 
+bool __vx_would_wait(int fd, unsigned events) {
+    struct vx_poll handle = {.handle = fd, .events = events, .ready = 0};
+    /* A handle the poll rejects reports an error, so the call itself reports it. */
+    return vx_poll(&handle, 1, 0) == 0;
+}
+
 void __vx_forget_fd(int fd) {
     if (fd >= 0 && fd < TRACKED) {
         __vx_set_nonblocking(fd, false);
@@ -94,6 +100,12 @@ int listen(int fd, int backlog) {
 }
 
 int accept4(int fd, struct sockaddr *address, socklen_t *length, int flags) {
+    /* The kernel's accept waits for a connection even on a non-blocking listener, so a
+     * non-blocking one checks first, and returns EAGAIN if no connection is waiting. */
+    if (__vx_nonblocking(fd) && __vx_would_wait(fd, VX_POLL_READ)) {
+        errno = EAGAIN;
+        return -1;
+    }
     struct vx_socket_address peer;
     int handle = vx_accept(fd, &peer, __vx_nonblocking(fd) ? VX_SOCK_NONBLOCK : 0);
     if (handle >= 0 && address && length) {
@@ -254,6 +266,9 @@ int ioctl(int fd, unsigned long request, ...) {
     if (request == FIONREAD && argument) {
         *argument = 0;
         return 0;
+    }
+    if (request == FIOCLEX || request == FIONCLEX) {
+        return 0; /* No close-on-exec flag to set (see fcntl's F_SETFD). */
     }
     if (request == SIOCGIFCONF && argument) {
         /* The interfaces with an IPv4 address. */

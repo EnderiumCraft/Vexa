@@ -37,6 +37,9 @@ int __vx_errno_of(long vx_error);
 bool __vx_nonblocking(int fd);
 void __vx_set_nonblocking(int fd, bool on);
 bool __vx_is_socket(int fd);
+/* Whether an operation (VX_POLL_READ or VX_POLL_WRITE) on `fd` would wait now, by a
+ * zero-timeout poll. For the calls the kernel can't make non-blocking: pipes and accept. */
+bool __vx_would_wait(int fd, unsigned events);
 void __vx_forget_fd(int fd);
 /* Directory handles' paths, for the *at calls (posix2.c). */
 void __vx_remember_dir(int fd, const char *path);
