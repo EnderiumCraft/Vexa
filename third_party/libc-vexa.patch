@@ -32,8 +32,8 @@ diff -ruN a/libc/src/unix/mod.rs b/libc/src/unix/mod.rs
      }
 diff -ruN a/libc/src/unix/vexa/mod.rs b/libc/src/unix/vexa/mod.rs
 --- a/libc/src/unix/vexa/mod.rs	1970-01-01 00:00:00.000000000 +0000
-+++ b/libc/src/unix/vexa/mod.rs	2026-10-11 20:10:15.587682808 +0000
-@@ -0,0 +1,474 @@
++++ b/libc/src/unix/vexa/mod.rs	2026-10-11 20:23:17.671664920 +0000
+@@ -0,0 +1,473 @@
 +//! Vexa (libvexa): the types and functions of Vexa's C library, as libc declares them.
 +//!
 +//! The layouts here follow libvexa's own headers (`libvexa/include`), not Linux's: libvexa
@@ -337,7 +337,6 @@ diff -ruN a/libc/src/unix/vexa/mod.rs b/libc/src/unix/vexa/mod.rs
 +pub const ETXTBSY: c_int = 26;
 +pub const EWOULDBLOCK: c_int = EAGAIN;
 +pub const O_NOFOLLOW: c_int = 0o400000;
-+pub const FIOCLEX: c_ulong = 0x5451;
 +pub const UTIME_OMIT: c_long = 1073741822;
 +pub const IP_MULTICAST_LOOP: c_int = 34;
 +pub const IP_DROP_MEMBERSHIP: c_int = 36;
