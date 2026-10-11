@@ -8,6 +8,7 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
+#include <vexa/abi.h>
 #include <vexa/syscall.h>
 #include <vexa/thread.h>
 #include "internal.h"
@@ -235,6 +236,7 @@ int pthread_sigmask(int how, const void *set, void *old) {
 int pthread_attr_init(pthread_attr_t *attr) {
     attr->stack_size = 0;
     attr->detached = 0;
+    attr->stack_base = NULL;
     return 0;
 }
 
@@ -248,6 +250,32 @@ int pthread_attr_setstacksize(pthread_attr_t *attr, size_t size) {
         return EINVAL;
     }
     attr->stack_size = size;
+    return 0;
+}
+
+int pthread_attr_getstack(const pthread_attr_t *attr, void **address, size_t *size) {
+    if (!attr->stack_base) {
+        return EINVAL;
+    }
+    *address = attr->stack_base;
+    *size = attr->stack_size;
+    return 0;
+}
+
+/* The stack a thread runs on: the mapping it was started on, or the main thread's,
+ * which the kernel maps below VX_STACK_TOP. */
+int pthread_getattr_np(pthread_t thread, pthread_attr_t *attr) {
+    if (!thread) {
+        thread = pthread_self();
+    }
+    if (thread == main_thread) {
+        attr->stack_base = (void *)(size_t)(VX_STACK_TOP - VX_STACK_SIZE);
+        attr->stack_size = VX_STACK_SIZE;
+    } else {
+        attr->stack_base = thread->stack;
+        attr->stack_size = thread->stack_size;
+    }
+    attr->detached = thread->detached;
     return 0;
 }
 

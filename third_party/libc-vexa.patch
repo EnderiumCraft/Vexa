@@ -32,8 +32,8 @@ diff -ruN a/libc/src/unix/mod.rs b/libc/src/unix/mod.rs
      }
 diff -ruN a/libc/src/unix/vexa/mod.rs b/libc/src/unix/vexa/mod.rs
 --- a/libc/src/unix/vexa/mod.rs	1970-01-01 00:00:00.000000000 +0000
-+++ b/libc/src/unix/vexa/mod.rs	2026-10-11 20:23:17.671664920 +0000
-@@ -0,0 +1,473 @@
++++ b/libc/src/unix/vexa/mod.rs	2026-10-11 21:23:28.923582322 +0000
+@@ -0,0 +1,474 @@
 +//! Vexa (libvexa): the types and functions of Vexa's C library, as libc declares them.
 +//!
 +//! The layouts here follow libvexa's own headers (`libvexa/include`), not Linux's: libvexa
@@ -89,6 +89,7 @@ diff -ruN a/libc/src/unix/vexa/mod.rs b/libc/src/unix/vexa/mod.rs
 +pub struct pthread_attr_t {
 +    pub stack_size: size_t,
 +    pub detached: c_int,
++    pub stack_base: *mut c_void,
 +}
 +
 +#[repr(C)]

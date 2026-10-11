@@ -1,3 +1,4 @@
+#include <vexa/abi.h>
 #include <vexa/arch.h>
 #include <vexa/cpu.h>
 #include <vexa/elf.h>
@@ -15,8 +16,8 @@
 
 /* The stack: an 8 MiB area just below the top of user memory, filled in as
  * it's used. The page under it stays unmapped, so overflowing it faults. */
-#define USER_STACK_TOP 0x00007ffffffff000ULL
-#define USER_STACK_SIZE (8ULL * 1024 * 1024)
+#define USER_STACK_TOP VX_STACK_TOP
+#define USER_STACK_SIZE VX_STACK_SIZE
 #define MAX_ARGUMENT_BYTES (128 * 1024)
 
 /* Auxiliary vector entries (what the Linux ABI passes a program at startup;

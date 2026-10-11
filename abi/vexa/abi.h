@@ -200,6 +200,11 @@ struct vx_device_info {
 #define VX_MAP_WRITE 0x1
 #define VX_MAP_EXEC 0x2
 
+/* The main thread's stack: VX_STACK_SIZE bytes below VX_STACK_TOP, mapped as the
+ * program starts and filled in as it's used. The page under it is unmapped. */
+#define VX_STACK_TOP 0x00007ffffffff000ULL
+#define VX_STACK_SIZE (8ULL * 1024 * 1024)
+
 /* vx_spawn flags. */
 #define VX_SPAWN_NEW_GROUP 0x1 /* Start a new process group (for a shell's jobs). */
 #define VX_SPAWN_JOIN_GROUP 0x2 /* Join the process group in vx_spawn.group. */

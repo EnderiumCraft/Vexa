@@ -16,6 +16,7 @@ typedef struct __vx_pthread *pthread_t;
 typedef struct {
     size_t stack_size;
     int detached;
+    void *stack_base; /* Set by pthread_getattr_np: the lowest address of the stack. */
 } pthread_attr_t;
 
 typedef struct {
@@ -99,6 +100,9 @@ int pthread_attr_setstacksize(pthread_attr_t *attr, size_t size);
 int pthread_attr_getstacksize(const pthread_attr_t *attr, size_t *size);
 int pthread_attr_setdetachstate(pthread_attr_t *attr, int state);
 int pthread_attr_getdetachstate(const pthread_attr_t *attr, int *state);
+/* A thread's stack: its lowest address and size (the main thread's is the kernel's). */
+int pthread_attr_getstack(const pthread_attr_t *attr, void **address, size_t *size);
+int pthread_getattr_np(pthread_t thread, pthread_attr_t *attr);
 
 int pthread_mutex_init(pthread_mutex_t *mutex, const pthread_mutexattr_t *attr);
 int pthread_mutex_destroy(pthread_mutex_t *mutex);
