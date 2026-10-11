@@ -1,18 +1,21 @@
 #!/usr/bin/env python3
 """Generates libc's declarations for Vexa from libvexa's C headers.
 
-    gen-vexa-libc.py libvexa/include OUT_DIR
+    gen-vexa-libc.py LIBVEXA_INCLUDE OUT_DIR LIBC_UNIX_MOD
 
 writes three Rust files into OUT_DIR (src/unix/vexa in libc's source tree):
 
   consts.rs   the integer #defines (octal, hex and decimal), as `pub const`
-  types.rs    the typedefs and structs (repr(C)), as libvexa lays them out
+  types.rs    the typedefs and structs (repr(C)), laid out as libvexa's headers lay them out
   fns.rs      the extern "C" prototypes
 
-The hand-written parts (the pthread, semaphore and stat layouts that libc needs
-in a particular shape, and the names libc defines itself) are in
-src/unix/vexa/mod.rs and are skipped here. Anything the generator cannot read
-is reported on stderr and left out, so the output is never a guess.
+LIBC_UNIX_MOD is libc's src/unix/mod.rs. The names its common Unix code already defines
+(size_t, DIR, FILE, ...) are read from there and never emitted again.
+
+The hand-written parts (the pthread, semaphore and stat layouts that libc needs in a
+particular shape, and the names libc defines itself) are in src/unix/vexa/mod.rs.
+Anything the generator cannot read, or that uses a type nothing defines, is reported
+on stderr and left out, so the output is never a guess.
 """
 import os
 import re
@@ -42,6 +45,16 @@ C_BASE = {
     "float": "c_float",
 }
 
+# The C99 fixed-width names, which Rust spells as primitives.
+STDINT = {
+    "int8_t": "i8", "int16_t": "i16", "int32_t": "i32", "int64_t": "i64",
+    "uint8_t": "u8", "uint16_t": "u16", "uint32_t": "u32", "uint64_t": "u64",
+    "intmax_t": "i64", "uintmax_t": "u64",
+}
+
+PRIMITIVES = {"u8", "u16", "u32", "u64", "i8", "i16", "i32", "i64", "usize", "isize",
+              "f32", "f64", "bool", "mut", "const"}
+
 RUST_KEYWORDS = {"type", "fn", "ref", "match", "loop", "move", "self", "in", "as", "use",
                  "mod", "impl", "where", "let", "mut", "const", "static", "struct", "enum",
                  "trait", "pub", "return", "crate", "super", "box", "dyn", "else", "if",
@@ -49,6 +62,8 @@ RUST_KEYWORDS = {"type", "fn", "ref", "match", "loop", "move", "self", "in", "as
 
 NAME_KEYWORDS = {"int", "char", "long", "short", "unsigned", "signed", "void", "double",
                  "float", "const", "volatile", "struct", "union", "enum"}
+
+QUALIFIERS = r"\b(const|volatile|restrict|__restrict|__restrict__|register|static|extern|inline)\b"
 
 
 def warn(msg):
@@ -60,8 +75,17 @@ def strip_comments(text):
     return re.sub(r"//[^\n]*", " ", text)
 
 
+def libc_common_names(path):
+    """Names libc's common Unix code defines: the generated code must not repeat them."""
+    text = open(path, errors="replace").read()
+    names = set(re.findall(r"^\s*pub\s+(?:type|struct|enum|union)\s+([A-Za-z_]\w*)", text, re.M))
+    names |= set(re.findall(r"extern_ty!\s*\{\s*pub\s+enum\s+([A-Za-z_]\w*)", text))
+    names |= set(re.findall(r"^\s*pub\s+(?:unsafe\s+)?(?:fn|const|static)\s+([A-Za-z_]\w*)", text, re.M))
+    return names
+
+
 def read_headers(root):
-    """All the headers libc needs, with C++ wrappers and #defines removed."""
+    """All the headers libc needs, with C++ wrappers and preprocessor lines removed."""
     texts = []
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
@@ -82,17 +106,30 @@ def read_headers(root):
                     elif skipping and re.match(r"#\s*endif", s):
                         skipping -= 1
                     continue
-                if skipping:
-                    continue
-                if 'extern "C"' in s:
+                if skipping or 'extern "C"' in s:
                     continue
                 lines.append(line)
             texts.append(strip_comments("".join(lines)))
     return "\n".join(texts)
 
 
+def define_pairs(root):
+    pat = re.compile(r"^\s*#\s*define\s+([A-Za-z_]\w*)\s+\(?(-?(?:0x[0-9a-fA-F]+|0[0-7]*|[1-9][0-9]*))[uUlL]*\)?\s*(?:/\*.*)?$")
+    out = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
+        for name in sorted(filenames):
+            if not name.endswith(".h"):
+                continue
+            for line in open(os.path.join(dirpath, name), errors="replace"):
+                m = pat.match(line)
+                if m:
+                    out.append((m.group(1), m.group(2)))
+    return out
+
+
 def parse_statements(text):
-    """Yields ('stmt', text), ('struct', head, body, trailing) for the top level."""
+    """Yields ('stmt', text) and ('struct', head, body, trailing) for the top level."""
     i, n = 0, len(text)
     buf = ""
     while i < n:
@@ -113,7 +150,7 @@ def parse_statements(text):
             k = text.find(";", j)
             trailing = text[j + 1:k] if k != -1 else text[j + 1:]
             if "(" in head or head == "":
-                # A function body (or an unnamed block): nothing to declare.
+                # A function body, or a block with nothing to declare.
                 i = j + 1
                 if text[i:i + 1] == ";":
                     i += 1
@@ -130,12 +167,14 @@ def parse_statements(text):
 
 
 def base_type(t):
-    t = re.sub(r"\b(const|volatile|restrict|register|static|extern|inline)\b", " ", t)
+    t = re.sub(QUALIFIERS, " ", t)
     t = re.sub(r"\s+", " ", t).strip()
     if t.startswith("struct "):
         return t[len("struct "):].strip()
     if t in C_BASE:
         return C_BASE[t]
+    if t in STDINT:
+        return STDINT[t]
     if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", t):
         return t
     raise ValueError("unknown type " + repr(t))
@@ -151,6 +190,14 @@ def map_type(t):
     return base_type(t)
 
 
+def check_names(rust_ty, known):
+    """Every type name in a mapped type must be defined: here, in libc, or a primitive."""
+    for name in re.findall(r"\b[A-Za-z_]\w*\b", rust_ty):
+        if name in PRIMITIVES or name.startswith("c_") or name in known:
+            continue
+        raise ValueError("undefined type " + name)
+
+
 def fix_name(name):
     return name + "_" if name in RUST_KEYWORDS else name
 
@@ -164,7 +211,7 @@ def eval_dim(dim, consts):
     raise ValueError("array size " + dim)
 
 
-def parse_struct(head, body, trailing, consts):
+def parse_struct(head, body, trailing, consts, known):
     m = re.fullmatch(r"(?:typedef\s+)?struct\s*([A-Za-z_]\w*)?", head)
     if not m:
         raise ValueError("struct head " + repr(head))
@@ -172,19 +219,19 @@ def parse_struct(head, body, trailing, consts):
     if not name:
         raise ValueError("anonymous struct")
     fields = []
-    for decl in re.split(r";", body):
+    for decl in body.split(";"):
         decl = decl.strip()
         if not decl:
             continue
-        if ":" in decl or "(" in decl or "{" in decl:
+        if ":" in decl or "(" in decl or "{" in decl or "}" in decl:
             raise ValueError("unsupported field " + repr(decl))
         parts = decl.split(",")
         first = parts[0].strip()
         mm = re.match(r"^(.*?)(\**)\s*([A-Za-z_]\w*)\s*((?:\[[^\]]*\])*)$", first)
         if not mm:
             raise ValueError("field " + repr(first))
-        base, stars, fname, dims = mm.group(1), mm.group(2), mm.group(3), mm.group(4)
-        decls = [(base, stars, fname, dims)]
+        base = mm.group(1)
+        decls = [(base, mm.group(2), mm.group(3), mm.group(4))]
         for extra in parts[1:]:
             em = re.match(r"^\s*(\**)\s*([A-Za-z_]\w*)\s*((?:\[[^\]]*\])*)\s*$", extra)
             if not em:
@@ -194,11 +241,12 @@ def parse_struct(head, body, trailing, consts):
             ty = map_type(base + " " + stars)
             for dim in re.findall(r"\[([^\]]*)\]", dims)[::-1]:
                 ty = "[%s; %d]" % (ty, eval_dim(dim, consts))
+            check_names(ty, known)
             fields.append("    pub %s: %s," % (fix_name(fname), ty))
     return name, "#[repr(C)]\npub struct %s {\n%s\n}\n" % (name, "\n".join(fields))
 
 
-def parse_function(stmt):
+def parse_function(stmt, known):
     stmt = re.sub(r"__attribute__\s*\(\([^()]*\)\)", " ", stmt).strip()
     stmt = re.sub(r"^extern\s+", "", stmt).strip()
     noreturn = "noreturn" in stmt
@@ -208,10 +256,10 @@ def parse_function(stmt):
     ret, name, args = m.group(1).strip(), m.group(2), m.group(3).strip()
     if "(" in args or ")" in args or re.search(r"\b(typedef|struct\s*\{)", args):
         return None
-    if re.search(r"\b(typedef|static)\b", ret) or not ret:
+    if re.search(r"\b(typedef|static|inline)\b", ret) or not ret:
         return None
-    if re.search(r"\binline\b", ret):
-        return None
+    if re.search(r"\bva_list\b", args):
+        raise ValueError("takes a va_list")
     rust_args = []
     if args and args != "void":
         for i, arg in enumerate(args.split(",")):
@@ -219,13 +267,15 @@ def parse_function(stmt):
             if arg == "...":
                 rust_args.append("...")
                 continue
-            arg = re.sub(r"([A-Za-z_]\w*)\s*\[\s*\]", r"*\1", arg)
+            arg = re.sub(r"([A-Za-z_]\w*)\s*\[[^\]]*\]", r"*\1", arg)
             am = re.match(r"^(.*?)([A-Za-z_]\w*)$", arg)
-            if arg.endswith("*") or not am or am.group(2) in NAME_KEYWORDS or not am.group(1).strip() and am.group(2) not in C_BASE:
+            if arg.endswith("*") or not am or am.group(2) in NAME_KEYWORDS or (not am.group(1).strip() and am.group(2) not in C_BASE):
                 ty = map_type(arg)
+                check_names(ty, known)
                 rust_args.append("a%d: %s" % (i, ty))
             else:
                 ty = map_type(am.group(1))
+                check_names(ty, known)
                 rust_args.append("%s: %s" % (fix_name(am.group(2)), ty))
     if noreturn:
         rty = "!"
@@ -233,6 +283,7 @@ def parse_function(stmt):
         rty = None
     else:
         rty = map_type(ret)
+        check_names(rty, known)
     sig = "pub fn %s(%s)" % (name, ", ".join(rust_args))
     if rty:
         sig += " -> " + rty
@@ -240,18 +291,15 @@ def parse_function(stmt):
 
 
 def main():
-    root, outdir = sys.argv[1], sys.argv[2]
+    root, outdir, libc_unix = sys.argv[1], sys.argv[2], sys.argv[3]
     text = read_headers(root)
+    common = libc_common_names(libc_unix)
 
     consts = {}
     const_lines = []
-    raw = open_all_defines(root)
-    for name, val in raw:
+    for name, val in define_pairs(root):
         try:
-            if re.fullmatch(r"-?0[0-7]+", val):
-                n = int(val, 8)
-            else:
-                n = int(val, 0)
+            n = int(val, 8) if re.fullmatch(r"-?0[0-7]+", val) else int(val, 0)
         except ValueError:
             continue
         if name in consts:
@@ -261,55 +309,56 @@ def main():
         const_lines.append("pub const %s: %s = %d;" % (name, ty, n))
 
     types, fns = [], []
-    seen_types = set()
+    defined = set(HAND)
     for item in parse_statements(text):
         if item[0] == "struct":
             _, head, body, trailing = item
             try:
-                name, code = parse_struct(head, body, trailing, consts)
+                name, code = parse_struct(head, body, trailing, consts, common | defined)
             except ValueError as e:
                 warn("skipped struct %s: %s" % (head or trailing, e))
                 continue
-            if name in HAND or name in seen_types:
+            if name in common or name in defined:
                 continue
-            seen_types.add(name)
+            defined.add(name)
             types.append(code)
             continue
         stmt = item[1]
         if not stmt or stmt.startswith("#"):
             continue
         if stmt.startswith("typedef"):
+            if "(" in stmt:
+                continue
             tm = re.match(r"^typedef\s+(.*?)\s+([A-Za-z_]\w*)$", stmt, flags=re.S)
-            if not tm or "(" in stmt:
+            if not tm:
                 continue
             name = tm.group(2)
-            if name in HAND or name in seen_types:
+            if name in common or name in defined:
                 continue
             try:
                 ty = map_type(tm.group(1))
+                check_names(ty, common | defined)
             except ValueError as e:
                 warn("skipped typedef %s: %s" % (name, e))
                 continue
-            seen_types.add(name)
+            defined.add(name)
             types.append("pub type %s = %s;" % (name, ty))
             continue
         if re.match(r"^(enum|union)\b", stmt):
             continue
         try:
-            fp = parse_function(stmt)
+            fp = parse_function(stmt, common | defined)
         except ValueError as e:
             warn("skipped function: %s (%s)" % (stmt[:60].replace("\n", " "), e))
             continue
         if fp:
             name, decl = fp
-            if name in HAND or name in consts:
+            if name in common or name in consts:
                 continue
             fns.append(decl)
-        elif "(" in stmt and not stmt.startswith("extern \"C\""):
-            warn("skipped declaration: %s" % stmt[:80].replace("\n", " "))
 
     header = ("// Generated by tools/rust/gen-vexa-libc.py from libvexa's headers. Do not edit.\n\n"
-              "use crate::prelude::*;\nuse super::*;\n\n")
+              "use crate::prelude::*;\nuse crate::unix::*;\nuse super::*;\n\n")
     os.makedirs(outdir, exist_ok=True)
     with open(os.path.join(outdir, "consts.rs"), "w") as f:
         f.write(header + "\n".join(const_lines) + "\n")
@@ -318,21 +367,6 @@ def main():
     with open(os.path.join(outdir, "fns.rs"), "w") as f:
         f.write(header + 'extern "C" {\n' + "\n".join("    " + d for d in fns) + "\n}\n")
     print("%d constants, %d types, %d functions" % (len(const_lines), len(types), len(fns)))
-
-
-def open_all_defines(root):
-    pat = re.compile(r"^\s*#\s*define\s+([A-Za-z_]\w*)\s+\(?(-?(?:0x[0-9a-fA-F]+|0[0-7]*|[1-9][0-9]*))[uUlL]*\)?\s*(?:/\*.*)?$")
-    out = []
-    for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
-        for name in sorted(filenames):
-            if not name.endswith(".h"):
-                continue
-            for line in open(os.path.join(dirpath, name), errors="replace"):
-                m = pat.match(line)
-                if m:
-                    out.append((m.group(1), m.group(2)))
-    return out
 
 
 if __name__ == "__main__":
