@@ -12,6 +12,8 @@
 #   tls-probe.rs     rustls over loopback, with ring as its crypto provider and a
 #                    self-signed certificate made in the probe
 #   hyper-probe.rs   hyper's HTTP/1 client and server over loopback, on tokio
+#   https-probe.rs   the CA bundle in /etc/ssl/certs as rustls's trust store: a self-signed
+#                    server is refused, and example.com is fetched over HTTPS
 #
 # WORKDIR is the directory build-std-vexa.sh made. Its crates/ and probes are recreated on
 # each run. The probes share one target directory, so std is built once.
@@ -158,3 +160,24 @@ tokio = { path = "$work/crates/tokio-1.53.2" }
 EOF2
 cp "$here/hyper-probe.rs" "$work/probe-hyper/src/main.rs"
 build_probe "$work/probe-hyper"
+
+echo "== probe 5: the CA bundle as the trust store: an untrusted server, then example.com over HTTPS"
+rm -rf "$work/probe-https"
+mkdir -p "$work/probe-https/src"
+cat > "$work/probe-https/Cargo.toml" <<EOF2
+[package]
+name = "probe-https"
+version = "0.0.0"
+edition = "2021"
+
+[dependencies]
+rustls = { version = "=0.23.45", default-features = false, features = ["ring", "std", "tls12"] }
+rcgen = { version = "=0.14.10", default-features = false, features = ["ring", "pem"] }
+
+[patch.crates-io]
+$(patch_libc)
+ring = { path = "$work/crates/ring-0.17.14" }
+getrandom02 = { package = "getrandom", path = "$work/crates/getrandom-0.2.17" }
+EOF2
+cp "$here/https-probe.rs" "$work/probe-https/src/main.rs"
+build_probe "$work/probe-https"

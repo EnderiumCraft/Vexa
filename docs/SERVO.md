@@ -58,8 +58,11 @@ lands.
       (0.2 and 0.3), `mio` 1.2.4 on its `poll(2)` selector with the pipe waker, `socket2`,
       `tokio` 1.53 (runtime, timer, TCP), `rustls` 0.23 with `ring` 0.17 as the crypto
       provider (a TLS handshake over loopback, with a self-signed certificate made in the
-      probe), and `hyper` 1.12's HTTP/1 client and server over loopback. Still open: how
-      rustls trusts real sites, the 64-handle `poll` limit, and `dlopen`, which is not probed.
+      probe), and `hyper` 1.12's HTTP/1 client and server over loopback. rustls trusts the
+      system's CA bundle, `/etc/ssl/certs/ca-certificates.crt` (121 roots): a self-signed
+      server is refused, and a leaf signed by a CA added to those roots is accepted. Still
+      open: a real site (this sandbox gives the VM no DNS answer), the 64-handle `poll`
+      limit, and `dlopen`, which is not probed.
 
       ```sh
       PATH=$PWD/build/sdk/vexa-sdk/bin:$PATH sh tools/rust/build-std-vexa.sh WORKDIR
@@ -68,8 +71,9 @@ lands.
 
       The crates get their Vexa edits from [`tools/rust/crates-vexa-glue.py`](../tools/rust/crates-vexa-glue.py).
       The probes are [`crates-probe.rs`](../tools/rust/crates-probe.rs) (mio),
-      [`tokio-probe.rs`](../tools/rust/tokio-probe.rs), [`tls-probe.rs`](../tools/rust/tls-probe.rs)
-      and [`hyper-probe.rs`](../tools/rust/hyper-probe.rs).
+      [`tokio-probe.rs`](../tools/rust/tokio-probe.rs), [`tls-probe.rs`](../tools/rust/tls-probe.rs),
+      [`hyper-probe.rs`](../tools/rust/hyper-probe.rs) and
+      [`https-probe.rs`](../tools/rust/https-probe.rs).
 
 ## What the probes found
 
@@ -136,11 +140,9 @@ lands.
 1. **M1, `std` on Vexa.** Done. The probe prints, and a `std` program has run threads, a
    file, and an environment variable in the VM.
 2. **M2, Servo's leaf crates.** Nearly done. The crates above all run in the VM, with
-   std's `Instant` for time. Still open: rustls needs a trust store for real sites (a
-   `webpki-roots` build embeds Mozilla's roots, so no file read is needed; or read
-   `/etc/ssl/certs/ca-certificates.crt`, which the TLS phase installs), the 64-handle `poll`
-   limit, and `dlopen`, which libvexa
-   has but nothing has probed.
+   std's `Instant` for time. rustls trusts `/etc/ssl/certs/ca-certificates.crt`. Still open:
+   a real HTTPS fetch (this sandbox's VM gets no DNS answer, so the probe reports that), the
+   64-handle `poll` limit, and `dlopen`, which libvexa has but nothing has probed.
 3. **M3, SpiderMonkey on Vexa.** Port the `mozjs_sys` build (a target config for Vexa, and
    the C++ runtime from the libc++ work in Phase 67).
 4. **M4, GL for WebRender.** Give surfman a software GL context on Vexa, from OSMesa
@@ -152,7 +154,7 @@ lands.
 
 ## Next step
 
-Close out M2: choose the trust store for rustls, probe `dlopen`, and fix the 64-handle `poll`
-limit (a server with more than 64 connections will fail). Also decide what `setsockopt`
-should do with options it accepts and ignores. Then M3, SpiderMonkey, which needs its build
-read before anything else can be sized.
+Close out M2: probe `dlopen`, fix the 64-handle `poll` limit (a server with more than 64
+connections will fail), and decide what `setsockopt` should do with options it accepts and
+ignores. Then M3, SpiderMonkey, which needs its build read before anything else can be sized.
+A real HTTPS fetch needs a VM that resolves names, and this sandbox can't provide one.
