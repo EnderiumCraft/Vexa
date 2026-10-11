@@ -5,7 +5,8 @@
 
 writes three Rust files into OUT_DIR (src/unix/vexa in libc's source tree):
 
-  consts.rs   the integer #defines (octal, hex and decimal), as `pub const`
+  consts.rs   the integer #defines (octal, hex and decimal), and the null-pointer ones
+              such as RTLD_DEFAULT, as `pub const`
   types.rs    the typedefs and structs (repr(C)), laid out as libvexa's headers lay them out
   fns.rs      the extern "C" prototypes
 
@@ -126,6 +127,22 @@ def define_pairs(root):
                 if m:
                     out.append((m.group(1), m.group(2)))
     return out
+
+
+def null_defines(root):
+    """The names defined as a null pointer, such as RTLD_DEFAULT ((void *)0)."""
+    pat = re.compile(r"^\s*#\s*define\s+([A-Za-z_]\w*)\s+\(\(void\s*\*\)\s*0\)\s*(?:/\*.*)?$")
+    out = set()
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
+        for name in sorted(filenames):
+            if not name.endswith(".h"):
+                continue
+            for line in open(os.path.join(dirpath, name), errors="replace"):
+                m = pat.match(line)
+                if m:
+                    out.add(m.group(1))
+    return sorted(out)
 
 
 def parse_statements(text):
@@ -320,6 +337,8 @@ def main():
         consts[name] = n
         ty = const_type(name, n)
         const_lines.append("pub const %s: %s = %d;" % (name, ty, n))
+    for name in null_defines(root):
+        const_lines.append("pub const %s: *mut core::ffi::c_void = core::ptr::null_mut();" % name)
 
     types, fns = [], []
     defined = set(HAND)
