@@ -1,6 +1,6 @@
 diff -ruN -x .cargo-ok -x consts.rs -x types.rs -x fns.rs -x '*.orig' a/libc/src/new/mod.rs b/libc/src/new/mod.rs
---- a/libc/src/new/mod.rs	2026-10-11 19:39:51.321711891 +0000
-+++ b/libc/src/new/mod.rs	2026-10-11 19:39:51.340316866 +0000
+--- a/libc/src/new/mod.rs	2026-10-11 19:41:16.605411006 +0000
++++ b/libc/src/new/mod.rs	2026-10-11 19:41:16.620639929 +0000
 @@ -125,6 +125,9 @@
      } else if #[cfg(target_os = "vxworks")] {
          mod vxworks;
@@ -13,13 +13,13 @@ diff -ruN -x .cargo-ok -x consts.rs -x types.rs -x fns.rs -x '*.orig' a/libc/src
          // pub(crate) use wasi::*;
 diff -ruN -x .cargo-ok -x consts.rs -x types.rs -x fns.rs -x '*.orig' a/libc/src/new/vexa/mod.rs b/libc/src/new/vexa/mod.rs
 --- a/libc/src/new/vexa/mod.rs	1970-01-01 00:00:00.000000000 +0000
-+++ b/libc/src/new/vexa/mod.rs	2026-10-11 19:39:51.342965117 +0000
++++ b/libc/src/new/vexa/mod.rs	2026-10-11 19:41:16.622359938 +0000
 @@ -0,0 +1,2 @@
 +//! Vexa's C library (libvexa), as libc's Rust declarations.
 +pub(crate) use super::common::posix::unistd;
 diff -ruN -x .cargo-ok -x consts.rs -x types.rs -x fns.rs -x '*.orig' a/libc/src/unix/mod.rs b/libc/src/unix/mod.rs
---- a/libc/src/unix/mod.rs	2026-10-11 19:39:51.330542147 +0000
-+++ b/libc/src/unix/mod.rs	2026-10-11 19:39:51.351894589 +0000
+--- a/libc/src/unix/mod.rs	2026-10-11 19:41:16.612836021 +0000
++++ b/libc/src/unix/mod.rs	2026-10-11 19:41:16.628319944 +0000
 @@ -1923,6 +1923,9 @@
      } else if #[cfg(target_os = "nuttx")] {
          mod nuttx;
@@ -32,8 +32,8 @@ diff -ruN -x .cargo-ok -x consts.rs -x types.rs -x fns.rs -x '*.orig' a/libc/src
      }
 diff -ruN -x .cargo-ok -x consts.rs -x types.rs -x fns.rs -x '*.orig' a/libc/src/unix/vexa/mod.rs b/libc/src/unix/vexa/mod.rs
 --- a/libc/src/unix/vexa/mod.rs	1970-01-01 00:00:00.000000000 +0000
-+++ b/libc/src/unix/vexa/mod.rs	2026-10-11 19:39:51.353419614 +0000
-@@ -0,0 +1,443 @@
++++ b/libc/src/unix/vexa/mod.rs	2026-10-11 19:41:16.629407931 +0000
+@@ -0,0 +1,445 @@
 +//! Vexa (libvexa): the types and functions of Vexa's C library, as libc declares them.
 +//!
 +//! The layouts here follow libvexa's own headers (`libvexa/include`), not Linux's: libvexa
@@ -149,6 +149,8 @@ diff -ruN -x .cargo-ok -x consts.rs -x types.rs -x fns.rs -x '*.orig' a/libc/src
 +pub struct pthread_barrierattr_t {
 +    pub unused: c_int,
 +}
++
++pub type stat64 = stat;
 +
 +#[repr(C)]
 +#[derive(Copy, Clone)]

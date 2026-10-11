@@ -39,6 +39,15 @@ EDITS = [
     ("sys/fs/unix.rs",
      '    target_os = "wasi",\n)))]\npub struct DirEntry {\n',
      '    target_os = "wasi",\n    target_os = "vexa",\n)))]\npub struct DirEntry {\n'),
+    ("sys/fs/unix.rs",
+     '    target_os = "wasi",\n))]\npub struct DirEntry {\n',
+     '    target_os = "wasi",\n    target_os = "vexa",\n))]\npub struct DirEntry {\n'),
+    ("os/linux/mod.rs",
+     'pub mod process;\n',
+     '#[cfg(target_os = "linux")]\npub mod process;\n'),
+    ("os/mod.rs",
+     '#[cfg(any(target_os = "linux", target_os = "android", target_os = "cygwin", doc))]\nmod net;\n',
+     '#[cfg(any(target_os = "linux", target_os = "vexa", target_os = "android", target_os = "cygwin", doc))]\nmod net;\n'),
     ("sys/args/unix.rs",
      '    target_os = "nuttx",\n))]\nmod imp {\n',
      '    target_os = "nuttx",\n    target_os = "vexa",\n))]\nmod imp {\n'),
@@ -63,6 +72,10 @@ def main():
     for rel, old, new in EDITS:
         path = os.path.join(library, "std", "src", rel)
         text = open(path).read()
+        if text.count(new) >= 1:
+            # Checked first: some new texts contain their old text.
+            print("already applied:", rel)
+            continue
         count = text.count(old)
         if count != 1:
             sys.exit("std-vexa-glue: %s: expected the text once, found %d times" % (rel, count))
