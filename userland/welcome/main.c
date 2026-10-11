@@ -304,13 +304,6 @@ static void copy_rect(struct vx_surface *to, const struct vx_surface *from, int 
     }
 }
 
-/* A glass bubble in the wallpaper (in pixels): a lit crescent at the top-left. */
-static void bubble(int cx, int cy, int r) {
-    vx_fill_rounded(&backdrop, cx - r, cy - r, 2 * r, 2 * r, r, 0xffffff, 20);
-    vx_fill_rounded(&backdrop, cx - r + r / 6, cy - r + r / 6, 2 * r - r / 3, 2 * r - r / 3, r, 0xffffff, 12);
-    vx_fill_rounded(&backdrop, cx - r * 3 / 5, cy - r * 3 / 5, r * 2 / 5, r / 4, r / 8, 0xffffff, 140);
-}
-
 static struct vx_settings desk; /* Read again after each change (and not for every look at it). */
 
 static void reload_settings(void) {
@@ -330,7 +323,7 @@ static const char *setting(const char *key, const char *fallback) {
     return vx_settings_get(&desk, key, fallback);
 }
 
-/* The backdrop (the wallpaper chosen, with bubbles, a glow and the card's shadow),
+/* The backdrop (the wallpaper chosen, with a glow and the card's shadow),
  * the greeting's (the same, dimmed), the card's frosted glass (that part of the
  * backdrop, blurred, in the window's color, with a light from the top), and the
  * sidebar. */
@@ -371,18 +364,6 @@ static void make_scenery(void) {
     } else {
         for (int y = 0; y < win_h; y++) {
             vx_fill(&backdrop, 0, y, win_w, 1, vx_mix(top, bottom, y * 255 / (win_h - 1)));
-        }
-    }
-    /* A few glass bubbles, where the card isn't. */
-    static const struct {
-        int x, y, r; /* Percent of the window, and the radius in design units. */
-    } bubbles[] = {{9, 16, 40}, {19, 62, 24}, {5, 86, 50}, {88, 10, 22}, {93, 44, 34}, {84, 88, 60}, {34, 93, 14}};
-    for (unsigned i = 0; i < sizeof(bubbles) / sizeof(bubbles[0]); i++) {
-        int cx = win_w * bubbles[i].x / 100, cy = win_h * bubbles[i].y / 100, r = u(bubbles[i].r);
-        bool over = cx + r > card_x - 16 && cx - r < card_x + real_card_w + 16 && cy + r > card_y - 16 &&
-                    cy - r < card_y + real_card_h + 16;
-        if (!over && cx - r >= 0 && cy - r >= 0 && cx + r < win_w && cy + r < win_h) {
-            bubble(cx, cy, r);
         }
     }
     /* The greeting's: dimmed, and a little more towards the bottom. */
