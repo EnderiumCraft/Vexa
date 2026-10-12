@@ -11,13 +11,15 @@
 #   third_party/mozjs-sys-vexa.patch  mozjs_sys 153.3.0-1 (SpiderMonkey), and
 #   third_party/mozjs-vexa.patch      the SpiderMonkey tree inside it
 #   third_party/crates-vexa.patch     mio, socket2, tokio, getrandom and ring
-# The program is tools/servo/servo-render. It loads a local HTML file, writes the frame to a
-# PNG, and prints "servo-render: passed" when the page's pixels are right.
+# The programs are in tools/servo/servo-render. servo-render loads a local HTML file, writes the
+# frame to a PNG, and prints "servo-render: passed" when the page's pixels are right.
+# servo-window opens a window on the Vexa desktop and shows the page in it.
 #
 #   build-servo-vexa.sh WORKDIR [--prepare-only]
 #
-# Output: WORKDIR/servo-render, a stripped x86_64-unknown-vexa executable. With
-# --prepare-only, the sources are made (WORKDIR/crates and WORKDIR/app) and nothing is built.
+# Output: WORKDIR/servo-render and WORKDIR/servo-window, stripped x86_64-unknown-vexa
+# executables. With --prepare-only, the sources are made (WORKDIR/crates and WORKDIR/app) and
+# nothing is built.
 # Needs: the vexa-std toolchain (tools/rust/build-std-vexa.sh), the SDK (build/sdk/vexa-sdk),
 # clang 19 as the host compiler (HOST_CC and HOST_CXX; they default to /usr/lib/llvm-19), the
 # repo's zlib for Vexa (make build/zlib-native/libz.a: freetype-sys builds FreeType and libpng
@@ -97,5 +99,7 @@ export MOZBUILD_STATE_PATH="$work/state"
 export BINDGEN_EXTRA_CLANG_ARGS="-nostdinc++ -isystem $sdk/include/c++/v1 -nostdinc -isystem $sdk/include -isystem $llvm_lib/clang/19/include"
 (cd "$work/app" && cargo +vexa-std build --target "$target" -Zbuild-std=core,alloc,std,panic_abort)
 
-strip -o "$work/servo-render" "$work/app/target/x86_64-unknown-vexa/debug/servo-render"
-echo "built $work/servo-render"
+for program in servo-render servo-window; do
+    strip -o "$work/$program" "$work/app/target/x86_64-unknown-vexa/debug/$program"
+done
+echo "built $work/servo-render and $work/servo-window"

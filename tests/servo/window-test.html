@@ -1,0 +1,41 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>window test</title>
+<!-- servo-window checks this page: each event sets the title, and the program prints each
+     title it gets. A press, a typed key, a wheel turn, and a scroll or resize (which show in
+     the title from the animation frames) each show up that way. -->
+<style>
+  html, body { margin: 0; background: #ff8000; }
+  #square { position: absolute; left: 0; top: 0; width: 100px; height: 100px; background: #0000ff; }
+  #field { position: absolute; left: 200px; top: 200px; width: 300px; height: 30px; font-size: 16px; }
+  #marker { position: absolute; left: 0; top: 2000px; width: 100px; height: 100px; background: #800080; }
+  #spacer { height: 3000px; }
+  #spin { position: absolute; right: 0; bottom: 0; width: 10px; height: 10px; background: #ffffff;
+          animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+<div id="square"></div>
+<input id="field" type="text">
+<div id="marker"></div>
+<div id="spacer"></div>
+<div id="spin"></div>
+<script>
+  addEventListener('mousedown', e => { document.title = `mousedown ${e.clientX},${e.clientY}`; });
+  addEventListener('keydown', e => { document.title = `key ${e.key}`; });
+  document.getElementById('field').addEventListener('input', e => {
+    document.title = `typed ${e.target.value}`;
+  });
+  addEventListener('wheel', e => { document.title = `wheel ${e.deltaY}`; });
+  // The scroll offset and the viewport change during rendering, which only runs while the page
+  // animates (the spinning square keeps it animating). So the page checks them on each frame.
+  let shown = '';
+  function check() {
+    const now = `scroll ${Math.round(scrollY)} size ${innerWidth}x${innerHeight}`;
+    if (now !== shown) {
+      shown = now;
+      document.title = now;
+    }
+    requestAnimationFrame(check);
+  }
+  requestAnimationFrame(check);
+</script>
