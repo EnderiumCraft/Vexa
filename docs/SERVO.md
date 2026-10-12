@@ -212,14 +212,17 @@ lands.
      [`tests/servo/render-test.html`](../tests/servo/render-test.html) through `file://`, paints
      it, reads the frame back through `SoftwareRenderingContext`, and checks the pixels (orange,
      with a blue square in the top-left corner). It prints `servo-render: passed` in the VM.
-   - **A window.** [`servo-window`](../tools/servo/servo-render/src/bin/servo-window.rs) opens a
-     libvexa window and paints the page into it. The pointer (press and wheel), the keyboard
-     (typed text into a field) and the window's resize go to the `WebView`. The window test,
-     [`tools/servo/run-window-test.py`](../tools/servo/run-window-test.py) with
+   - **A window: Vane.** [`vane`](../tools/servo/servo-render/src/bin/vane) is the browser (the
+     user guide has its keys). It opens a libvexa window with tabs, Back, Forward and Reload, an
+     address bar and the page below, and paints each frame Servo finishes into the window. The
+     pointer (press and wheel), the keyboard and the window's resize go to the `WebView`. The
+     window test, [`tools/servo/run-window-test.py`](../tools/servo/run-window-test.py) with
      [`tests/servo/window-test.html`](../tests/servo/window-test.html), drives each through the
-     desktop in the VM. The page sets its title on each event, and the program prints each
-     title, so the log shows the events arrive: `mousedown 250,215`, `typed hi`, `wheel 40`,
-     `scroll 40`, and the resize.
+     desktop in the VM. The page sets its title on each event, and Vane prints each title, so
+     the log shows the events arrive: `mousedown 350,215`, `typed hi`, `wheel 40`, `scroll 40`,
+     and the resize. The sources are in `src/bin/vane`: `main.rs` (the window, tabs, events),
+     `ffi.rs` (libvexa's drawing), `tab.rs` (a tab, and what its page tells the program),
+     `address.rs` (editing the address) and `nav.rs` (what the typed text means).
 
    Both are built by [`tools/servo/build-servo-vexa.sh`](../tools/servo/build-servo-vexa.sh).
    Servo's crates need [`third_party/servo-vexa.patch`](../third_party/servo-vexa.patch): no
@@ -259,32 +262,45 @@ lands.
      display list from the old fragment tree. [`third_party/servo-vexa.patch`](../third_party/servo-vexa.patch)
      adds `Relayout` to the damage when the device changed (`servo-layout-0.7.0/layout_impl.rs`).
      With it the window test's page fills the maximized window.
-   - **Painting is slow in the VM.** A frame takes seconds in the debug build under QEMU's
+   - **Painting is slow in the VM.** A frame takes seconds in a debug build under QEMU's
      emulation, so a page's title (set by its script) comes well before the first frame with its
      pixels. The first screenshots of these tests were taken too early and looked like a
-     compositing bug. `servo-window` now prints `servo-window: corner #rrggbb` when the page's
-     top-left pixel changes and `servo-window: edge #rrggbb at WIDTH` when its top-right pixel or
-     width changes, and the window and address tests wait for them before the screenshot.
-   - **The address bar.** [`servo-window`](../tools/servo/servo-render/src/bin/servo-window.rs)
-     has a 40-pixel bar on top, drawn with libvexa's toolbar and text field. A click on it, or
-     Ctrl+L, takes the keyboard; the first typed character replaces the address; Enter loads it
-     (an address without a scheme is https); Escape or a click on the page gives the keyboard back.
-     [`tools/servo/run-address-test.py`](../tools/servo/run-address-test.py) passes in the VM: it
-     clicks the bar, types the address of `window-test.html` one key at a time, and checks the
-     navigation, the page's title and that its blue corner is painted. The window keeps repainting
-     every 250 ms as well. A navigation opens a new `WebView`.
-   - The window test ([`run-window-test.py`](../tools/servo/run-window-test.py)) passes with the
-     bar: the page is 800x560, and 1278x704 after the resize.
-6. **M6, integration.** An app bundle, a desktop entry, tests and docs, and the sandbox
-   decision (`gaol` does not support Vexa).
+     compositing bug. Vane prints `vane: corner #rrggbb` when the page's top-left pixel changes
+     and `vane: edge #rrggbb at WIDTH` when its top-right pixel or width changes, and the tests
+     wait for them before the screenshot. Vane is built optimised (`build-servo-vexa.sh` passes
+     `--release`), which is much faster.
+   - **The std must match libvexa.** The first optimised build crashed at startup: a write
+     through a null pointer in `std::thread::spawn`, after `Thread::new` returned. The kernel's
+     fault report (it prints the registers) showed `rbx` zero and nothing else wrong: the saved
+     `rbx` in `Thread::new`'s frame had been overwritten. `pthread_attr_init` zeroes the three
+     fields of libvexa's `pthread_attr_t` (`stack_base` came with `pthread_getattr_np`), and the
+     std of the toolchain in use had been built before that, with a two-field struct and a frame
+     16 bytes too small. A debug build had padding there and never showed it. The repository's
+     `third_party/libc-vexa.patch` is right; the toolchain has to be rebuilt from it
+     (`tools/rust/build-std-vexa.sh`) whenever libvexa's headers change.
+   - **Tabs, the address bar and navigation.** Vane's address bar edits the text (cursor,
+     selection, the clipboard), takes an address or words to search for, and Enter loads it in
+     the tab. [`run-address-test.py`](../tools/servo/run-address-test.py) clicks the bar, types
+     the address of `window-test.html` one key at a time, and checks the navigation, the page's
+     title and that its blue corner is painted. [`run-tabs-test.py`](../tools/servo/run-tabs-test.py)
+     opens a second tab with Ctrl+T, loads a page in it, moves between the tabs with Ctrl+1 and
+     Ctrl+2, zooms, closes the tab with Ctrl+W, and goes back and forward with Alt+Left and
+     Alt+Right.
+6. **M6, integration.** Done except for the sandbox decision (`gaol` does not support Vexa).
+   `apps/Vane.vxapp` (icon made by `tools/make-vane-icon.py`, the start page) and the
+   Makefile: `make vane` builds the program, and the ISO keeps it on the boot CD
+   (`/cdrom/vane/vane`, like Doom's game files, as it is about 60 MB) and has the app and
+   `/bin/vane` when it was built.
 
 ## Next step
 
 The browser, which is the goal:
 
-- Names in the VM (a resolver, or `/etc/hosts`), so `https` works on real sites and not only by
-  address.
-- Then M6: an app bundle, a desktop entry, tests, and the docs.
+- Names: libvexa resolves with the DHCP server's DNS and `/etc/hosts`, so `https` works on real
+  sites where the network has DNS (QEMU's user network uses the host's); the test sandbox has
+  none, so the HTTPS test uses an address.
+- Prompt dialogs (`prompt()`), file pickers, colour pickers and the page's context menu are not
+  shown yet (they are cancelled); downloads, find in page and bookmarks do not exist.
 
 Two crashes seen in `servo-window` (a page fault reading the CA bundle at startup, and one writing a
 GPU buffer after a navigation) came about once in every 4 to 10 starts. The cause was in the
