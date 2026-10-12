@@ -226,14 +226,23 @@ lands.
    sandbox (gaol is left out on Vexa, and multiprocess is off), no ICU, ring for TLS and
    WebCrypto, in-process IPC, FreeType fonts, `navigator.platform` as `Vexa`, and inventory's
    constructors, which the default resources need. surfman's OSMesa context is current from its
-   creation, because glow reads the GL version before a surface is bound. Still missing: loading
-   over `net`, and the JIT and intl. Backtraces are empty, as there is no unwinder.
+   creation, because glow reads the GL version before a surface is bound. Still missing: `https`,
+   and the JIT and intl. Backtraces are empty, as there is no unwinder.
    - **Text.** Servo's font list on Vexa ([`servo-fonts`' `vexa` module](../third_party/servo-vexa.patch))
      reads the TrueType and OpenType files in `/share/fonts`, the DejaVu faces that libvexa's
      text uses, through FreeType. A test page's text gets a width, and its render is painted:
      [`tests/servo/font-test.html`](../tests/servo/font-test.html) sets its title to `fonts ok`,
      and the same VM run (`tools/servo/run-render-test.py`) checks that title and the image
      (`Hello from Vexa`, in DejaVu Sans).
+   - **Loading over HTTP.** `servo-render` loads an `http://` page through Servo's `net` crate.
+     [`tools/servo/run-net-test.py`](../tools/servo/run-net-test.py) serves `tests/servo` on the
+     host, and the VM loads `http://10.0.2.2:8765/font-test.html` (10.0.2.2 is the host, from the
+     VM's user-mode network); the page's title must be `fonts ok`. The first load failed in
+     hyper-util's connector: socket2 reads a socket's flags with `fcntl(F_GETFL)`, and libvexa
+     answered `EBADF`, because it stat'd the handle as a file. A socket is not a file, so
+     [`libvexa/src/posix.c`](../libvexa/src/posix.c) now reports the socket's own non-blocking
+     state. The VM does not resolve names yet, so the test uses the address. `https` is not
+     done: it needs the CA bundle and the host name checks.
 
    **Known issue: a resized window paints a narrow frame.** After a resize, Servo lays the page
    out at the new size (the page's `innerWidth` is the new width), and the frame that
@@ -252,6 +261,6 @@ The browser, which is the goal:
 
 - Fix the resize: find why the drawn width lags after `OSMesaMakeCurrent` changes size, in
   `third_party/surfman-vexa.patch` or in Mesa's `osmesa.c` (`tools/build-mesa-vexa.sh`).
-- An address bar, and loading `http` and `https` through Servo's `net`, with the CA bundle
-  M2 checked. This needs a VM that resolves names.
+- An address bar, and `https` through Servo's `net`, with the CA bundle M2 checked. Names
+  need a VM that resolves them; `http` already loads by address.
 - Then M6: an app bundle, a desktop entry, tests, and the docs.
