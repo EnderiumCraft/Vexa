@@ -16,6 +16,7 @@ use std::error::Error;
 use std::ffi::CString;
 use std::os::raw::{c_char, c_int, c_long, c_uint};
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 use dpi::PhysicalSize;
 use servo::resources::ResourceReaderMethods;
@@ -35,6 +36,9 @@ const HEIGHT: u32 = 600;
 const BAR_HEIGHT: u32 = 40;
 /// What one notch of the wheel scrolls the page by.
 const PIXELS_PER_NOTCH: f64 = 40.0;
+/// How often the window is painted whether or not Servo reports a frame. Servo does not always
+/// report one after a navigation or a resize, and the window would keep showing the old page.
+const PRESENT_INTERVAL: Duration = Duration::from_millis(250);
 
 // libvexa's gui.h. Only the parts this program uses are declared.
 const WINDOW_RESIZABLE: c_uint = 0x1;
@@ -234,6 +238,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut buttons = 0;
     let mut modifiers = Modifiers::empty();
     let mut reported_load = false;
+    let mut last_present = Instant::now();
     loop {
         servo.spin_event_loop();
 
@@ -271,8 +276,9 @@ fn main() -> Result<(), Box<dyn Error>> {
             reported_load = true;
             println!("servo-window: page loaded");
         }
-        if page.frame_ready.replace(false) {
+        if page.frame_ready.replace(false) || last_present.elapsed() >= PRESENT_INTERVAL {
             present(window, &rendering_context, &webview, &bar);
+            last_present = Instant::now();
         }
     }
 
