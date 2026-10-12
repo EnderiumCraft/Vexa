@@ -151,6 +151,8 @@ struct Bar {
     focused: bool,
     /// The first character typed after the bar takes the focus replaces the address.
     replace_on_type: bool,
+    /// An address to load: the main loop opens it in a new WebView.
+    pending: Option<Url>,
 }
 
 impl Bar {
@@ -229,7 +231,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     unsafe { vx_window_present(window, 0, 0, WIDTH as c_int, HEIGHT as c_int) };
 
     let page = Rc::new(Page::default());
-    let webview = WebViewBuilder::new(&servo, rendering_context.clone())
+    let mut webview = WebViewBuilder::new(&servo, rendering_context.clone())
         .url(url)
         .delegate(page.clone())
         .build();
@@ -258,6 +260,16 @@ fn main() -> Result<(), Box<dyn Error>> {
                 GUI_RESIZE => resize(window, &webview, &bar, event.width, event.height),
                 _ => {},
             }
+        }
+
+        // A new address opens in a new WebView. After a navigation in the same WebView, Servo
+        // kept showing the old page's frame; a new WebView paints from the start.
+        if let Some(url) = bar.pending.take() {
+            webview = WebViewBuilder::new(&servo, rendering_context.clone())
+                .url(url)
+                .delegate(page.clone())
+                .build();
+            webview.set_focused(true);
         }
 
         if page.title_changed.replace(false) {
@@ -513,7 +525,7 @@ fn navigate(webview: &WebView, bar: &mut Bar) {
     match parsed {
         Ok(url) => {
             println!("servo-window: navigate {url}");
-            webview.load(url);
+            bar.pending = Some(url);
             bar.unfocus(webview);
         },
         Err(error) => println!("servo-window: bad address {text}: {error}"),
