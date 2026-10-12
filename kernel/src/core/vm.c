@@ -247,13 +247,8 @@ struct address_space *vm_fork(struct address_space *parent) {
 
 /* ---- Adding and removing areas ---- */
 
-int vm_add_area(struct address_space *as, uint64_t start, uint64_t end, unsigned flags) {
-    start = page_down(start);
-    end = page_up(end);
-    if (start < USER_BASE || end > USER_END || start >= end) {
-        return -VX_EINVAL;
-    }
-    uint64_t lock_flags = spin_lock_irqsave(&as->lock);
+/* Adds [start, end) with as->lock held; start and end are page aligned and in range. */
+static int add_area_locked(struct address_space *as, uint64_t start, uint64_t end, unsigned flags) {
     int error = split_at(as, start) && split_at(as, end) ? 0 : -VX_ENOMEM;
     /* Existing parts inside the range take the extra flags; gaps get new areas. */
     uint64_t cursor = start;
@@ -284,6 +279,17 @@ int vm_add_area(struct address_space *as, uint64_t start, uint64_t end, unsigned
         }
     }
     merge_areas(as);
+    return error;
+}
+
+int vm_add_area(struct address_space *as, uint64_t start, uint64_t end, unsigned flags) {
+    start = page_down(start);
+    end = page_up(end);
+    if (start < USER_BASE || end > USER_END || start >= end) {
+        return -VX_EINVAL;
+    }
+    uint64_t lock_flags = spin_lock_irqsave(&as->lock);
+    int error = add_area_locked(as, start, end, flags);
     spin_unlock_irqrestore(&as->lock, lock_flags);
     return error;
 }
@@ -318,11 +324,11 @@ uint64_t vm_map(struct address_space *as, uint64_t size, unsigned flags) {
         }
         candidate = lowest - size;
     }
+    /* The area is added under the same hold of the lock as the search: another thread mapping
+     * at the same time must not be handed the same range. */
+    int error = candidate < MAP_BOTTOM ? -VX_ENOMEM : add_area_locked(as, candidate, candidate + size, flags);
     spin_unlock_irqrestore(&as->lock, lock_flags);
-    if (candidate < MAP_BOTTOM || vm_add_area(as, candidate, candidate + size, flags)) {
-        return 0;
-    }
-    return candidate;
+    return error ? 0 : candidate;
 }
 
 /* Removes the pages of [start, end) from the page tables. They are freed only
@@ -441,9 +447,10 @@ uint64_t vm_set_heap_end(struct address_space *as, uint64_t end) {
     uint64_t old_top = page_up(as->heap_end), new_top = page_up(end);
     if (new_top > old_top) {
         uint64_t lock_flags = spin_lock_irqsave(&as->lock);
-        bool free = range_free(as, old_top, new_top);
+        /* Checked and added under one hold of the lock, like vm_map(). */
+        bool grown = range_free(as, old_top, new_top) && !add_area_locked(as, old_top, new_top, VM_WRITE);
         spin_unlock_irqrestore(&as->lock, lock_flags);
-        if (!free || vm_add_area(as, old_top, new_top, VM_WRITE)) {
+        if (!grown) {
             return as->heap_end;
         }
     } else if (new_top < old_top) {
