@@ -157,6 +157,10 @@ int fcntl(int fd, int command, ...) {
         return 0;
     }
     case F_GETFL: {
+        /* A socket is not a file, so the handle stat below would reject it. */
+        if (__vx_is_socket(fd)) {
+            return O_RDWR | (__vx_nonblocking(fd) ? O_NONBLOCK : 0);
+        }
         struct vx_stat st;
         return vx_handle_stat(fd, &st) ? (errno = EBADF, -1)
                                        : O_RDWR | (__vx_nonblocking(fd) ? O_NONBLOCK : 0);
