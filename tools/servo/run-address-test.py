@@ -44,15 +44,16 @@ def popen_with_disk(cmd, *args, **kwargs):
 
 
 smoke.subprocess.Popen = popen_with_disk
-# The address is typed one key at a time. A burst of keys overruns the VM's keyboard buffer,
-# and the keys at the end go missing; every "@" command waits half a second first, which is
-# enough for the keys to be read.
-address = "file:///mnt/vda/font-test.html"
+# The window starts on font-test.html, which is still: the window test's page animates, and a
+# window that keeps painting reads its keys too slowly. The address typed is window-test.html,
+# which is what the window test runs, so its title shows the navigation. Keys are typed one at a
+# time, each after a half-second wait (every "@" command waits that long first).
+address = "file:///mnt/vda/window-test.html"
 typed = [("@sendkey " + key, None, 1) for key in smoke.keys_for(address)]
 smoke.TYPED_COMMANDS = [
     ("#shell",),
     ("desktop", 'desktop: window 1 "Terminal"', 30),
-    ("@type /mnt/vda/servo-window file:///mnt/vda/window-test.html > /dev/console",
+    ("@type /mnt/vda/servo-window file:///mnt/vda/font-test.html > /dev/console",
      "servo-window: page loaded", 900),
     # The window's content is at (240, 129) on the screen, and the address bar is its top 40
     # pixels: the field's middle is at (640, 149). A press there takes the keyboard for the bar.
@@ -65,7 +66,7 @@ smoke.TYPED_COMMANDS = [
     ("@sendkey ret", "servo-window: navigate " + address, 60),
     # The page loads and sets its title. A mouse move with no movement only gives the step a
     # reason to wait on the console; the title is printed as the page's frames come in.
-    ("@mouse_move 0 0", "servo-window: title fonts ok", 120),
+    ("@mouse_move 0 0", "servo-window: title window test", 120),
 ]
 sys.argv = ["qemu-smoke-test.py", "--no-linux", "--only", "shell", "--keep-log",
             "--memory", "2G", "--screenshot", os.path.join(work, "address-vm.png")]
