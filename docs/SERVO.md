@@ -260,6 +260,18 @@ lands.
    `resize_rendering_context`) makes the viewport the full size, but the content past x=800 is
    still white, and repainting for two seconds does not change it. So the new display list does
    not reach the composited frame. Not found: why. The debugging changes are not in the repo.
+   - **The address bar.** [`servo-window`](../tools/servo/servo-render/src/bin/servo-window.rs)
+     has a 40-pixel bar on top, drawn with libvexa's toolbar and text field. A click on it, or
+     Ctrl+L, takes the keyboard; the first typed character replaces the address; Enter loads it
+     (an address without a scheme is https); Escape or a click on the page gives the keyboard back.
+     [`tools/servo/run-address-test.py`](../tools/servo/run-address-test.py) passes in the VM: it
+     clicks the bar, types the address of `window-test.html` one key at a time, and checks the
+     navigation and the page's title. The window keeps repainting every 250 ms as well, because
+     Servo did not always report the new frame. Still wrong: after a navigation the window shows
+     the old page's pixels, even though the title is the new page's, which is the same frame
+     problem as the resize (the new display list is not composited).
+   - The window test ([`run-window-test.py`](../tools/servo/run-window-test.py)) passes with the
+     bar: the page is 800x560, and 1278x704 after the resize.
 6. **M6, integration.** An app bundle, a desktop entry, tests and docs, and the sandbox
    decision (`gaol` does not support Vexa).
 
@@ -267,8 +279,13 @@ lands.
 
 The browser, which is the goal:
 
-- An address bar, and names in the VM (a resolver, or `/etc/hosts`), so `https` works on real
-  sites and not only by address.
+- Servo's frame pipeline: after a resize or a navigation, the composited frame is the old page's.
+  Both are the same problem, so one fix should clear both. Start from the parked resize note above.
+- Names in the VM (a resolver, or `/etc/hosts`), so `https` works on real sites and not only by
+  address.
 - Then M6: an app bundle, a desktop entry, tests, and the docs.
-- Parked: the resize (above). Next time, look at why the page's new display list does not reach
-  the composited frame, in Servo's painter and WebRender's frame building.
+
+Two crashes seen in `servo-window` (a page fault reading the CA bundle at startup, and one writing a
+GPU buffer after a navigation) may be a double free of a large libvexa block. libvexa now reports a
+second free and the caller's address, but the crashes have not been seen again since (one run only).
+If they return, `addr2line` on the caller address names the code that freed it.
