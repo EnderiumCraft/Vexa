@@ -64,4 +64,4 @@ smoke.TYPED_COMMANDS = [
 ]
 sys.argv = ["qemu-smoke-test.py", "--no-linux", "--only", "shell", "--keep-log",
             "--memory", "2G", "--screenshot", os.path.join(work, "window-vm.png")]
-smoke.main()
+sys.exit(smoke.main())
