@@ -992,11 +992,15 @@ impl App {
         for index in 0..self.tabs.len() {
             let state = self.tabs[index].state.clone();
             let active = index == self.active;
+            let titles: Vec<String> = state.titles.borrow_mut().drain(..).collect();
             if state.title_changed.replace(false) {
                 self.chrome_dirty = true;
                 if active {
                     self.update_window_title();
-                    println!("vane: title {}", state.title.borrow());
+                    // Every title is printed, in order: a page can set two between two looks.
+                    for title in &titles {
+                        println!("vane: title {title}");
+                    }
                 }
             }
             if state.url_changed.replace(false) && active {

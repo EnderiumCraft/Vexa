@@ -36,6 +36,8 @@ pub struct TabState {
     shared: Rc<Shared>,
     pub title: RefCell<String>,
     pub title_changed: Cell<bool>,
+    /// Every title the page set since the program last looked, in order.
+    pub titles: RefCell<Vec<String>>,
     pub url: RefCell<Option<Url>>,
     pub url_changed: Cell<bool>,
     pub load: Cell<Load>,
@@ -52,6 +54,7 @@ impl TabState {
             shared,
             title: RefCell::new(String::new()),
             title_changed: Cell::new(false),
+            titles: RefCell::new(Vec::new()),
             url: RefCell::new(None),
             url_changed: Cell::new(false),
             load: Cell::new(Load::Started),
@@ -108,7 +111,9 @@ impl WebViewDelegate for TabState {
     }
 
     fn notify_page_title_changed(&self, _: WebView, title: Option<String>) {
-        *self.title.borrow_mut() = title.unwrap_or_default();
+        let title = title.unwrap_or_default();
+        self.titles.borrow_mut().push(title.clone());
+        *self.title.borrow_mut() = title;
         self.title_changed.set(true);
     }
 
