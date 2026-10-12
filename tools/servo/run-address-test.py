@@ -44,6 +44,11 @@ def popen_with_disk(cmd, *args, **kwargs):
 
 
 smoke.subprocess.Popen = popen_with_disk
+# The address is typed one key at a time. A burst of keys overruns the VM's keyboard buffer,
+# and the keys at the end go missing; every "@" command waits half a second first, which is
+# enough for the keys to be read.
+address = "file:///mnt/vda/font-test.html"
+typed = [("@sendkey " + key, None, 1) for key in smoke.keys_for(address)]
 smoke.TYPED_COMMANDS = [
     ("#shell",),
     ("desktop", 'desktop: window 1 "Terminal"', 30),
@@ -55,9 +60,9 @@ smoke.TYPED_COMMANDS = [
     ("@mouse_move 640 149", None, 5),
     ("@mouse_button 1", "servo-window: address focused", 60),
     ("@mouse_button 0", None, 3),
-    # The first typed character replaces the address, and Enter loads what the bar holds.
-    ("@type file:///mnt/vda/font-test.html", None, 10),
-    ("@sendkey ret", "servo-window: navigate file:///mnt/vda/font-test.html", 60),
+] + typed + [
+    # Enter loads what the bar holds: the first typed character replaced the address.
+    ("@sendkey ret", "servo-window: navigate " + address, 60),
     # The page loads and sets its title. A mouse move with no movement only gives the step a
     # reason to wait on the console; the title is printed as the page's frames come in.
     ("@mouse_move 0 0", "servo-window: title fonts ok", 120),
