@@ -226,8 +226,8 @@ lands.
    sandbox (gaol is left out on Vexa, and multiprocess is off), no ICU, ring for TLS and
    WebCrypto, in-process IPC, FreeType fonts, `navigator.platform` as `Vexa`, and inventory's
    constructors, which the default resources need. surfman's OSMesa context is current from its
-   creation, because glow reads the GL version before a surface is bound. Still missing: `https`,
-   and the JIT and intl. Backtraces are empty, as there is no unwinder.
+   creation, because glow reads the GL version before a surface is bound. Still missing: the JIT
+   and intl. Backtraces are empty, as there is no unwinder.
    - **Text.** Servo's font list on Vexa ([`servo-fonts`' `vexa` module](../third_party/servo-vexa.patch))
      reads the TrueType and OpenType files in `/share/fonts`, the DejaVu faces that libvexa's
      text uses, through FreeType. A test page's text gets a width, and its render is painted:
@@ -241,17 +241,25 @@ lands.
      hyper-util's connector: socket2 reads a socket's flags with `fcntl(F_GETFL)`, and libvexa
      answered `EBADF`, because it stat'd the handle as a file. A socket is not a file, so
      [`libvexa/src/posix.c`](../libvexa/src/posix.c) now reports the socket's own non-blocking
-     state. The VM does not resolve names yet, so the test uses the address. `https` is not
-     done: it needs the CA bundle and the host name checks.
+     state. The VM does not resolve names yet, so the test uses the address.
+   - **Loading over HTTPS.** [`tools/servo/run-https-test.py`](../tools/servo/run-https-test.py)
+     makes a test CA and a certificate for `10.0.2.2`, serves `tests/servo` over TLS, and checks
+     two loads in the VM. Without the test CA the page is refused (`UnknownIssuer`, which Servo
+     shows as the title `Certificate error`). With `SSL_CERT_FILE` set to the system bundle plus
+     the test CA, the page loads and its title is `fonts ok`. Servo's default verifier reads the
+     system bundle, `/etc/ssl/certs/ca-certificates.crt`, through `rustls-native-certs`, which
+     honors `SSL_CERT_FILE`, so Servo needed no change. Public sites still need name resolution,
+     which the VM does not have yet.
 
-   **Known issue: a resized window paints a narrow frame.** After a resize, Servo lays the page
-   out at the new size (the page's `innerWidth` is the new width), and the frame that
-   `read_to_image` returns is the new size too. But the pixels past the old 800 columns come back
-   white: a saved frame (1278 by 744) is orange up to x=800 and white after it. So the fault is
-   in Servo's drawing onto the OSMesa buffer after the size changes, not in the window copy or
-   the desktop. Not yet traced: whether Mesa's softpipe framebuffer keeps its old width after
-   `OSMesaMakeCurrent` changes size (height updates, width does not, which suggests a width that
-   is cached somewhere), or whether WebRender's device size is what lags.
+   **Known issue, parked: a resized window paints a narrow frame.** After a resize the page is laid
+   out at the new size, and `read_to_image` returns the new size, but the pixels past the old 800
+   columns come back white. What is ruled out: OSMesa and Mesa. A standalone OSMesa program that
+   resizes from 800x600 to 1278x744 draws the full width. What is found: the first paint after the
+   resize still composites the old frame, with WebRender's viewport at the old 800x600 (offset to
+   y=144). Asking WebRender for a frame on resize (`generate_frame` in `servo-paint`'s
+   `resize_rendering_context`) makes the viewport the full size, but the content past x=800 is
+   still white, and repainting for two seconds does not change it. So the new display list does
+   not reach the composited frame. Not found: why. The debugging changes are not in the repo.
 6. **M6, integration.** An app bundle, a desktop entry, tests and docs, and the sandbox
    decision (`gaol` does not support Vexa).
 
@@ -259,8 +267,8 @@ lands.
 
 The browser, which is the goal:
 
-- Fix the resize: find why the drawn width lags after `OSMesaMakeCurrent` changes size, in
-  `third_party/surfman-vexa.patch` or in Mesa's `osmesa.c` (`tools/build-mesa-vexa.sh`).
-- An address bar, and `https` through Servo's `net`, with the CA bundle M2 checked. Names
-  need a VM that resolves them; `http` already loads by address.
+- An address bar, and names in the VM (a resolver, or `/etc/hosts`), so `https` works on real
+  sites and not only by address.
 - Then M6: an app bundle, a desktop entry, tests, and the docs.
+- Parked: the resize (above). Next time, look at why the page's new display list does not reach
+  the composited frame, in Servo's painter and WebRender's frame building.
