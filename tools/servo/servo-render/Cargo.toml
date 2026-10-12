@@ -49,6 +49,7 @@ servo-fonts-traits = { path = "../crates/servo-fonts-traits-0.7.0" }
 servo-constellation = { path = "../crates/servo-constellation-0.7.0" }
 servo = { path = "../crates/servo-0.7.0" }
 servo-fonts = { path = "../crates/servo-fonts-0.7.0" }
+servo-layout = { path = "../crates/servo-layout-0.7.0" }
 inventory = { path = "../crates/inventory-0.3.25" }
 
 [workspace]

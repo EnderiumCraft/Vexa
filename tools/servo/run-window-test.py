@@ -64,6 +64,10 @@ smoke.TYPED_COMMANDS = [
     # The window: snapping it to the top left resizes it, and the page reports the new size: the
     # window's 744 pixels less the bar's 40.
     ("@sendkey meta_l-up", "size 1278x704", 60),
+    # Painting is slow: the page's orange reaches the new right edge some seconds later, and the
+    # program says so. The screenshot shows the resized page.
+    ("@mouse_move 0 0", "servo-window: edge #ff8000 at 1278", 400),
+] + [("@mouse_move 0 0", None, 1)] * 6 + [
 ]
 sys.argv = ["qemu-smoke-test.py", "--no-linux", "--only", "shell", "--keep-log",
             "--memory", "2G", "--screenshot", os.path.join(work, "window-vm.png")]

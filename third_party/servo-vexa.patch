@@ -356,6 +356,31 @@ diff -ruN a/servo-fonts-traits-0.7.0/font_identifier.rs b/servo-fonts-traits-0.7
  mod platform {
      use std::fs::File;
      use std::path::{Path, PathBuf};
+diff -ruN a/servo-layout-0.7.0/layout_impl.rs b/servo-layout-0.7.0/layout_impl.rs
+--- a/servo-layout-0.7.0/layout_impl.rs	2026-10-12 21:50:01.343075810 +0000
++++ b/servo-layout-0.7.0/layout_impl.rs	2026-10-12 21:50:01.357551162 +0000
+@@ -1322,7 +1322,7 @@
+ 
+         let mut box_tree = self.box_tree.borrow_mut();
+         let mut layout_roots = Vec::new();
+-        let damage = {
++        let mut damage = {
+             let box_tree = &mut *box_tree;
+             let mut compute_damage_and_build_box_tree = || {
+                 compute_damage_and_rebuild_box_tree(
+@@ -1342,6 +1342,12 @@
+             }
+         };
+ 
++        // A new viewport size is damage the page's own elements do not report: the root keeps
++        // none of it, so layout would be skipped and the fragment tree would stay at the old
++        // size, while the display list is built for the new one.
++        if device_has_changed {
++            damage.insert(LayoutDamage::Relayout);
++        }
+         if damage.contains(LayoutDamage::RebuildStackingContextTree) {
+             self.need_new_stacking_context_tree.set(true);
+         }
 diff -ruN a/servo-net-0.7.0/Cargo.toml b/servo-net-0.7.0/Cargo.toml
 --- a/servo-net-0.7.0/Cargo.toml	2026-10-12 11:14:50.481700599 +0000
 +++ b/servo-net-0.7.0/Cargo.toml	2026-10-12 11:14:50.619074152 +0000

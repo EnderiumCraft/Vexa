@@ -16,6 +16,7 @@ use std::error::Error;
 use std::ffi::CString;
 use std::os::raw::{c_char, c_int, c_long, c_uint};
 use std::rc::Rc;
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use dpi::PhysicalSize;
@@ -36,8 +37,8 @@ const HEIGHT: u32 = 600;
 const BAR_HEIGHT: u32 = 40;
 /// What one notch of the wheel scrolls the page by.
 const PIXELS_PER_NOTCH: f64 = 40.0;
-/// How often the window is painted whether or not Servo reports a frame. Servo does not always
-/// report one after a navigation or a resize, and the window would keep showing the old page.
+/// How often the window is painted whether or not Servo reports a frame, so that a frame it did
+/// not report still shows.
 const PRESENT_INTERVAL: Duration = Duration::from_millis(250);
 
 // libvexa's gui.h. Only the parts this program uses are declared.
@@ -262,8 +263,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
         }
 
-        // A new address opens in a new WebView. After a navigation in the same WebView, Servo
-        // kept showing the old page's frame; a new WebView paints from the start.
+        // A new address opens in a new WebView.
         if let Some(url) = bar.pending.take() {
             webview = WebViewBuilder::new(&servo, rendering_context.clone())
                 .url(url)
@@ -342,6 +342,24 @@ fn present(
     let Some(image) = rendering_context.read_to_image(rect) else {
         return;
     };
+    // Painting is slow, and a page's title comes before its first frame: the program says when
+    // the colour of the page's top left corner changes, and when the top right corner's does or
+    // the page's width does, which the tests wait for.
+    static CORNER: AtomicU32 = AtomicU32::new(0xffffff);
+    static EDGE: AtomicU64 = AtomicU64::new(0xffffff);
+    let color = |x: u32| {
+        let [r, g, b, _] = image.get_pixel(x, 0).0;
+        (r as u32) << 16 | (g as u32) << 8 | b as u32
+    };
+    let corner = color(0);
+    if CORNER.swap(corner, Ordering::Relaxed) != corner {
+        println!("servo-window: corner #{corner:06x}");
+    }
+    let edge = color(image.width() - 1);
+    let state = (image.width() as u64) << 32 | edge as u64;
+    if EDGE.swap(state, Ordering::Relaxed) != state {
+        println!("servo-window: edge #{edge:06x} at {}", image.width());
+    }
     let surface = unsafe { &(*window).surface };
     let width = (image.width() as i32).min(surface.width);
     let height = (image.height() as i32).min(surface.height - BAR_HEIGHT as i32);

@@ -67,9 +67,13 @@ smoke.TYPED_COMMANDS = [
     # The page loads and sets its title. A mouse move with no movement only gives the step a
     # reason to wait on the console; the title is printed as the page's frames come in.
     ("@mouse_move 0 0", "servo-window: title window test", 120),
-    # The page's animation frames come after its title: wait for the title they set, so the
-    # screenshot shows the page and not the moment before it was drawn.
+    # The page's animation frames come after its title: wait for the title they set. Painting
+    # is slow, and the frame with the page's blue corner comes later still: the screenshot is
+    # taken once the program has shown it.
     ("@mouse_move 0 0", "servo-window: title scroll", 120),
+    ("@mouse_move 0 0", "servo-window: corner #0000ff", 400),
+    # The program shows the frame right after saying so, and the desktop draws it a moment later.
+] + [("@mouse_move 0 0", None, 1)] * 6 + [
 ]
 sys.argv = ["qemu-smoke-test.py", "--no-linux", "--only", "shell", "--keep-log",
             "--memory", "2G", "--screenshot", os.path.join(work, "address-vm.png")]

@@ -219,7 +219,7 @@ lands.
      [`tests/servo/window-test.html`](../tests/servo/window-test.html), drives each through the
      desktop in the VM. The page sets its title on each event, and the program prints each
      title, so the log shows the events arrive: `mousedown 250,215`, `typed hi`, `wheel 40`,
-     `scroll 40`, and the resize. Known issue, below.
+     `scroll 40`, and the resize.
 
    Both are built by [`tools/servo/build-servo-vexa.sh`](../tools/servo/build-servo-vexa.sh).
    Servo's crates need [`third_party/servo-vexa.patch`](../third_party/servo-vexa.patch): no
@@ -251,25 +251,28 @@ lands.
      honors `SSL_CERT_FILE`, so Servo needed no change. Public sites still need name resolution,
      which the VM does not have yet.
 
-   **Known issue, parked: a resized window paints a narrow frame.** After a resize the page is laid
-   out at the new size, and `read_to_image` returns the new size, but the pixels past the old 800
-   columns come back white. What is ruled out: OSMesa and Mesa. A standalone OSMesa program that
-   resizes from 800x600 to 1278x744 draws the full width. What is found: the first paint after the
-   resize still composites the old frame, with WebRender's viewport at the old 800x600 (offset to
-   y=144). Asking WebRender for a frame on resize (`generate_frame` in `servo-paint`'s
-   `resize_rendering_context`) makes the viewport the full size, but the content past x=800 is
-   still white, and repainting for two seconds does not change it. So the new display list does
-   not reach the composited frame. Not found: why. The debugging changes are not in the repo.
+   - **A resized window.** After a resize the page was laid out at the new size, `innerWidth` was
+     right, and the display lists reached the painter at the new viewport, but the page's boxes
+     stayed 800 pixels wide: the right of the window stayed white. It was not OSMesa, WebRender or
+     the swap chain. It was Servo's layout: a changed viewport only restyles, and the damage that
+     comes back for the root lacks `Relayout`, so `servo-layout` skips layout and builds the
+     display list from the old fragment tree. [`third_party/servo-vexa.patch`](../third_party/servo-vexa.patch)
+     adds `Relayout` to the damage when the device changed (`servo-layout-0.7.0/layout_impl.rs`).
+     With it the window test's page fills the maximized window.
+   - **Painting is slow in the VM.** A frame takes seconds in the debug build under QEMU's
+     emulation, so a page's title (set by its script) comes well before the first frame with its
+     pixels. The first screenshots of these tests were taken too early and looked like a
+     compositing bug. `servo-window` now prints `servo-window: corner #rrggbb` when the page's
+     top-left pixel changes and `servo-window: edge #rrggbb at WIDTH` when its top-right pixel or
+     width changes, and the window and address tests wait for them before the screenshot.
    - **The address bar.** [`servo-window`](../tools/servo/servo-render/src/bin/servo-window.rs)
      has a 40-pixel bar on top, drawn with libvexa's toolbar and text field. A click on it, or
      Ctrl+L, takes the keyboard; the first typed character replaces the address; Enter loads it
      (an address without a scheme is https); Escape or a click on the page gives the keyboard back.
      [`tools/servo/run-address-test.py`](../tools/servo/run-address-test.py) passes in the VM: it
      clicks the bar, types the address of `window-test.html` one key at a time, and checks the
-     navigation and the page's title. The window keeps repainting every 250 ms as well, because
-     Servo did not always report the new frame. Still wrong: after a navigation the window shows
-     the old page's pixels, even though the title is the new page's, which is the same frame
-     problem as the resize (the new display list is not composited).
+     navigation, the page's title and that its blue corner is painted. The window keeps repainting
+     every 250 ms as well. A navigation opens a new `WebView`.
    - The window test ([`run-window-test.py`](../tools/servo/run-window-test.py)) passes with the
      bar: the page is 800x560, and 1278x704 after the resize.
 6. **M6, integration.** An app bundle, a desktop entry, tests and docs, and the sandbox
@@ -279,13 +282,13 @@ lands.
 
 The browser, which is the goal:
 
-- Servo's frame pipeline: after a resize or a navigation, the composited frame is the old page's.
-  Both are the same problem, so one fix should clear both. Start from the parked resize note above.
 - Names in the VM (a resolver, or `/etc/hosts`), so `https` works on real sites and not only by
   address.
 - Then M6: an app bundle, a desktop entry, tests, and the docs.
 
 Two crashes seen in `servo-window` (a page fault reading the CA bundle at startup, and one writing a
-GPU buffer after a navigation) may be a double free of a large libvexa block. libvexa now reports a
-second free and the caller's address, but the crashes have not been seen again since (one run only).
-If they return, `addr2line` on the caller address names the code that freed it.
+GPU buffer after a navigation) came about once in every 4 to 10 starts. The cause was in the
+kernel: `vm_map` looked for a free range, released the address space lock, and only then added the
+area, so two threads mapping at once could be given the same memory (`vm_add_area` merges into
+areas that are already there instead of failing). The search and the insert are now one critical
+section, and 20 starts in a row passed with no fault.

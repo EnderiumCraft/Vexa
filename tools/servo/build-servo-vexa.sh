@@ -57,7 +57,7 @@ rm -rf "$work/crates"
 mkdir -p "$work/crates"
 for c in getrandom-0.2.17 getrandom-0.3.4 getrandom-0.4.3 mio-1.2.4 socket2-0.6.5 tokio-1.53.2 \
     ring-0.17.14 servo-0.7.0 servo-constellation-0.7.0 servo-fonts-0.7.0 servo-fonts-traits-0.7.0 \
-    rustix-1.1.5 servo-script-0.7.0 servo-script-bindings-0.7.0 servo-net-0.7.0 rustls-0.23.45 \
+    servo-layout-0.7.0 rustix-1.1.5 servo-script-0.7.0 servo-script-bindings-0.7.0 servo-net-0.7.0 rustls-0.23.45 \
     tokio-rustls-0.26.6 inventory-0.3.25 surfman-0.14.0 libc-0.2.190 mozjs_sys-153.3.0-1; do
     cp -r "$registry/$c" "$work/crates/$c"
 done
