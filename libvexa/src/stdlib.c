@@ -186,21 +186,41 @@ static void *malloc_unlocked(size_t size) {
     return header + 1;
 }
 
-static void free_unlocked(void *pointer) {
+/* Prints `what` and an address, in hex, to standard error. */
+static void report_address(const char *what, uintptr_t address) {
+    static const char digits[] = "0123456789abcdef";
+    char text[96];
+    size_t length = strlen(what);
+    memcpy(text, what, length);
+    text[length++] = '0';
+    text[length++] = 'x';
+    for (int shift = (int)(sizeof(uintptr_t) * 8) - 4; shift >= 0; shift -= 4) {
+        text[length++] = digits[(address >> shift) & 15];
+    }
+    text[length++] = '\n';
+    vx_write(2, text, length);
+}
+
+/* `caller`: the address that called free, for a report of a bad pointer. */
+static void free_unlocked(void *pointer, void *caller) {
     if (!pointer) {
         return;
     }
     struct header *header = (struct header *)pointer - 1;
     if ((header->magic & 0xffffffff) == MAGIC && header->magic >> 32 == ALIGNED) {
-        free_unlocked((void *)header->size);
+        free_unlocked((void *)header->size, caller);
         return;
     }
     if ((header->magic & 0xffffffff) != MAGIC) {
         static const char message[] = "free(): not a malloc pointer (or freed twice)\n";
         vx_write(2, message, sizeof(message) - 1);
+        report_address("free() called from ", (uintptr_t)caller);
         abort();
     }
     if (header->magic >> 32 == LARGE) {
+        /* Cleared before the pages go: a second free of the block is caught above, instead
+         * of unmapping whatever has been mapped at its address since. */
+        header->magic = 0;
         vx_unmap(header, header->size + sizeof(struct header));
         return;
     }
@@ -224,8 +244,9 @@ void *malloc(size_t size) {
 }
 
 void free(void *pointer) {
+    void *caller = __builtin_return_address(0);
     vx_mutex_lock(&heap_lock);
-    free_unlocked(pointer);
+    free_unlocked(pointer, caller);
     vx_mutex_unlock(&heap_lock);
 }
 
