@@ -14,6 +14,8 @@ struct timezone {
 };
 
 int gettimeofday(struct timeval *tv, void *tz);
+/* Not supported yet (it fails with ENOSYS): sets file times. */
+int utimes(const char *path, const struct timeval times[2]);
 
 /* (fd_set and select, as other systems' <sys/time.h> give them too.) */
 #include <sys/select.h>

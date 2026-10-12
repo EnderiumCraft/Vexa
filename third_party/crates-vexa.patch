@@ -1,0 +1,270 @@
+diff -ruN a/getrandom-0.2.17/src/lib.rs b/getrandom-0.2.17/src/lib.rs
+--- a/getrandom-0.2.17/src/lib.rs	2026-10-11 23:59:51.724667784 +0000
++++ b/getrandom-0.2.17/src/lib.rs	2026-10-11 23:59:51.728922297 +0000
+@@ -235,7 +235,7 @@
+ // The function MUST NOT ever write uninitialized bytes into `dest`,
+ // regardless of what value it returns.
+ cfg_if! {
+-    if #[cfg(any(target_os = "haiku", target_os = "redox", target_os = "nto", target_os = "aix"))] {
++    if #[cfg(any(target_os = "haiku", target_os = "redox", target_os = "nto", target_os = "aix", target_os = "vexa"))] {
+         mod util_libc;
+         #[path = "use_file.rs"] mod imp;
+     } else if #[cfg(any(
+diff -ruN a/getrandom-0.2.17/src/util_libc.rs b/getrandom-0.2.17/src/util_libc.rs
+--- a/getrandom-0.2.17/src/util_libc.rs	2026-10-11 23:59:51.724868064 +0000
++++ b/getrandom-0.2.17/src/util_libc.rs	2026-10-11 23:59:51.728434627 +0000
+@@ -11,7 +11,7 @@
+ cfg_if! {
+     if #[cfg(any(target_os = "netbsd", target_os = "openbsd", target_os = "android", target_os = "cygwin"))] {
+         use libc::__errno as errno_location;
+-    } else if #[cfg(any(target_os = "linux", target_os = "emscripten", target_os = "hurd", target_os = "redox", target_os = "dragonfly"))] {
++    } else if #[cfg(any(target_os = "linux", target_os = "emscripten", target_os = "hurd", target_os = "redox", target_os = "dragonfly", target_os = "vexa"))] {
+         use libc::__errno_location as errno_location;
+     } else if #[cfg(any(target_os = "solaris", target_os = "illumos"))] {
+         use libc::___errno as errno_location;
+diff -ruN a/getrandom-0.3.4/Cargo.toml b/getrandom-0.3.4/Cargo.toml
+--- a/getrandom-0.3.4/Cargo.toml	2026-10-11 23:59:51.733396067 +0000
++++ b/getrandom-0.3.4/Cargo.toml	2026-10-11 23:59:51.736887778 +0000
+@@ -96,7 +96,7 @@
+ version = "0.2.154"
+ default-features = false
+ 
+-[target.'cfg(any(target_os = "haiku", target_os = "redox", target_os = "nto", target_os = "aix"))'.dependencies.libc]
++[target.'cfg(any(target_os = "haiku", target_os = "redox", target_os = "nto", target_os = "aix", target_os = "vexa"))'.dependencies.libc]
+ version = "0.2.154"
+ default-features = false
+ 
+diff -ruN a/getrandom-0.3.4/src/backends.rs b/getrandom-0.3.4/src/backends.rs
+--- a/getrandom-0.3.4/src/backends.rs	2026-10-11 23:59:51.734662458 +0000
++++ b/getrandom-0.3.4/src/backends.rs	2026-10-11 23:59:51.737416742 +0000
+@@ -59,6 +59,7 @@
+         target_os = "redox",
+         target_os = "nto",
+         target_os = "aix",
++        target_os = "vexa",
+     ))] {
+         mod use_file;
+         pub use use_file::*;
+diff -ruN a/getrandom-0.3.4/src/util_libc.rs b/getrandom-0.3.4/src/util_libc.rs
+--- a/getrandom-0.3.4/src/util_libc.rs	2026-10-11 23:59:51.734794171 +0000
++++ b/getrandom-0.3.4/src/util_libc.rs	2026-10-11 23:59:51.738335411 +0000
+@@ -4,7 +4,7 @@
+ cfg_if! {
+     if #[cfg(any(target_os = "netbsd", target_os = "openbsd", target_os = "android", target_os = "cygwin"))] {
+         use libc::__errno as errno_location;
+-    } else if #[cfg(any(target_os = "linux", target_os = "emscripten", target_os = "hurd", target_os = "redox", target_os = "dragonfly"))] {
++    } else if #[cfg(any(target_os = "linux", target_os = "emscripten", target_os = "hurd", target_os = "redox", target_os = "dragonfly", target_os = "vexa"))] {
+         use libc::__errno_location as errno_location;
+     } else if #[cfg(any(target_os = "solaris", target_os = "illumos"))] {
+         use libc::___errno as errno_location;
+diff -ruN a/getrandom-0.4.3/Cargo.toml b/getrandom-0.4.3/Cargo.toml
+--- a/getrandom-0.4.3/Cargo.toml	2026-10-11 23:59:51.742423295 +0000
++++ b/getrandom-0.4.3/Cargo.toml	2026-10-11 23:59:51.746401252 +0000
+@@ -108,7 +108,7 @@
+ version = "0.2.154"
+ default-features = false
+ 
+-[target.'cfg(any(target_os = "haiku", target_os = "redox", target_os = "nto", target_os = "aix"))'.dependencies.libc]
++[target.'cfg(any(target_os = "haiku", target_os = "redox", target_os = "nto", target_os = "aix", target_os = "vexa"))'.dependencies.libc]
+ version = "0.2.154"
+ default-features = false
+ 
+diff -ruN a/getrandom-0.4.3/src/backends.rs b/getrandom-0.4.3/src/backends.rs
+--- a/getrandom-0.4.3/src/backends.rs	2026-10-11 23:59:51.743728981 +0000
++++ b/getrandom-0.4.3/src/backends.rs	2026-10-11 23:59:51.747582542 +0000
+@@ -46,6 +46,7 @@
+         target_os = "redox",
+         target_os = "nto",
+         target_os = "aix",
++        target_os = "vexa",
+     ))] {
+         mod use_file;
+         pub use use_file::*;
+diff -ruN a/getrandom-0.4.3/src/utils/get_errno.rs b/getrandom-0.4.3/src/utils/get_errno.rs
+--- a/getrandom-0.4.3/src/utils/get_errno.rs	2026-10-11 23:59:51.743920316 +0000
++++ b/getrandom-0.4.3/src/utils/get_errno.rs	2026-10-11 23:59:51.748237582 +0000
+@@ -1,7 +1,7 @@
+ cfg_if! {
+     if #[cfg(any(target_os = "netbsd", target_os = "openbsd", target_os = "android", target_os = "cygwin"))] {
+         use libc::__errno as errno_location;
+-    } else if #[cfg(any(target_os = "linux", target_os = "emscripten", target_os = "hurd", target_os = "redox", target_os = "dragonfly"))] {
++    } else if #[cfg(any(target_os = "linux", target_os = "emscripten", target_os = "hurd", target_os = "redox", target_os = "dragonfly", target_os = "vexa"))] {
+         use libc::__errno_location as errno_location;
+     } else if #[cfg(target_os = "illumos")] {
+         use libc::___errno as errno_location;
+diff -ruN a/mio-1.2.4/Cargo.toml b/mio-1.2.4/Cargo.toml
+--- a/mio-1.2.4/Cargo.toml	2026-10-11 23:59:51.647549125 +0000
++++ b/mio-1.2.4/Cargo.toml	2026-10-11 23:59:51.653253259 +0000
+@@ -125,7 +125,7 @@
+ version = "0.9"
+ 
+ [target.'cfg(any(unix, target_os = "hermit", target_os = "wasi"))'.dependencies.libc]
+-version = "0.2.183"
++version = "0.2.178"
+ 
+ [target.'cfg(target_os = "wasi")'.dependencies.wasi]
+ version = "0.11.0"
+diff -ruN a/mio-1.2.4/src/poll.rs b/mio-1.2.4/src/poll.rs
+--- a/mio-1.2.4/src/poll.rs	2026-10-11 23:59:51.648628424 +0000
++++ b/mio-1.2.4/src/poll.rs	2026-10-11 23:59:51.655994721 +0000
+@@ -12,7 +12,8 @@
+         target_os = "nto",
+         target_os = "vita",
+         target_os = "cygwin",
+-        target_os = "horizon"
++        target_os = "horizon",
++        target_os = "vexa"
+     )),
+ ))]
+ use std::os::fd::{AsFd, AsRawFd, BorrowedFd, RawFd};
+@@ -454,7 +455,8 @@
+         target_os = "nto",
+         target_os = "vita",
+         target_os = "cygwin",
+-        target_os = "horizon"
++        target_os = "horizon",
++        target_os = "vexa"
+     )),
+ ))]
+ impl AsRawFd for Poll {
+@@ -758,7 +760,8 @@
+         target_os = "nto",
+         target_os = "vita",
+         target_os = "cygwin",
+-        target_os = "horizon"
++        target_os = "horizon",
++        target_os = "vexa"
+     )),
+ ))]
+ impl AsFd for Registry {
+@@ -781,7 +784,8 @@
+         target_os = "nto",
+         target_os = "vita",
+         target_os = "cygwin",
+-        target_os = "horizon"
++        target_os = "horizon",
++        target_os = "vexa"
+     )),
+ ))]
+ impl AsRawFd for Registry {
+diff -ruN a/mio-1.2.4/src/sys/unix/mod.rs b/mio-1.2.4/src/sys/unix/mod.rs
+--- a/mio-1.2.4/src/sys/unix/mod.rs	2026-10-11 23:59:51.649065374 +0000
++++ b/mio-1.2.4/src/sys/unix/mod.rs	2026-10-11 23:59:51.654559647 +0000
+@@ -55,7 +55,8 @@
+         target_os = "vita",
+         target_os = "cygwin",
+         target_os = "wasi",
+-        target_os = "horizon"
++        target_os = "horizon",
++        target_os = "vexa",
+     ), path = "selector/poll.rs")]
+     mod selector;
+     pub(crate) use self::selector::*;
+@@ -109,6 +110,7 @@
+         target_os = "aix",
+         target_os = "haiku",
+         target_os = "hurd",
++        target_os = "vexa",
+         target_os = "nto",
+         target_os = "redox",
+         all(mio_unsupported_force_poll_poll, target_os = "solaris"),
+@@ -167,6 +169,7 @@
+             all(mio_unsupported_force_poll_poll, target_os = "solaris"),
+             target_os = "vita",
+             target_os = "cygwin",
++            target_os = "vexa",
+         ),
+         not(target_os = "hermit"),
+         not(target_os = "wasi"),
+diff -ruN a/mio-1.2.4/src/sys/unix/net.rs b/mio-1.2.4/src/sys/unix/net.rs
+--- a/mio-1.2.4/src/sys/unix/net.rs	2026-10-11 23:59:51.649105188 +0000
++++ b/mio-1.2.4/src/sys/unix/net.rs	2026-10-11 23:59:51.654587694 +0000
+@@ -67,6 +67,7 @@
+         target_os = "haiku",
+         target_os = "vita",
+         target_os = "nto",
++        target_os = "vexa",
+     ))]
+     {
+         if let Err(err) = syscall!(fcntl(socket, libc::F_SETFL, libc::O_NONBLOCK)) {
+diff -ruN a/mio-1.2.4/src/sys/unix/pipe.rs b/mio-1.2.4/src/sys/unix/pipe.rs
+--- a/mio-1.2.4/src/sys/unix/pipe.rs	2026-10-11 23:59:51.649134919 +0000
++++ b/mio-1.2.4/src/sys/unix/pipe.rs	2026-10-11 23:59:51.654617445 +0000
+@@ -41,6 +41,7 @@
+         target_os = "watchos",
+         target_os = "espidf",
+         target_os = "nto",
++        target_os = "vexa",
+     ))]
+     unsafe {
+         // For platforms that don't have `pipe2(2)` we need to manually set the
+diff -ruN a/mio-1.2.4/src/sys/unix/tcp.rs b/mio-1.2.4/src/sys/unix/tcp.rs
+--- a/mio-1.2.4/src/sys/unix/tcp.rs	2026-10-11 23:59:51.649487474 +0000
++++ b/mio-1.2.4/src/sys/unix/tcp.rs	2026-10-11 23:59:51.654648055 +0000
+@@ -105,6 +105,7 @@
+         target_os = "wasi",
+         target_os = "horizon",
+         all(target_arch = "x86", target_os = "android"),
++        target_os = "vexa",
+     ))]
+     let stream = {
+         syscall!(accept(
+@@ -126,6 +127,7 @@
+                 target_os = "hermit",
+                 target_os = "nto",
+                 target_os = "wasi",
++                target_os = "vexa",
+             ))]
+             syscall!(fcntl(s.as_raw_fd(), libc::F_SETFL, libc::O_NONBLOCK))?;
+ 
+diff -ruN a/ring-0.17.14/build.rs b/ring-0.17.14/build.rs
+--- a/ring-0.17.14/build.rs	2026-10-11 23:59:51.770598612 +0000
++++ b/ring-0.17.14/build.rs	2026-10-11 23:59:51.795040701 +0000
+@@ -243,6 +243,7 @@
+ /// mentioned in `ASM_TARGETS`.
+ const LINUX_ABI: &[&str] = &[
+     "android",
++    "vexa",
+     "dragonfly",
+     "freebsd",
+     "fuchsia",
+diff -ruN a/ring-0.17.14/src/rand.rs b/ring-0.17.14/src/rand.rs
+--- a/ring-0.17.14/src/rand.rs	2026-10-11 23:59:51.786870337 +0000
++++ b/ring-0.17.14/src/rand.rs	2026-10-11 23:59:51.807197897 +0000
+@@ -140,6 +140,7 @@
+     target_os = "redox",
+     target_os = "solaris",
+     target_os = "vita",
++    target_os = "vexa",
+     target_os = "windows",
+     all(
+         target_vendor = "apple",
+diff -ruN a/socket2-0.6.5/src/sys/unix.rs b/socket2-0.6.5/src/sys/unix.rs
+--- a/socket2-0.6.5/src/sys/unix.rs	2026-10-11 23:59:51.660660433 +0000
++++ b/socket2-0.6.5/src/sys/unix.rs	2026-10-11 23:59:51.663631889 +0000
+@@ -402,6 +402,7 @@
+         )
+     ),
+     target_os = "android",
++    target_os = "vexa",
+ ))]
+ type IovLen = usize;
+ 
+diff -ruN a/tokio-1.53.2/src/net/unix/ucred.rs b/tokio-1.53.2/src/net/unix/ucred.rs
+--- a/tokio-1.53.2/src/net/unix/ucred.rs	2026-10-11 23:59:51.674625507 +0000
++++ b/tokio-1.53.2/src/net/unix/ucred.rs	2026-10-11 23:59:51.701148515 +0000
+@@ -33,6 +33,14 @@
+     }
+ }
+ 
++#[cfg(target_os = "vexa")]
++pub(crate) fn get_peer_cred(_sock: &crate::net::UnixStream) -> std::io::Result<UCred> {
++    Err(std::io::Error::new(
++        std::io::ErrorKind::Unsupported,
++        "Vexa's Unix sockets have no peer credentials",
++    ))
++}
++
+ #[cfg(any(
+     target_os = "linux",
+     target_os = "redox",

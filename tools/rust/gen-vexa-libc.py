@@ -77,12 +77,14 @@ def strip_comments(text):
 
 
 def libc_common_names(path):
-    """Names libc's common Unix code defines: the generated code must not repeat them."""
+    """Names libc's common Unix code defines, as (types, values): the generated code must not
+    repeat them. Types and values are separate namespaces in Rust, so a struct and a function
+    may share a name (struct flock and the flock function)."""
     text = open(path, errors="replace").read()
-    names = set(re.findall(r"^\s*pub\s+(?:type|struct|enum|union)\s+([A-Za-z_]\w*)", text, re.M))
-    names |= set(re.findall(r"extern_ty!\s*\{\s*pub\s+enum\s+([A-Za-z_]\w*)", text))
-    names |= set(re.findall(r"^\s*pub\s+(?:unsafe\s+)?(?:fn|const|static)\s+([A-Za-z_]\w*)", text, re.M))
-    return names
+    types = set(re.findall(r"^\s*pub\s+(?:type|struct|enum|union)\s+([A-Za-z_]\w*)", text, re.M))
+    types |= set(re.findall(r"extern_ty!\s*\{\s*pub\s+enum\s+([A-Za-z_]\w*)", text))
+    values = set(re.findall(r"^\s*pub\s+(?:unsafe\s+)?(?:fn|const|static)\s+([A-Za-z_]\w*)", text, re.M))
+    return types, values
 
 
 def read_headers(root):
@@ -323,7 +325,8 @@ def parse_function(stmt, known):
 def main():
     root, outdir, libc_unix = sys.argv[1], sys.argv[2], sys.argv[3]
     text = read_headers(root)
-    common = libc_common_names(libc_unix)
+    common_types, common_values = libc_common_names(libc_unix)
+    common = common_types | common_values
 
     consts = {}
     const_lines = []
@@ -350,7 +353,7 @@ def main():
             except ValueError as e:
                 warn("skipped struct %s: %s" % (head or trailing, e))
                 continue
-            if name in common or name in defined:
+            if name in common_types or name in defined:
                 continue
             defined.add(name)
             types.append(code)
@@ -365,7 +368,7 @@ def main():
             if not tm:
                 continue
             name = tm.group(2)
-            if name in common or name in defined:
+            if name in common_types or name in defined:
                 continue
             try:
                 ty = map_type(tm.group(1))
@@ -385,7 +388,7 @@ def main():
             continue
         if fp:
             name, decl = fp
-            if name in common or name in consts:
+            if name in common_values or name in consts:
                 continue
             fns.append(decl)
 

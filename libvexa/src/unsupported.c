@@ -5,6 +5,7 @@
 #include <errno.h>
 #include <stddef.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <sys/types.h>
 
 pid_t fork(void) {
@@ -51,4 +52,11 @@ DIR *fdopendir(int fd) {
     (void)fd;
     errno = ENOSYS;
     return NULL;
+}
+
+int utimes(const char *path, const struct timeval times[2]) {
+    (void)path;
+    (void)times;
+    errno = ENOSYS;
+    return -1;
 }
