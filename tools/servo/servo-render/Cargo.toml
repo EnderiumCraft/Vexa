@@ -1,0 +1,54 @@
+[package]
+name = "servo-render"
+version = "0.0.0"
+edition = "2021"
+build = "build.rs"
+
+[dependencies]
+libz-sys = { version = "=1.1.29", features = ["static"] }
+servo = { version = "=0.7.0", default-features = false, features = ["bundled"] }
+# Servo's own channels, in-process: Vexa has no fork, and multiprocess is off.
+ipc-channel = { version = "=0.23.0", features = ["force-inprocess"] }
+# Servo's fonts use FreeType through pkg-config; for Vexa, FreeType and libpng are built from
+# their sources (as in tools/webrender), and libpng needs zlib.
+freetype-sys = { version = "=0.23.0", features = ["bundled"] }
+dpi = "=0.1.2"
+image = { version = "0.25", default-features = false, features = ["png"] }
+url = "=2.5.8"
+servo-default-resources = "=0.7.0"
+
+# Vexa has no unwinder yet, so panics abort. No debug info, to keep the build small.
+[profile.dev]
+panic = "abort"
+debug = 0
+
+[profile.release]
+panic = "abort"
+debug = 0
+
+# The crates Servo needs, patched for Vexa. tools/servo/build-servo-vexa.sh makes the ../crates
+# directories from the cargo registry, with third_party's patches applied.
+[patch.crates-io]
+getrandom02 = { package = "getrandom", version = "=0.2.17", path = "../crates/getrandom-0.2.17" }
+getrandom03 = { package = "getrandom", version = "=0.3.4", path = "../crates/getrandom-0.3.4" }
+getrandom04 = { package = "getrandom", version = "=0.4.3", path = "../crates/getrandom-0.4.3" }
+libc = { path = "../crates/libc-0.2.190" }
+surfman = { path = "../crates/surfman-0.14.0" }
+mozjs_sys = { path = "../crates/mozjs_sys-153.3.0-1" }
+servo-script = { path = "../crates/servo-script-0.7.0" }
+servo-script-bindings = { path = "../crates/servo-script-bindings-0.7.0" }
+rustls = { path = "../crates/rustls-0.23.45" }
+tokio-rustls = { path = "../crates/tokio-rustls-0.26.6" }
+servo-net = { path = "../crates/servo-net-0.7.0" }
+mio = { path = "../crates/mio-1.2.4" }
+socket2 = { path = "../crates/socket2-0.6.5" }
+tokio = { path = "../crates/tokio-1.53.2" }
+ring = { path = "../crates/ring-0.17.14" }
+rustix = { path = "../crates/rustix-1.1.5" }
+servo-fonts-traits = { path = "../crates/servo-fonts-traits-0.7.0" }
+servo-constellation = { path = "../crates/servo-constellation-0.7.0" }
+servo = { path = "../crates/servo-0.7.0" }
+servo-fonts = { path = "../crates/servo-fonts-0.7.0" }
+inventory = { path = "../crates/inventory-0.3.25" }
+
+[workspace]

@@ -207,13 +207,33 @@ lands.
    the right pixels back. The test is [`tools/webrender/webrender-test`](../tools/webrender/webrender-test),
    built by [`tools/webrender/build-webrender-vexa.sh`](../tools/webrender/build-webrender-vexa.sh),
    and it prints `webrender-test: passed` in the VM.
-5. **M5, an embedder.** A Vexa app that hosts Servo: a window through libvexa's GUI, input,
-   loading pages through `net`, painting the frame. Runs in the VM.
+5. **M5, an embedder.** The first part is done: Servo renders a local file in the VM.
+   [`tools/servo/servo-render`](../tools/servo/servo-render) loads
+   [`tests/servo/render-test.html`](../tests/servo/render-test.html) through `file://`, spins
+   Servo's event loop until the page has loaded and a frame is painted after that, reads the
+   frame back through `SoftwareRenderingContext`, and writes it to a PNG. It checks the pixels
+   (the orange page, with the blue square in the top-left corner) and prints
+   `servo-render: passed` in the VM. Build it with
+   `tools/servo/build-servo-vexa.sh WORKDIR` ([script](../tools/servo/build-servo-vexa.sh)),
+   then run `tools/servo/run-render-test.py WORKDIR` ([script](../tools/servo/run-render-test.py)). Servo's crates
+   need [`third_party/servo-vexa.patch`](../third_party/servo-vexa.patch): no sandbox (gaol
+   is left out on Vexa, and multiprocess is off), no ICU, ring for TLS and WebCrypto,
+   in-process IPC, FreeType fonts, `navigator.platform` as `Vexa`, and inventory's
+   constructors, which the default resources need. surfman's OSMesa context is now current
+   from creation, because glow reads the GL version before a surface is bound. What is not
+   there yet: a window and input, loading over `net`, text (the font list is empty, so
+   nothing can be shaped), and the JIT and intl. Backtraces are empty, as there is no
+   unwinder.
 6. **M6, integration.** An app bundle, a desktop entry, tests and docs, and the sandbox
    decision (`gaol` does not support Vexa).
 
 ## Next step
 
-M5, an embedder. Host Servo in a Vexa app: a window through libvexa's GUI (or the native
-compositor), input, loading pages through `net`, and painting WebRender's frame into it. The
-first Servo build keeps the JIT and intl off; revisit that once M5 runs.
+The browser, which is the goal. On top of the local-file render:
+
+- A window through libvexa's GUI: WebRender's frame in a window, resized with it, with mouse
+  and keyboard input passed to the `WebView`, and scrolling.
+- An address bar, and loading `http` and `https` through Servo's `net`, with the CA bundle
+  M2 checked. This needs a VM that resolves names.
+- Text: a Vexa font list, from FreeType over the fonts libvexa ships, so pages have fonts.
+- Then M6: an app bundle, a desktop entry, tests, and the docs.

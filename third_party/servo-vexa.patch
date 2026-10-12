@@ -1,0 +1,407 @@
+diff -ruN a/inventory-0.3.25/src/lib.rs b/inventory-0.3.25/src/lib.rs
+--- a/inventory-0.3.25/src/lib.rs	2026-10-12 02:00:27.348112370 +0000
++++ b/inventory-0.3.25/src/lib.rs	2026-10-12 02:00:27.354555442 +0000
+@@ -547,6 +547,7 @@
+                         target_os = "redox",
+                         target_os = "vxworks",
+                         target_os = "none",
++                        target_os = "vexa",
+                     )
+                 ),
+                 link_section = ".init_array",
+diff -ruN a/rustix-1.1.5/src/ioctl/mod.rs b/rustix-1.1.5/src/ioctl/mod.rs
+--- a/rustix-1.1.5/src/ioctl/mod.rs	2026-10-12 02:00:26.478335684 +0000
++++ b/rustix-1.1.5/src/ioctl/mod.rs	2026-10-12 02:00:26.512046157 +0000
+@@ -320,7 +320,8 @@
+     target_os = "haiku",
+     target_os = "horizon",
+     target_os = "hurd",
+-    target_os = "vita"
++    target_os = "vita",
++    target_os = "vexa"
+ ))]
+ type _Opcode = c::c_ulong;
+ 
+diff -ruN a/rustls-0.23.45/Cargo.toml b/rustls-0.23.45/Cargo.toml
+--- a/rustls-0.23.45/Cargo.toml	2026-10-12 02:00:27.019763503 +0000
++++ b/rustls-0.23.45/Cargo.toml	2026-10-12 02:00:27.038162166 +0000
+@@ -68,9 +68,8 @@
+ ]
+ custom-provider = []
+ default = [
+-    "aws_lc_rs",
++    "ring",
+     "logging",
+-    "prefer-post-quantum",
+     "std",
+     "tls12",
+ ]
+diff -ruN a/servo-0.7.0/Cargo.toml b/servo-0.7.0/Cargo.toml
+--- a/servo-0.7.0/Cargo.toml	2026-10-12 02:00:26.333762362 +0000
++++ b/servo-0.7.0/Cargo.toml	2026-10-12 02:00:26.339267614 +0000
+@@ -471,7 +471,7 @@
+ [dev-dependencies.winit]
+ version = "0.30.13"
+ 
+-[target.'cfg(all(not(target_os = "windows"), not(target_os = "ios"), not(target_os = "android"), not(target_env = "ohos"), not(target_arch = "arm"), not(target_arch = "aarch64"), not(target_arch="riscv32"), not(target_arch="riscv64")))'.dependencies.gaol]
++[target.'cfg(all(not(target_os = "windows"), not(target_os = "ios"), not(target_os = "android"), not(target_os = "vexa"), not(target_env = "ohos"), not(target_arch = "arm"), not(target_arch = "aarch64"), not(target_arch="riscv32"), not(target_arch="riscv64")))'.dependencies.gaol]
+ version = "0.2.1"
+ 
+ [target.'cfg(any(target_os = "android", target_env = "ohos"))'.dependencies.webxr]
+diff -ruN a/servo-0.7.0/servo.rs b/servo-0.7.0/servo.rs
+--- a/servo-0.7.0/servo.rs	2026-10-12 02:00:26.334838690 +0000
++++ b/servo-0.7.0/servo.rs	2026-10-12 02:00:26.340951449 +0000
+@@ -18,6 +18,7 @@
+     not(target_os = "windows"),
+     not(target_os = "ios"),
+     not(target_os = "android"),
++    not(target_os = "vexa"),
+     not(target_arch = "arm"),
+     not(target_arch = "aarch64"),
+     not(target_arch = "riscv32"),
+@@ -71,6 +72,7 @@
+     not(target_os = "windows"),
+     not(target_os = "ios"),
+     not(target_os = "android"),
++    not(target_os = "vexa"),
+     not(target_arch = "arm"),
+     not(target_arch = "aarch64"),
+     not(target_arch = "riscv32"),
+@@ -1408,6 +1410,7 @@
+     not(target_os = "windows"),
+     not(target_os = "ios"),
+     not(target_os = "android"),
++    not(target_os = "vexa"),
+     not(target_arch = "arm"),
+     not(target_arch = "aarch64"),
+     not(target_arch = "riscv32"),
+diff -ruN a/servo-constellation-0.7.0/Cargo.toml b/servo-constellation-0.7.0/Cargo.toml
+--- a/servo-constellation-0.7.0/Cargo.toml	2026-10-12 02:00:26.348787606 +0000
++++ b/servo-constellation-0.7.0/Cargo.toml	2026-10-12 02:00:26.352615211 +0000
+@@ -194,7 +194,7 @@
+ version = "=0.7.0"
+ package = "servo-webxr-api"
+ 
+-[target.'cfg(any(target_os="macos", all(not(target_os = "windows"), not(target_os = "ios"), not(target_os="android"), not(target_env="ohos"), not(target_arch="arm"), not(target_arch="aarch64"), not(target_arch="riscv32"), not(target_arch="riscv64"))))'.dependencies.gaol]
++[target.'cfg(any(target_os="macos", all(not(target_os = "windows"), not(target_os = "ios"), not(target_os="android"), not(target_os="vexa"), not(target_env="ohos"), not(target_arch="arm"), not(target_arch="aarch64"), not(target_arch="riscv32"), not(target_arch="riscv64"))))'.dependencies.gaol]
+ version = "0.2.1"
+ 
+ [lints.clippy]
+diff -ruN a/servo-constellation-0.7.0/sandboxing.rs b/servo-constellation-0.7.0/sandboxing.rs
+--- a/servo-constellation-0.7.0/sandboxing.rs	2026-10-12 02:00:26.349284326 +0000
++++ b/servo-constellation-0.7.0/sandboxing.rs	2026-10-12 02:00:26.353390885 +0000
+@@ -11,6 +11,7 @@
+         not(target_os = "windows"),
+         not(target_os = "ios"),
+         not(target_os = "android"),
++        not(target_os = "vexa"),
+         not(target_env = "ohos"),
+         not(target_arch = "arm"),
+         not(target_arch = "aarch64"),
+@@ -97,6 +98,7 @@
+     not(target_os = "windows"),
+     not(target_os = "ios"),
+     not(target_os = "android"),
++    not(target_os = "vexa"),
+     not(target_env = "ohos"),
+     not(target_arch = "arm"),
+     not(target_arch = "aarch64"),
+@@ -130,6 +132,7 @@
+     target_os = "windows",
+     target_os = "ios",
+     target_os = "android",
++    target_os = "vexa",
+     target_env = "ohos",
+     target_arch = "arm",
+     target_arch = "riscv32",
+@@ -146,6 +149,7 @@
+ #[cfg(any(
+     target_os = "windows",
+     target_os = "android",
++    target_os = "vexa",
+     target_env = "ohos",
+     target_arch = "arm",
+     target_arch = "aarch64",
+@@ -181,6 +185,7 @@
+     not(target_os = "windows"),
+     not(target_os = "ios"),
+     not(target_os = "android"),
++    not(target_os = "vexa"),
+     not(target_env = "ohos"),
+     not(target_arch = "arm"),
+     not(target_arch = "aarch64"),
+diff -ruN a/servo-fonts-0.7.0/Cargo.toml b/servo-fonts-0.7.0/Cargo.toml
+--- a/servo-fonts-0.7.0/Cargo.toml	2026-10-12 02:00:26.359955752 +0000
++++ b/servo-fonts-0.7.0/Cargo.toml	2026-10-12 02:00:26.402754830 +0000
+@@ -212,15 +212,15 @@
+ version = "0.23"
+ features = ["bundled"]
+ 
+-[target.'cfg(any(target_os = "linux", target_os = "android", target_os = "freebsd"))'.dependencies.freetype-sys]
++[target.'cfg(any(target_os = "linux", target_os = "android", target_os = "freebsd", target_os = "vexa"))'.dependencies.freetype-sys]
+ version = "0.23"
+ 
+-[target.'cfg(any(target_os = "linux", target_os = "android", target_os = "freebsd"))'.dependencies.harfbuzz-sys]
++[target.'cfg(any(target_os = "linux", target_os = "android", target_os = "freebsd", target_os = "vexa"))'.dependencies.harfbuzz-sys]
+ version = "0.8"
+ features = ["freetype"]
+ default-features = false
+ 
+-[target.'cfg(any(target_os = "linux", target_os = "android", target_os = "freebsd"))'.dependencies.servo-allocator]
++[target.'cfg(any(target_os = "linux", target_os = "android", target_os = "freebsd", target_os = "vexa"))'.dependencies.servo-allocator]
+ version = "=0.7.0"
+ 
+ [target.'cfg(target_os = "android")'.dependencies.xml]
+diff -ruN a/servo-fonts-0.7.0/platform/freetype/mod.rs b/servo-fonts-0.7.0/platform/freetype/mod.rs
+--- a/servo-fonts-0.7.0/platform/freetype/mod.rs	2026-10-12 02:00:26.361402600 +0000
++++ b/servo-fonts-0.7.0/platform/freetype/mod.rs	2026-10-12 02:00:26.404396426 +0000
+@@ -19,6 +19,13 @@
+ #[cfg(target_os = "android")]
+ pub use self::android::font_list;
+ 
++#[cfg(target_os = "vexa")]
++mod vexa {
++    pub mod font_list;
++}
++#[cfg(target_os = "vexa")]
++pub use self::vexa::font_list;
++
+ #[cfg(any(target_env = "ohos", ohos_mock))]
+ mod ohos {
+     mod font_cache;
+diff -ruN a/servo-fonts-0.7.0/platform/freetype/vexa/font_list.rs b/servo-fonts-0.7.0/platform/freetype/vexa/font_list.rs
+--- a/servo-fonts-0.7.0/platform/freetype/vexa/font_list.rs	1970-01-01 00:00:00.000000000 +0000
++++ b/servo-fonts-0.7.0/platform/freetype/vexa/font_list.rs	2026-10-12 02:00:26.404928758 +0000
+@@ -0,0 +1,41 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
++
++//! The font list on Vexa. There is no fontconfig here yet, so Servo finds no installed
++//! families and no fallback families. Text can't be shaped until this lists the fonts that
++//! libvexa ships, for example by reading the font directories with FreeType.
++
++use fonts_traits::FontTemplate;
++use style::values::computed::font::GenericFontFamily;
++
++use crate::{FallbackFontSelectionOptions, LowercaseFontFamilyName};
++
++pub(crate) fn for_each_available_family<F>(_callback: F)
++where
++    F: FnMut(String),
++{
++}
++
++pub(crate) fn for_each_variation<F>(_family_name: &str, _callback: F)
++where
++    F: FnMut(FontTemplate),
++{
++}
++
++pub fn fallback_font_families(_options: FallbackFontSelectionOptions) -> Vec<&'static str> {
++    Vec::new()
++}
++
++pub(crate) fn default_system_generic_font_family(
++    generic: GenericFontFamily,
++) -> LowercaseFontFamilyName {
++    let name = match generic {
++        GenericFontFamily::None | GenericFontFamily::Serif => "serif",
++        GenericFontFamily::SansSerif | GenericFontFamily::SystemUi => "sans-serif",
++        GenericFontFamily::Monospace => "monospace",
++        GenericFontFamily::Cursive => "cursive",
++        GenericFontFamily::Fantasy => "fantasy",
++    };
++    name.into()
++}
+diff -ruN a/servo-fonts-0.7.0/platform/mod.rs b/servo-fonts-0.7.0/platform/mod.rs
+--- a/servo-fonts-0.7.0/platform/mod.rs	2026-10-12 02:00:26.362441065 +0000
++++ b/servo-fonts-0.7.0/platform/mod.rs	2026-10-12 02:00:26.405410404 +0000
+@@ -21,14 +21,14 @@
+     not(target_env = "ohos")
+ ))]
+ use crate::FallbackFontSelectionOptions;
+-#[cfg(any(target_os = "linux", target_os = "android", target_os = "freebsd"))]
++#[cfg(any(target_os = "linux", target_os = "android", target_os = "freebsd", target_os = "vexa"))]
+ pub use crate::platform::freetype::{font, font_list};
+ #[cfg(target_os = "macos")]
+ pub use crate::platform::macos::{core_text_font_cache, font, font_list};
+ #[cfg(target_os = "windows")]
+ pub use crate::platform::windows::{font, font_list};
+ 
+-#[cfg(any(target_os = "linux", target_os = "android", target_os = "freebsd"))]
++#[cfg(any(target_os = "linux", target_os = "android", target_os = "freebsd", target_os = "vexa"))]
+ pub mod freetype;
+ 
+ #[cfg(target_os = "macos")]
+diff -ruN a/servo-fonts-traits-0.7.0/font_identifier.rs b/servo-fonts-traits-0.7.0/font_identifier.rs
+--- a/servo-fonts-traits-0.7.0/font_identifier.rs	2026-10-12 02:00:26.452586866 +0000
++++ b/servo-fonts-traits-0.7.0/font_identifier.rs	2026-10-12 02:00:26.456832165 +0000
+@@ -24,7 +24,7 @@
+     }
+ }
+ 
+-#[cfg(any(target_os = "linux", target_os = "android", target_os = "freebsd"))]
++#[cfg(any(target_os = "linux", target_os = "android", target_os = "freebsd", target_os = "vexa"))]
+ mod platform {
+     use std::fs::File;
+     use std::path::{Path, PathBuf};
+diff -ruN a/servo-net-0.7.0/Cargo.toml b/servo-net-0.7.0/Cargo.toml
+--- a/servo-net-0.7.0/Cargo.toml	2026-10-12 02:00:27.000100679 +0000
++++ b/servo-net-0.7.0/Cargo.toml	2026-10-12 02:00:27.007756243 +0000
+@@ -64,10 +64,8 @@
+ version = "0.35"
+ features = ["tokio-rustls-webpki-roots"]
+ 
+-[dependencies.aws-lc-rs]
+-version = "1.17"
+-features = ["aws-lc-sys"]
+-default-features = false
++[dependencies.ring]
++version = "0.17"
+ 
+ [dependencies.base64]
+ version = "0.23.0"
+@@ -242,7 +240,7 @@
+     "logging",
+     "std",
+     "tls12",
+-    "aws-lc-rs",
++    "ring",
+ ]
+ default-features = false
+ 
+diff -ruN a/servo-net-0.7.0/connector.rs b/servo-net-0.7.0/connector.rs
+--- a/servo-net-0.7.0/connector.rs	2026-10-12 02:00:27.000783083 +0000
++++ b/servo-net-0.7.0/connector.rs	2026-10-12 02:00:27.008010380 +0000
+@@ -25,7 +25,7 @@
+ use parking_lot::Mutex;
+ use rustls::client::danger::ServerCertVerifier;
+ use rustls::client::{ClientConnection, EchStatus};
+-use rustls::crypto::{CryptoProvider, aws_lc_rs};
++use rustls::crypto::{CryptoProvider, ring};
+ use rustls::{CipherSuite, ClientConfig, NamedGroup, ProtocolVersion};
+ use rustls_pki_types::{CertificateDer, ServerName, UnixTime};
+ use servo_config::pref;
+@@ -397,7 +397,7 @@
+         // initializing servo, so this should never fail.
+         .unwrap_or_else(|| {
+             warn!("Default crypto provider not initialized before first access in connector.");
+-            Arc::new(aws_lc_rs::default_provider())
++            Arc::new(ring::default_provider())
+         })
+ });
+ 
+diff -ruN a/servo-net-0.7.0/subresource_integrity.rs b/servo-net-0.7.0/subresource_integrity.rs
+--- a/servo-net-0.7.0/subresource_integrity.rs	2026-10-12 02:00:27.002275098 +0000
++++ b/servo-net-0.7.0/subresource_integrity.rs	2026-10-12 02:00:27.009399930 +0000
+@@ -6,7 +6,7 @@
+ use std::str::Split;
+ use std::sync::LazyLock;
+ 
+-use aws_lc_rs::digest::{self};
++use ring::digest::{self};
+ use base64::Engine;
+ use net_traits::response::{Response, ResponseBody, ResponseType};
+ use parking_lot::MutexGuard;
+diff -ruN a/servo-script-0.7.0/Cargo.toml b/servo-script-0.7.0/Cargo.toml
+--- a/servo-script-0.7.0/Cargo.toml	2026-10-12 02:00:26.527470939 +0000
++++ b/servo-script-0.7.0/Cargo.toml	2026-10-12 02:00:26.662870708 +0000
+@@ -144,10 +144,8 @@
+ [dependencies.atomic_refcell]
+ version = "0.1.14"
+ 
+-[dependencies.aws-lc-rs]
+-version = "1.17"
+-features = ["aws-lc-sys"]
+-default-features = false
++[dependencies.ring]
++version = "0.17"
+ 
+ [dependencies.backtrace]
+ version = "0.3"
+@@ -326,7 +324,6 @@
+ [dependencies.js]
+ version = "=0.26.4"
+ features = [
+-    "intl",
+     "libz-sys",
+ ]
+ default-features = false
+diff -ruN a/servo-script-0.7.0/dom/navigator/navigatorinfo.rs b/servo-script-0.7.0/dom/navigator/navigatorinfo.rs
+--- a/servo-script-0.7.0/dom/navigator/navigatorinfo.rs	2026-10-12 02:00:26.593641518 +0000
++++ b/servo-script-0.7.0/dom/navigator/navigatorinfo.rs	2026-10-12 02:00:26.691665891 +0000
+@@ -52,6 +52,12 @@
+ }
+ 
+ #[expect(non_snake_case)]
++#[cfg(target_os = "vexa")]
++pub(crate) fn Platform() -> DOMString {
++    DOMString::from_static("Vexa")
++}
++
++#[expect(non_snake_case)]
+ #[cfg(target_os = "macos")]
+ pub(crate) fn Platform() -> DOMString {
+     DOMString::from_static("Mac")
+diff -ruN a/servo-script-0.7.0/dom/webcrypto/subtlecrypto/hmac_operation.rs b/servo-script-0.7.0/dom/webcrypto/subtlecrypto/hmac_operation.rs
+--- a/servo-script-0.7.0/dom/webcrypto/subtlecrypto/hmac_operation.rs	2026-10-12 02:00:26.622023565 +0000
++++ b/servo-script-0.7.0/dom/webcrypto/subtlecrypto/hmac_operation.rs	2026-10-12 02:00:26.698859695 +0000
+@@ -2,8 +2,8 @@
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+ 
+-use aws_lc_rs::constant_time::verify_slices_are_equal;
+-use aws_lc_rs::hmac;
++use ring::constant_time::verify_slices_are_equal;
++use ring::hmac;
+ use js::context::JSContext;
+ use rand::TryRng;
+ use rand::rngs::SysRng;
+diff -ruN a/servo-script-0.7.0/dom/webcrypto/subtlecrypto/pbkdf2_operation.rs b/servo-script-0.7.0/dom/webcrypto/subtlecrypto/pbkdf2_operation.rs
+--- a/servo-script-0.7.0/dom/webcrypto/subtlecrypto/pbkdf2_operation.rs	2026-10-12 02:00:26.623208228 +0000
++++ b/servo-script-0.7.0/dom/webcrypto/subtlecrypto/pbkdf2_operation.rs	2026-10-12 02:00:26.699108668 +0000
+@@ -4,7 +4,7 @@
+ 
+ use std::num::NonZero;
+ 
+-use aws_lc_rs::pbkdf2;
++use ring::pbkdf2;
+ use js::context::JSContext;
+ 
+ use crate::dom::bindings::codegen::Bindings::CryptoKeyBinding::{KeyType, KeyUsage};
+diff -ruN a/servo-script-0.7.0/dom/webcrypto/subtlecrypto/sha_operation.rs b/servo-script-0.7.0/dom/webcrypto/subtlecrypto/sha_operation.rs
+--- a/servo-script-0.7.0/dom/webcrypto/subtlecrypto/sha_operation.rs	2026-10-12 02:00:26.624108206 +0000
++++ b/servo-script-0.7.0/dom/webcrypto/subtlecrypto/sha_operation.rs	2026-10-12 02:00:26.699281265 +0000
+@@ -2,7 +2,7 @@
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+ 
+-use aws_lc_rs::digest;
++use ring::digest;
+ 
+ use crate::dom::bindings::error::Error;
+ use crate::dom::subtlecrypto::{Algorithm, CryptoAlgorithm};
+diff -ruN a/servo-script-bindings-0.7.0/Cargo.toml b/servo-script-bindings-0.7.0/Cargo.toml
+--- a/servo-script-bindings-0.7.0/Cargo.toml	2026-10-12 02:00:26.712514991 +0000
++++ b/servo-script-bindings-0.7.0/Cargo.toml	2026-10-12 02:00:26.758189165 +0000
+@@ -83,7 +83,6 @@
+ [dependencies.js]
+ version = "=0.26.4"
+ features = [
+-    "intl",
+     "libz-sys",
+ ]
+ default-features = false
+diff -ruN a/tokio-rustls-0.26.6/Cargo.toml b/tokio-rustls-0.26.6/Cargo.toml
+--- a/tokio-rustls-0.26.6/Cargo.toml	2026-10-12 02:00:27.332944015 +0000
++++ b/tokio-rustls-0.26.6/Cargo.toml	2026-10-12 02:00:27.338441669 +0000
+@@ -56,7 +56,7 @@
+ default = [
+     "logging",
+     "tls12",
+-    "aws_lc_rs",
++    "ring",
+ ]
+ early-data = []
+ fips = ["rustls/fips"]

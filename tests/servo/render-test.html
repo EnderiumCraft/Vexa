@@ -1,0 +1,10 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>render test</title>
+<!-- servo-render checks this page: orange everywhere, with a blue square in the top-left
+     corner, so the pixels show both the colours and the orientation. -->
+<style>
+  html, body { margin: 0; height: 100%; background: #ff8000; }
+  #corner { position: absolute; left: 0; top: 0; width: 100px; height: 100px; background: #0000ff; }
+</style>
+<div id="corner"></div>

@@ -40,6 +40,8 @@ chmod -R u+w "$work/libc"
 patch -p2 -s -d "$work/libc" < "$repo/third_party/libc-vexa.patch"
 python3 "$here/gen-vexa-libc.py" "$repo/libvexa/include" \
     "$work/libc/src/unix/vexa" "$work/libc/src/unix/mod.rs"
+python3 "$here/gen-vexa-libc-extra.py" "$work/libc/src" \
+    "$work/libc/src/unix/vexa/extra.rs"
 
 echo "== the sysroot's library tree: libc from the copy above, then Vexa's std edits"
 rm -rf "$work/library"
