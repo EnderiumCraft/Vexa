@@ -536,6 +536,38 @@ terminal (with your own copy of Doom or Doom II, say), and `-file` adds levels m
 them. `chocolate-doom -timedemo demo1` plays the first demo as fast as it can and says
 how many frames a second that was.
 
+### Vane
+
+The web browser: Vane draws pages with the Servo engine, a modern one with its own
+JavaScript, CSS layout, fonts and HTTPS. Pages are laid out and painted in software, so
+a big page takes a moment; the progress bar under the toolbar moves while one loads.
+
+Along the top are the tabs: a click picks one, the cross closes it (so does a middle
+click), and **+** opens a new one. Under them are Back, Forward and Reload, the address
+bar and a menu (new tab, reload, zoom, copy the address). The address bar takes an
+address (`example.org`, `http://10.0.2.2:8000/`; without a scheme it is https, or http
+for `localhost` and addresses on your network) or words to search for. A click in it
+selects the address, and the usual keys edit it: the arrows, Home and End, Shift to
+select, Ctrl+A, Ctrl+C, Ctrl+X and Ctrl+V. Links that ask for a new window open as tabs,
+pages can use the clipboard, `alert` and `confirm` show as dialogs, and a `<select>`
+opens a menu. A new tab shows the start page.
+
+| Keys | |
+|---|---|
+| Ctrl+T / Ctrl+W | new tab / close the tab |
+| Ctrl+Tab, Ctrl+Shift+Tab | next / previous tab (Ctrl+PageDown, Ctrl+PageUp too) |
+| Ctrl+1 to Ctrl+9 | the tab at that place (Ctrl+9: the last) |
+| Ctrl+L or F6 | edit the address; Enter loads it, Escape gives it up |
+| Ctrl+R or F5 | reload |
+| Alt+Left / Alt+Right | back / forward |
+| Ctrl++ / Ctrl+- / Ctrl+0 | zoom in / out / 100% |
+| Ctrl+Q | quit |
+
+At a terminal, `vane https://example.org` opens a page (more addresses open more tabs).
+Vane follows the theme: dark pages that ask for it (`prefers-color-scheme`) get it.
+It is big, so its program stays on the boot CD (`/cdrom/vane`); an ISO built without
+`make vane` does not have it.
+
 ### NetSurf
 
 A web browser: NetSurf, a small one with its own engine, here as a Vexa app. It shows

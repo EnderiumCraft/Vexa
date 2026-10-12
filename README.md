@@ -111,8 +111,9 @@ runs X programs such as `xterm` in windows of their own on it. The kernel:
   sound on the HD Audio device), and SDL_mixer; each release carries it
 - plays Doom: Chocolate Doom, built with the SDK like any SDL program, with Freedoom's
   levels, art and music
-- browses the web with NetSurf (HTML, CSS, images, HTTPS, a little JavaScript), a
-  native app built with the SDK
+- browses the web with Vane (tabs, the Servo engine: modern HTML, CSS, JavaScript and
+  HTTPS) and with NetSurf (small, HTML, CSS, images, HTTPS, a little JavaScript), both
+  native apps
 - has a file system tree with a root in memory (unpacked from an initramfs), `/dev`,
   and disks mounted under `/mnt`
 - installs itself on a disk (the Installer app, or `install`) and starts from it, with

@@ -219,7 +219,7 @@ USER_OBJS := $(LIBVEXA_OBJS) \
 	$(patsubst %,$(BUILD)/%.o,$(wildcard $(addsuffix /*.c,$(addprefix userland/,$(PROGRAMS)))))
 
 .PHONY: all openssl curl mesa alsa linux-tarballs kernel programs iso run run-disk run-nographic test test-install test-disks clean distclean \
-	busybox busybox-source doom doom-source netsurf netsurf-source bash coreutils python x11 test-native test-quick native-iso \
+	busybox busybox-source doom doom-source netsurf netsurf-source vane bash coreutils python x11 test-native test-quick native-iso \
 	test-bios test-uefi test-safe test-native-boot test-virgl run-virgl sdk sdk-test packages
 
 all: iso
@@ -592,6 +592,24 @@ $(NETSURF_SOURCE_TARBALL): $(NETSURF_TARBALL) third_party/netsurf-vexa.patch too
 
 netsurf-source: $(NETSURF_SOURCE_TARBALL)
 
+# Vane, the web browser (the Servo engine, tools/servo): a Rust program, built for Vexa with
+# tools/servo/build-servo-vexa.sh, which needs the Vexa Rust toolchain (tools/rust/build-std-vexa.sh)
+# and crates.io. It is big (about 60 MB), so it stays on the boot CD (/cdrom/vane) like Doom's
+# game files, and the ISO has it when it has been built (`make vane`).
+VANE ?= $(BUILD)/vane/vane
+VANE_WORK := $(BUILD)/vane-work
+VANE_SOURCES := $(wildcard tools/servo/servo-render/src/bin/vane/*.rs) tools/servo/servo-render/Cargo.toml \
+	tools/servo/servo-render/Cargo.lock tools/servo/servo-render/build.rs \
+	third_party/servo-vexa.patch third_party/crates-vexa.patch third_party/surfman-vexa.patch \
+	tools/servo/build-servo-vexa.sh
+
+$(VANE): $(VANE_SOURCES) $(SDK_DIR)/.complete
+	tools/servo/build-servo-vexa.sh $(VANE_WORK)
+	mkdir -p $(dir $@)
+	cp $(VANE_WORK)/vane $@
+
+vane: $(VANE)
+
 # Doom: Chocolate Doom (GPL-2.0), built with the SDK like any SDL program,
 # with Freedoom's levels and art (BSD), which stay on the boot CD (/cdrom/doom)
 # until they're played. `make doom-source` packs its source and Vexa's patch,
@@ -653,7 +671,7 @@ LINUX_ON_CD := bin lib sbin usr
 # builds are reproducible).
 $(INITRAMFS): $(PROGRAM_BINS) $(LIBVEXA_SO) $(VEXA_LD) $(DLTEST_SO) $(ROOTFS_FILES) $(APP_FILES) $(LINUX_TREE) \
 		docs/USER-GUIDE.md $(DOOM_PROGRAM) $(CXX_TEST_PROGRAM) $(SDL_GL_TEST_PROGRAM) \
-		$(CORE_GL_TEST_PROGRAM) $(NETSURF_PROGRAM)
+		$(CORE_GL_TEST_PROGRAM) $(NETSURF_PROGRAM) $(wildcard $(VANE))
 	rm -rf $(BUILD)/rootfs
 	mkdir -p $(BUILD)/rootfs/bin $(BUILD)/rootfs/lib
 	cp -R rootfs/. $(BUILD)/rootfs/
@@ -677,6 +695,9 @@ $(INITRAMFS): $(PROGRAM_BINS) $(LIBVEXA_SO) $(VEXA_LD) $(DLTEST_SO) $(ROOTFS_FIL
 		mv $(BUILD)/rootfs/bin/$$exe $$bundle/Contents/Vexa/ && \
 		ln -s /apps/$${bundle##*/}/Contents/Vexa/$$exe $(BUILD)/rootfs/bin/$$exe || exit 1; \
 	done
+	# Vane's program is on the boot CD too (make_iso puts it there), when it has been built.
+	if [ -f "$(VANE)" ]; then ln -s /cdrom/vane/vane $(BUILD)/rootfs/bin/vane; \
+	else rm -rf $(BUILD)/rootfs/apps/Vane.vxapp; fi
 	# Doom's game files are on the boot CD (make_iso puts them there).
 	ln -s /cdrom/doom/freedoom1.wad $(BUILD)/rootfs/apps/Doom.vxapp/Contents/Resources/freedoom1.wad
 	# NetSurf's resources (its pages, style sheets, messages, pictures).
@@ -1054,6 +1075,7 @@ define make_iso
 	mkdir -p $(2).root/doom
 	cp $(FREEDOOM_DIR)/freedoom1.wad $(FREEDOOM_DIR)/COPYING.txt $(FREEDOOM_DIR)/CREDITS.txt \
 		$(2).root/doom/
+	if [ -f "$(VANE)" ]; then mkdir -p $(2).root/vane && cp $(VANE) $(2).root/vane/vane; fi
 	xorriso -as mkisofs -R -r -J -D -b boot/limine/limine-bios-cd.bin \
 		-no-emul-boot -boot-load-size 4 -boot-info-table -hfsplus \
 		-apm-block-size 2048 --efi-boot boot/limine/limine-uefi-cd.bin \
@@ -1120,6 +1142,7 @@ native-iso: $(DOOM) $(CXX_TEST) $(CXX_TEST_STATIC) $(MESA_VEXA) $(SDL_GL_TEST) $
 		MESA_VEXA_LIB=$(abspath $(MESA_VEXA)) SDL_GL_TEST_PROGRAM=$(abspath $(SDL_GL_TEST)) \
 		CORE_GL_TEST_PROGRAM=$(abspath $(CORE_GL_TEST)) \
 		NETSURF_PROGRAM=$(abspath $(NETSURF)) NETSURF_RES=$(abspath $(NETSURF_DIR)/res) \
+		$(if $(wildcard $(VANE)),VANE=$(abspath $(VANE))) \
 		FREEDOOM_DIR=$(abspath $(BUILD)/freedoom) iso
 # Installing on a disk (the Installer app), then starting from it.
 test-install: $(ISO)

@@ -130,6 +130,12 @@ void interrupt_dispatch(struct interrupt_frame *frame) {
         kprintf("[proc]   thread %d, rsp=%p, fs base %p (saved %p)\n",
                 thread ? (int)thread->tid : -1, (void *)frame->rsp,
                 (void *)rdmsr(IA32_FS_BASE_MSR), thread ? (void *)thread->fs_base : NULL);
+        kprintf("[proc]   rax=%p rbx=%p rcx=%p rdx=%p rsi=%p rdi=%p rbp=%p\n", (void *)frame->rax,
+                (void *)frame->rbx, (void *)frame->rcx, (void *)frame->rdx, (void *)frame->rsi,
+                (void *)frame->rdi, (void *)frame->rbp);
+        kprintf("[proc]   r8=%p r9=%p r10=%p r11=%p r12=%p r13=%p r14=%p r15=%p\n",
+                (void *)frame->r8, (void *)frame->r9, (void *)frame->r10, (void *)frame->r11,
+                (void *)frame->r12, (void *)frame->r13, (void *)frame->r14, (void *)frame->r15);
         signal_fault(frame, signal, exception_names[frame->vector & 31]);
         signal_deliver(frame);
         return;
