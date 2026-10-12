@@ -3,6 +3,7 @@
 #include <vexa/kprintf.h>
 #include <vexa/mm.h>
 #include <vexa/process.h>
+#include <vexa/sched.h>
 #include <vexa/signal.h>
 
 struct __attribute__((packed)) idt_entry {
@@ -125,6 +126,10 @@ void interrupt_dispatch(struct interrupt_frame *frame) {
         kprintf("[proc] %s at rip=%p, address %p\n",
                 frame->vector == 14 ? detail : exception_names[frame->vector & 31],
                 (void *)frame->rip, (void *)cr2);
+        struct thread *thread = thread_current();
+        kprintf("[proc]   thread %d, rsp=%p, fs base %p (saved %p)\n",
+                thread ? (int)thread->tid : -1, (void *)frame->rsp,
+                (void *)rdmsr(IA32_FS_BASE_MSR), thread ? (void *)thread->fs_base : NULL);
         signal_fault(frame, signal, exception_names[frame->vector & 31]);
         signal_deliver(frame);
         return;
