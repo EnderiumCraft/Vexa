@@ -49,9 +49,11 @@ smoke.TYPED_COMMANDS = [
     ("@type /mnt/vda/servo-window file:///mnt/vda/window-test.html > /dev/console",
      "servo-window: page loaded", 900),
     # The pointer starts at the middle of the 1280x800 screen. The window's content is at
-    # (240, 129) on the screen, and the field is at (250, 215) in the page.
+    # (240, 129) on the screen. The address bar takes its top 40 pixels, so the page starts
+    # there, and the field is at (250, 215) in the page: (250, 255) in the window, which is
+    # (490, 384) on the screen.
     ("@mouse_move -640 -400", None, 5),
-    ("@mouse_move 490 344", None, 5),
+    ("@mouse_move 490 384", None, 5),
     ("@mouse_button 1", "servo-window: title mousedown 250,215", 60),
     ("@mouse_button 0", None, 3),
     # The keyboard: the field has the focus after the press, so the typed text reaches it.
@@ -59,8 +61,9 @@ smoke.TYPED_COMMANDS = [
     # The wheel: a notch scrolls the page, and the page reports its new offset.
     ("@mouse_move 0 0 -1", "servo-window: title wheel ", 60),
     ("@mouse_move 0 0 0", "servo-window: title scroll 40 ", 60),
-    # The window: snapping it to the top left resizes it, and the page reports the new size.
-    ("@sendkey meta_l-up", "size 1278x744", 60),
+    # The window: snapping it to the top left resizes it, and the page reports the new size: the
+    # window's 744 pixels less the bar's 40.
+    ("@sendkey meta_l-up", "size 1278x704", 60),
 ]
 sys.argv = ["qemu-smoke-test.py", "--no-linux", "--only", "shell", "--keep-log",
             "--memory", "2G", "--screenshot", os.path.join(work, "window-vm.png")]

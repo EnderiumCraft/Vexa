@@ -1,11 +1,15 @@
-//! servo-window: opens a window on the Vexa desktop and shows a page that Servo renders into
-//! it. Mouse, wheel and keyboard go to the page, and resizing the window resizes the page.
+//! servo-window: opens a window on the Vexa desktop with an address bar, and a page that Servo
+//! renders below the bar. Mouse, wheel and keyboard go to the page, and resizing the window
+//! resizes the page.
 //!
 //!   servo-window URL
 //!
-//! It runs until the window is closed. Servo paints through the software rendering context,
-//! and each frame it finishes is copied into the window's surface and presented. The page's
-//! title becomes the window's title, and each change is printed, so a test can read it.
+//! The address bar shows the page's address. Click it, or press Ctrl+L, and type another: Enter
+//! loads it (an address without a scheme is https), and Escape or a click on the page gives the
+//! keyboard back to the page. It runs until the window is closed. Servo paints through the
+//! software rendering context, and each frame it finishes is copied into the window's surface
+//! and presented. The page's title becomes the window's title, and each change is printed, so a
+//! test can read it.
 
 use std::cell::{Cell, RefCell};
 use std::error::Error;
@@ -27,6 +31,8 @@ use url::Url;
 
 const WIDTH: u32 = 800;
 const HEIGHT: u32 = 600;
+/// The address bar, above the page: libvexa's toolbar, with its field 8 pixels down.
+const BAR_HEIGHT: u32 = 40;
 /// What one notch of the wheel scrolls the page by.
 const PIXELS_PER_NOTCH: f64 = 40.0;
 
@@ -37,6 +43,12 @@ const GUI_POINTER: c_int = 2;
 const GUI_CLOSE: c_int = 3;
 const GUI_FOCUS: c_int = 4;
 const GUI_RESIZE: c_int = 5;
+
+// Linux keyboard codes (Vexa's abi.h).
+const KEY_ESCAPE: c_int = 1;
+const KEY_BACKSPACE: c_int = 14;
+const KEY_ENTER: c_int = 28;
+const KEY_L: c_int = 38;
 
 #[repr(C)]
 struct VxSurface {
@@ -84,15 +96,26 @@ extern "C" {
     fn vx_window_set_title(window: *mut VxWindow, title: *const c_char);
     fn vx_window_destroy(window: *mut VxWindow);
     fn vx_gui_wait(event: *mut VxGuiEvent, timeout_ms: c_long) -> c_int;
+    fn vx_draw_toolbar(surface: *mut VxSurface, x: c_int, y: c_int, width: c_int, height: c_int);
+    fn vx_draw_field(
+        surface: *mut VxSurface,
+        x: c_int,
+        y: c_int,
+        width: c_int,
+        text: *const c_char,
+        focused: bool,
+    );
 }
 
-/// What the page tells the program: loads, frames and titles.
+/// What the page tells the program: loads, frames, titles and addresses.
 #[derive(Default)]
 struct Page {
     loaded: Cell<bool>,
     frame_ready: Cell<bool>,
     title: RefCell<Option<String>>,
     title_changed: Cell<bool>,
+    url: RefCell<Option<Url>>,
+    url_changed: Cell<bool>,
 }
 
 impl WebViewDelegate for Page {
@@ -109,6 +132,43 @@ impl WebViewDelegate for Page {
     fn notify_page_title_changed(&self, _: WebView, title: Option<String>) {
         *self.title.borrow_mut() = title;
         self.title_changed.set(true);
+    }
+
+    fn notify_url_changed(&self, _: WebView, url: Url) {
+        *self.url.borrow_mut() = Some(url);
+        self.url_changed.set(true);
+    }
+}
+
+/// The address bar: the address the page shows, or the one being typed.
+#[derive(Default)]
+struct Bar {
+    text: String,
+    focused: bool,
+    /// The first character typed after the bar takes the focus replaces the address.
+    replace_on_type: bool,
+}
+
+impl Bar {
+    fn focus(&mut self, webview: &WebView) {
+        self.focused = true;
+        self.replace_on_type = true;
+        webview.set_focused(false);
+        println!("servo-window: address focused");
+    }
+
+    fn unfocus(&mut self, webview: &WebView) {
+        self.focused = false;
+        self.replace_on_type = false;
+        webview.set_focused(true);
+    }
+
+    /// Makes the first typed character replace the address, once.
+    fn clear_for_typing(&mut self) {
+        if self.replace_on_type {
+            self.text.clear();
+            self.replace_on_type = false;
+        }
     }
 }
 
@@ -143,10 +203,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
     unsafe { vx_window_center(window) };
     fill(window, 0xffffff);
-    unsafe { vx_window_present(window, 0, 0, WIDTH as c_int, HEIGHT as c_int) };
 
     let rendering_context = Rc::new(
-        SoftwareRenderingContext::new(PhysicalSize::new(WIDTH, HEIGHT))
+        SoftwareRenderingContext::new(PhysicalSize::new(WIDTH, HEIGHT - BAR_HEIGHT))
             .expect("Could not create the software rendering context"),
     );
     rendering_context
@@ -157,6 +216,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         .event_loop_waker(Box::new(NoWaker))
         .build();
     servo.setup_logging();
+
+    let mut bar = Bar {
+        text: url.to_string(),
+        ..Bar::default()
+    };
+    paint_bar(window, &bar);
+    unsafe { vx_window_present(window, 0, 0, WIDTH as c_int, HEIGHT as c_int) };
 
     let page = Rc::new(Page::default());
     let webview = WebViewBuilder::new(&servo, rendering_context.clone())
@@ -181,10 +247,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         if waited > 0 {
             match event.kind {
                 GUI_CLOSE => break,
-                GUI_KEY => key(&webview, &event, &mut modifiers),
-                GUI_POINTER => pointer(&webview, &event, &mut buttons),
-                GUI_FOCUS => webview.set_focused(event.value != 0),
-                GUI_RESIZE => resize(window, &webview, event.width, event.height),
+                GUI_KEY => key(window, &webview, &mut bar, &event, &mut modifiers),
+                GUI_POINTER => pointer(window, &webview, &mut bar, &event, &mut buttons),
+                GUI_FOCUS => webview.set_focused(event.value != 0 && !bar.focused),
+                GUI_RESIZE => resize(window, &webview, &bar, event.width, event.height),
                 _ => {},
             }
         }
@@ -195,12 +261,18 @@ fn main() -> Result<(), Box<dyn Error>> {
             unsafe { vx_window_set_title(window, c_title.as_ptr()) };
             println!("servo-window: title {title}");
         }
+        if page.url_changed.replace(false) && !bar.focused {
+            if let Some(url) = page.url.borrow().clone() {
+                bar.text = url.to_string();
+                show_bar(window, &bar);
+            }
+        }
         if page.loaded.get() && !reported_load {
             reported_load = true;
             println!("servo-window: page loaded");
         }
         if page.frame_ready.replace(false) {
-            present(window, &rendering_context, &webview);
+            present(window, &rendering_context, &webview, &bar);
         }
     }
 
@@ -218,8 +290,31 @@ fn fill(window: *mut VxWindow, color: u32) {
     }
 }
 
-/// Copies the frame Servo has painted into the window's surface, and shows it.
-fn present(window: *mut VxWindow, rendering_context: &SoftwareRenderingContext, webview: &WebView) {
+/// Draws the address bar into the top rows of the window's surface.
+fn paint_bar(window: *mut VxWindow, bar: &Bar) {
+    let surface = unsafe { &mut (*window).surface as *mut VxSurface };
+    let width = unsafe { (*surface).width };
+    let text = CString::new(bar.text.replace('\0', "")).unwrap_or_default();
+    unsafe {
+        vx_draw_toolbar(surface, 0, 0, width, BAR_HEIGHT as c_int);
+        vx_draw_field(surface, 8, 8, width - 16, text.as_ptr(), bar.focused);
+    }
+}
+
+/// Redraws and shows just the address bar, when it changes.
+fn show_bar(window: *mut VxWindow, bar: &Bar) {
+    paint_bar(window, bar);
+    let width = unsafe { (*window).surface.width };
+    unsafe { vx_window_present(window, 0, 0, width, BAR_HEIGHT as c_int) };
+}
+
+/// Copies the frame Servo has painted into the window's surface below the bar, and shows it.
+fn present(
+    window: *mut VxWindow,
+    rendering_context: &SoftwareRenderingContext,
+    webview: &WebView,
+    bar: &Bar,
+) {
     webview.paint();
     let size = rendering_context.size();
     let rect = DeviceIntRect::new(
@@ -231,35 +326,65 @@ fn present(window: *mut VxWindow, rendering_context: &SoftwareRenderingContext, 
     };
     let surface = unsafe { &(*window).surface };
     let width = (image.width() as i32).min(surface.width);
-    let height = (image.height() as i32).min(surface.height);
+    let height = (image.height() as i32).min(surface.height - BAR_HEIGHT as i32);
     for y in 0..height {
         for x in 0..width {
             let [r, g, b, _] = image.get_pixel(x as u32, y as u32).0;
             let color = (r as u32) << 16 | (g as u32) << 8 | b as u32;
-            unsafe { *surface.pixels.offset((y * surface.stride + x) as isize) = color };
+            let row = y + BAR_HEIGHT as i32;
+            unsafe { *surface.pixels.offset((row * surface.stride + x) as isize) = color };
         }
     }
-    unsafe { vx_window_present(window, 0, 0, width, height) };
+    paint_bar(window, bar);
+    unsafe { vx_window_present(window, 0, 0, surface.width, surface.height) };
 }
 
 /// The window was resized: the program gets a surface of the new size, and the page is resized
-/// to match. `WebView::resize` resizes the rendering context too, on Servo's paint thread.
-fn resize(window: *mut VxWindow, webview: &WebView, width: c_int, height: c_int) {
+/// to the rest of it, below the bar. `WebView::resize` resizes the rendering context too, on
+/// Servo's paint thread.
+fn resize(window: *mut VxWindow, webview: &WebView, bar: &Bar, width: c_int, height: c_int) {
     // A failed resize keeps the old surface, so the page keeps its old size too.
     if unsafe { vx_window_resize(window, width, height) } != 0 {
         println!("servo-window: resize to {width}x{height} failed");
         return;
     }
     println!("servo-window: resized to {width}x{height}");
-    webview.resize(PhysicalSize::new(width as u32, height as u32));
+    show_bar(window, bar);
+    let page_height = (height as u32).saturating_sub(BAR_HEIGHT).max(1);
+    webview.resize(PhysicalSize::new(width as u32, page_height));
 }
 
-/// Pointer motion, buttons and wheel. The pointer is in the window's coordinates.
-fn pointer(webview: &WebView, event: &VxGuiEvent, buttons: &mut c_int) {
-    let point = WebViewPoint::Device(DevicePoint::new(event.x as f32, event.y as f32));
+/// Pointer motion, buttons and wheel. The pointer is in the window's coordinates: the bar is at
+/// the top, and the page's coordinates start below it. A press in the bar takes the keyboard for
+/// the bar, and a press on the page gives it back to the page.
+fn pointer(
+    window: *mut VxWindow,
+    webview: &WebView,
+    bar: &mut Bar,
+    event: &VxGuiEvent,
+    buttons: &mut c_int,
+) {
+    let changed = event.buttons ^ *buttons;
+    *buttons = event.buttons;
+    let pressed = changed & event.buttons != 0;
+    if event.y < BAR_HEIGHT as c_int {
+        if pressed {
+            bar.focus(webview);
+            show_bar(window, bar);
+        }
+        return;
+    }
+    if pressed && bar.focused {
+        bar.unfocus(webview);
+        show_bar(window, bar);
+    }
+
+    let point = WebViewPoint::Device(DevicePoint::new(
+        event.x as f32,
+        (event.y - BAR_HEIGHT as c_int) as f32,
+    ));
     webview.notify_input_event(InputEvent::MouseMove(MouseMoveEvent::new(point)));
 
-    let changed = event.buttons ^ *buttons;
     for (bit, button) in [
         (0, MouseButton::Primary),
         (1, MouseButton::Secondary),
@@ -276,7 +401,6 @@ fn pointer(webview: &WebView, event: &VxGuiEvent, buttons: &mut c_int) {
             )));
         }
     }
-    *buttons = event.buttons;
 
     // Servo takes wheel deltas as winit does, where a positive y turns the page up (the DOM's
     // deltaY is the negative of it). The wheel is positive when it turns up, too.
@@ -292,9 +416,15 @@ fn pointer(webview: &WebView, event: &VxGuiEvent, buttons: &mut c_int) {
     }
 }
 
-/// A key goes to the page as Servo's keyboard event: a named key (Enter, the arrows...), or the
-/// character it types.
-fn key(webview: &WebView, event: &VxGuiEvent, modifiers: &mut Modifiers) {
+/// A key goes to the address bar while it has the focus, and to the page otherwise. Ctrl+L
+/// gives the bar the focus.
+fn key(
+    window: *mut VxWindow,
+    webview: &WebView,
+    bar: &mut Bar,
+    event: &VxGuiEvent,
+    modifiers: &mut Modifiers,
+) {
     let state = if event.value == 0 {
         KeyState::Up
     } else {
@@ -311,6 +441,20 @@ fn key(webview: &WebView, event: &VxGuiEvent, modifiers: &mut Modifiers) {
         modifiers.insert(modifier);
     } else {
         modifiers.remove(modifier);
+    }
+    let pressed = matches!(state, KeyState::Down);
+
+    if pressed && event.key == KEY_L && modifiers.contains(Modifiers::CONTROL) {
+        bar.focus(webview);
+        show_bar(window, bar);
+        return;
+    }
+    if bar.focused {
+        if pressed {
+            bar_key(webview, bar, event);
+            show_bar(window, bar);
+        }
+        return;
     }
 
     let key = named_key(event.key)
@@ -332,6 +476,42 @@ fn key(webview: &WebView, event: &VxGuiEvent, modifiers: &mut Modifiers) {
         event.value == 2,
         false,
     )));
+}
+
+/// A key pressed while the address bar has the focus: typing edits the address, Enter loads it,
+/// and Escape gives the keyboard back to the page.
+fn bar_key(webview: &WebView, bar: &mut Bar, event: &VxGuiEvent) {
+    match event.key {
+        KEY_ESCAPE => bar.unfocus(webview),
+        KEY_BACKSPACE => {
+            if bar.replace_on_type {
+                bar.clear_for_typing();
+            } else {
+                bar.text.pop();
+            }
+        },
+        KEY_ENTER => navigate(webview, bar),
+        _ => {
+            if let Some(c) = char::from_u32(event.character as u32).filter(|c| !c.is_control()) {
+                bar.clear_for_typing();
+                bar.text.push(c);
+            }
+        },
+    }
+}
+
+/// Loads the address the bar holds. An address without a scheme is https.
+fn navigate(webview: &WebView, bar: &mut Bar) {
+    let text = bar.text.trim().to_string();
+    let parsed = Url::parse(&text).or_else(|_| Url::parse(&format!("https://{text}")));
+    match parsed {
+        Ok(url) => {
+            println!("servo-window: navigate {url}");
+            webview.load(url);
+            bar.unfocus(webview);
+        },
+        Err(error) => println!("servo-window: bad address {text}: {error}"),
+    }
 }
 
 /// The named keys, by the codes in Vexa's abi.h (the Linux keyboard codes).
