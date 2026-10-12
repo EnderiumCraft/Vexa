@@ -10,8 +10,8 @@ bundle plus the test CA, and rustls reads it through rustls-native-certs.
 WORKDIR is the one tools/servo/build-servo-vexa.sh built, with servo-render in it. This makes
 WORKDIR/https.img (a FAT disk with servo-render and the test CA bundle), makes the certificates in
 WORKDIR/https/, serves tests/servo over TLS on port 8443, boots build/vexa.iso with the disk through
-tools/qemu-smoke-test.py, and checks that the refused load prints "servo-render: title Error loading
-page" and the trusted load prints "servo-render: title fonts ok". The VM's screen is kept in
+tools/qemu-smoke-test.py, and checks that the refused load prints "servo-render: title Certificate
+error" and the trusted load prints "servo-render: title fonts ok". The VM's screen is kept in
 WORKDIR/https-vm.png, and the server's log in WORKDIR/https/server.log. Needs openssl, mkfs.vfat
 and mtools."""
 import atexit
@@ -103,7 +103,7 @@ smoke.TYPED_COMMANDS = [
     # Without the test CA, the server's certificate must be refused.
     ("export RUST_LOG=net=warn", None, 5),
     (f"/mnt/vda/servo-render https://10.0.2.2:{port}/font-test.html /mnt/vda/https-refused.png",
-     "servo-render: title Error loading page", 900),
+     "servo-render: title Certificate error", 900),
     # With it, the same page loads, and its script runs.
     ("export SSL_CERT_FILE=/mnt/vda/ca-test.pem", None, 5),
     (f"/mnt/vda/servo-render https://10.0.2.2:{port}/font-test.html /mnt/vda/https.png",
