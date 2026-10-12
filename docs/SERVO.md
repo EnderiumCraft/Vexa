@@ -227,8 +227,13 @@ lands.
    WebCrypto, in-process IPC, FreeType fonts, `navigator.platform` as `Vexa`, and inventory's
    constructors, which the default resources need. surfman's OSMesa context is current from its
    creation, because glow reads the GL version before a surface is bound. Still missing: loading
-   over `net`, text (the font list is empty, so nothing can be shaped), and the JIT and intl.
-   Backtraces are empty, as there is no unwinder.
+   over `net`, and the JIT and intl. Backtraces are empty, as there is no unwinder.
+   - **Text.** Servo's font list on Vexa ([`servo-fonts`' `vexa` module](../third_party/servo-vexa.patch))
+     reads the TrueType and OpenType files in `/share/fonts`, the DejaVu faces that libvexa's
+     text uses, through FreeType. A test page's text gets a width, and its render is painted:
+     [`tests/servo/font-test.html`](../tests/servo/font-test.html) sets its title to `fonts ok`,
+     and the same VM run (`tools/servo/run-render-test.py`) checks that title and the image
+     (`Hello from Vexa`, in DejaVu Sans).
 
    **Known issue: a resized window paints a narrow frame.** After a resize, Servo lays the page
    out at the new size (the page's `innerWidth` is the new width), and the frame that
@@ -249,5 +254,4 @@ The browser, which is the goal:
   `third_party/surfman-vexa.patch` or in Mesa's `osmesa.c` (`tools/build-mesa-vexa.sh`).
 - An address bar, and loading `http` and `https` through Servo's `net`, with the CA bundle
   M2 checked. This needs a VM that resolves names.
-- Text: a Vexa font list, from FreeType over the fonts libvexa ships, so pages have fonts.
 - Then M6: an app bundle, a desktop entry, tests, and the docs.

@@ -1,6 +1,6 @@
 diff -ruN a/inventory-0.3.25/src/lib.rs b/inventory-0.3.25/src/lib.rs
---- a/inventory-0.3.25/src/lib.rs	2026-10-12 02:00:27.348112370 +0000
-+++ b/inventory-0.3.25/src/lib.rs	2026-10-12 02:00:27.354555442 +0000
+--- a/inventory-0.3.25/src/lib.rs	2026-10-12 11:14:50.973092274 +0000
++++ b/inventory-0.3.25/src/lib.rs	2026-10-12 11:14:50.977778131 +0000
 @@ -547,6 +547,7 @@
                          target_os = "redox",
                          target_os = "vxworks",
@@ -10,8 +10,8 @@ diff -ruN a/inventory-0.3.25/src/lib.rs b/inventory-0.3.25/src/lib.rs
                  ),
                  link_section = ".init_array",
 diff -ruN a/rustix-1.1.5/src/ioctl/mod.rs b/rustix-1.1.5/src/ioctl/mod.rs
---- a/rustix-1.1.5/src/ioctl/mod.rs	2026-10-12 02:00:26.478335684 +0000
-+++ b/rustix-1.1.5/src/ioctl/mod.rs	2026-10-12 02:00:26.512046157 +0000
+--- a/rustix-1.1.5/src/ioctl/mod.rs	2026-10-12 11:14:49.791291018 +0000
++++ b/rustix-1.1.5/src/ioctl/mod.rs	2026-10-12 11:14:49.943666395 +0000
 @@ -320,7 +320,8 @@
      target_os = "haiku",
      target_os = "horizon",
@@ -23,8 +23,8 @@ diff -ruN a/rustix-1.1.5/src/ioctl/mod.rs b/rustix-1.1.5/src/ioctl/mod.rs
  type _Opcode = c::c_ulong;
  
 diff -ruN a/rustls-0.23.45/Cargo.toml b/rustls-0.23.45/Cargo.toml
---- a/rustls-0.23.45/Cargo.toml	2026-10-12 02:00:27.019763503 +0000
-+++ b/rustls-0.23.45/Cargo.toml	2026-10-12 02:00:27.038162166 +0000
+--- a/rustls-0.23.45/Cargo.toml	2026-10-12 11:14:50.693999978 +0000
++++ b/rustls-0.23.45/Cargo.toml	2026-10-12 11:14:50.945986427 +0000
 @@ -68,9 +68,8 @@
  ]
  custom-provider = []
@@ -37,8 +37,8 @@ diff -ruN a/rustls-0.23.45/Cargo.toml b/rustls-0.23.45/Cargo.toml
      "tls12",
  ]
 diff -ruN a/servo-0.7.0/Cargo.toml b/servo-0.7.0/Cargo.toml
---- a/servo-0.7.0/Cargo.toml	2026-10-12 02:00:26.333762362 +0000
-+++ b/servo-0.7.0/Cargo.toml	2026-10-12 02:00:26.339267614 +0000
+--- a/servo-0.7.0/Cargo.toml	2026-10-12 11:14:47.588265537 +0000
++++ b/servo-0.7.0/Cargo.toml	2026-10-12 11:14:47.592527193 +0000
 @@ -471,7 +471,7 @@
  [dev-dependencies.winit]
  version = "0.30.13"
@@ -49,8 +49,8 @@ diff -ruN a/servo-0.7.0/Cargo.toml b/servo-0.7.0/Cargo.toml
  
  [target.'cfg(any(target_os = "android", target_env = "ohos"))'.dependencies.webxr]
 diff -ruN a/servo-0.7.0/servo.rs b/servo-0.7.0/servo.rs
---- a/servo-0.7.0/servo.rs	2026-10-12 02:00:26.334838690 +0000
-+++ b/servo-0.7.0/servo.rs	2026-10-12 02:00:26.340951449 +0000
+--- a/servo-0.7.0/servo.rs	2026-10-12 11:14:47.588682893 +0000
++++ b/servo-0.7.0/servo.rs	2026-10-12 11:14:47.593771127 +0000
 @@ -18,6 +18,7 @@
      not(target_os = "windows"),
      not(target_os = "ios"),
@@ -76,8 +76,8 @@ diff -ruN a/servo-0.7.0/servo.rs b/servo-0.7.0/servo.rs
      not(target_arch = "aarch64"),
      not(target_arch = "riscv32"),
 diff -ruN a/servo-constellation-0.7.0/Cargo.toml b/servo-constellation-0.7.0/Cargo.toml
---- a/servo-constellation-0.7.0/Cargo.toml	2026-10-12 02:00:26.348787606 +0000
-+++ b/servo-constellation-0.7.0/Cargo.toml	2026-10-12 02:00:26.352615211 +0000
+--- a/servo-constellation-0.7.0/Cargo.toml	2026-10-12 11:14:47.599261615 +0000
++++ b/servo-constellation-0.7.0/Cargo.toml	2026-10-12 11:14:47.602444289 +0000
 @@ -194,7 +194,7 @@
  version = "=0.7.0"
  package = "servo-webxr-api"
@@ -88,8 +88,8 @@ diff -ruN a/servo-constellation-0.7.0/Cargo.toml b/servo-constellation-0.7.0/Car
  
  [lints.clippy]
 diff -ruN a/servo-constellation-0.7.0/sandboxing.rs b/servo-constellation-0.7.0/sandboxing.rs
---- a/servo-constellation-0.7.0/sandboxing.rs	2026-10-12 02:00:26.349284326 +0000
-+++ b/servo-constellation-0.7.0/sandboxing.rs	2026-10-12 02:00:26.353390885 +0000
+--- a/servo-constellation-0.7.0/sandboxing.rs	2026-10-12 11:14:47.599857280 +0000
++++ b/servo-constellation-0.7.0/sandboxing.rs	2026-10-12 11:14:47.603411625 +0000
 @@ -11,6 +11,7 @@
          not(target_os = "windows"),
          not(target_os = "ios"),
@@ -131,8 +131,8 @@ diff -ruN a/servo-constellation-0.7.0/sandboxing.rs b/servo-constellation-0.7.0/
      not(target_arch = "arm"),
      not(target_arch = "aarch64"),
 diff -ruN a/servo-fonts-0.7.0/Cargo.toml b/servo-fonts-0.7.0/Cargo.toml
---- a/servo-fonts-0.7.0/Cargo.toml	2026-10-12 02:00:26.359955752 +0000
-+++ b/servo-fonts-0.7.0/Cargo.toml	2026-10-12 02:00:26.402754830 +0000
+--- a/servo-fonts-0.7.0/Cargo.toml	2026-10-12 11:14:47.609357727 +0000
++++ b/servo-fonts-0.7.0/Cargo.toml	2026-10-12 11:14:47.764166183 +0000
 @@ -212,15 +212,15 @@
  version = "0.23"
  features = ["bundled"]
@@ -153,8 +153,8 @@ diff -ruN a/servo-fonts-0.7.0/Cargo.toml b/servo-fonts-0.7.0/Cargo.toml
  
  [target.'cfg(target_os = "android")'.dependencies.xml]
 diff -ruN a/servo-fonts-0.7.0/platform/freetype/mod.rs b/servo-fonts-0.7.0/platform/freetype/mod.rs
---- a/servo-fonts-0.7.0/platform/freetype/mod.rs	2026-10-12 02:00:26.361402600 +0000
-+++ b/servo-fonts-0.7.0/platform/freetype/mod.rs	2026-10-12 02:00:26.404396426 +0000
+--- a/servo-fonts-0.7.0/platform/freetype/mod.rs	2026-10-12 11:14:47.610166360 +0000
++++ b/servo-fonts-0.7.0/platform/freetype/mod.rs	2026-10-12 11:14:47.764918227 +0000
 @@ -19,6 +19,13 @@
  #[cfg(target_os = "android")]
  pub use self::android::font_list;
@@ -171,52 +171,162 @@ diff -ruN a/servo-fonts-0.7.0/platform/freetype/mod.rs b/servo-fonts-0.7.0/platf
      mod font_cache;
 diff -ruN a/servo-fonts-0.7.0/platform/freetype/vexa/font_list.rs b/servo-fonts-0.7.0/platform/freetype/vexa/font_list.rs
 --- a/servo-fonts-0.7.0/platform/freetype/vexa/font_list.rs	1970-01-01 00:00:00.000000000 +0000
-+++ b/servo-fonts-0.7.0/platform/freetype/vexa/font_list.rs	2026-10-12 02:00:26.404928758 +0000
-@@ -0,0 +1,41 @@
++++ b/servo-fonts-0.7.0/platform/freetype/vexa/font_list.rs	2026-10-12 11:14:47.765225249 +0000
+@@ -0,0 +1,151 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 +
-+//! The font list on Vexa. There is no fontconfig here yet, so Servo finds no installed
-+//! families and no fallback families. Text can't be shaped until this lists the fonts that
-+//! libvexa ships, for example by reading the font directories with FreeType.
++//! The font list on Vexa. The fonts are the TrueType and OpenType files in `/share/fonts`,
++//! the directory libvexa's text reads from, and FreeType reads each file for its family and
++//! style. There is no fontconfig here, so the only fonts are the ones in that directory: the
++//! DejaVu faces that Vexa ships.
 +
-+use fonts_traits::FontTemplate;
++use std::ffi::{CStr, CString};
++use std::fs;
++use std::path::{Path, PathBuf};
++
++use fonts_traits::{FontTemplate, FontTemplateDescriptor, LocalFontIdentifier};
++use freetype_sys::{FT_Done_Face, FT_Face, FT_New_Face};
++use style::Atom;
 +use style::values::computed::font::GenericFontFamily;
++use style::values::computed::{FontStyle, FontWeight, FontWidth};
 +
-+use crate::{FallbackFontSelectionOptions, LowercaseFontFamilyName};
++use crate::platform::freetype::library_handle::FreeTypeLibraryHandle;
++use crate::{FallbackFontSelectionOptions, FontIdentifier, LowercaseFontFamilyName};
 +
-+pub(crate) fn for_each_available_family<F>(_callback: F)
++const FONT_DIRECTORY: &str = "/share/fonts";
++
++/// FreeType's style flags for a face.
++const STYLE_FLAG_ITALIC: i64 = 1;
++const STYLE_FLAG_BOLD: i64 = 2;
++
++/// The family name and style of a font file's first face.
++struct FaceInfo {
++    family: String,
++    bold: bool,
++    italic: bool,
++}
++
++/// The TrueType and OpenType files in the font directory, in name order.
++fn font_files() -> Vec<PathBuf> {
++    let Ok(entries) = fs::read_dir(FONT_DIRECTORY) else {
++        return Vec::new();
++    };
++    let mut files: Vec<PathBuf> = entries
++        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
++        .filter(|path| {
++            path.extension()
++                .and_then(|extension| extension.to_str())
++                .is_some_and(|extension| {
++                    matches!(extension.to_ascii_lowercase().as_str(), "ttf" | "otf")
++                })
++        })
++        .collect();
++    files.sort();
++    files
++}
++
++/// Reads the family name and the style of a font file's first face, with FreeType.
++fn face_info(path: &Path) -> Option<FaceInfo> {
++    let c_path = CString::new(path.to_str()?).ok()?;
++    let library = FreeTypeLibraryHandle::get().lock();
++    let mut face: FT_Face = std::ptr::null_mut();
++    let error = unsafe { FT_New_Face(library.freetype_library, c_path.as_ptr(), 0, &mut face) };
++    if error != 0 || face.is_null() {
++        return None;
++    }
++    let info = unsafe {
++        let face_record = &*face;
++        if face_record.family_name.is_null() {
++            None
++        } else {
++            CStr::from_ptr(face_record.family_name)
++                .to_str()
++                .ok()
++                .map(|family| FaceInfo {
++                    family: family.to_owned(),
++                    bold: face_record.style_flags as i64 & STYLE_FLAG_BOLD != 0,
++                    italic: face_record.style_flags as i64 & STYLE_FLAG_ITALIC != 0,
++                })
++        }
++    };
++    unsafe { FT_Done_Face(face) };
++    info
++}
++
++pub(crate) fn for_each_available_family<F>(mut callback: F)
 +where
 +    F: FnMut(String),
 +{
++    for path in font_files() {
++        if let Some(info) = face_info(&path) {
++            callback(info.family);
++        }
++    }
 +}
 +
-+pub(crate) fn for_each_variation<F>(_family_name: &str, _callback: F)
++pub(crate) fn for_each_variation<F>(family_name: &str, mut callback: F)
 +where
 +    F: FnMut(FontTemplate),
 +{
++    for path in font_files() {
++        let Some(info) = face_info(&path) else {
++            continue;
++        };
++        if !info.family.eq_ignore_ascii_case(family_name) {
++            continue;
++        }
++        let Some(path) = path.to_str() else {
++            continue;
++        };
++        let weight = if info.bold {
++            FontWeight::from_float(700.)
++        } else {
++            FontWeight::normal()
++        };
++        let style = if info.italic {
++            FontStyle::ITALIC
++        } else {
++            FontStyle::NORMAL
++        };
++        let identifier = LocalFontIdentifier {
++            path: Atom::from(path),
++            face_index: 0,
++            named_instance_index: 0,
++        };
++        callback(FontTemplate::new(
++            FontIdentifier::Local(identifier),
++            FontTemplateDescriptor::new(weight, FontWidth::NORMAL, style),
++            None,
++        ));
++    }
 +}
 +
++/// The families to try for a character no font of the page has: the sans family, which covers
++/// the characters DejaVu has.
 +pub fn fallback_font_families(_options: FallbackFontSelectionOptions) -> Vec<&'static str> {
-+    Vec::new()
++    vec!["DejaVu Sans"]
 +}
 +
 +pub(crate) fn default_system_generic_font_family(
 +    generic: GenericFontFamily,
 +) -> LowercaseFontFamilyName {
 +    let name = match generic {
-+        GenericFontFamily::None | GenericFontFamily::Serif => "serif",
-+        GenericFontFamily::SansSerif | GenericFontFamily::SystemUi => "sans-serif",
-+        GenericFontFamily::Monospace => "monospace",
-+        GenericFontFamily::Cursive => "cursive",
-+        GenericFontFamily::Fantasy => "fantasy",
++        GenericFontFamily::Monospace => "DejaVu Sans Mono",
++        // Vexa ships no serif face, so serif text uses the sans family.
++        GenericFontFamily::None |
++        GenericFontFamily::Serif |
++        GenericFontFamily::SansSerif |
++        GenericFontFamily::SystemUi |
++        GenericFontFamily::Cursive |
++        GenericFontFamily::Fantasy => "DejaVu Sans",
 +    };
 +    name.into()
 +}
 diff -ruN a/servo-fonts-0.7.0/platform/mod.rs b/servo-fonts-0.7.0/platform/mod.rs
---- a/servo-fonts-0.7.0/platform/mod.rs	2026-10-12 02:00:26.362441065 +0000
-+++ b/servo-fonts-0.7.0/platform/mod.rs	2026-10-12 02:00:26.405410404 +0000
+--- a/servo-fonts-0.7.0/platform/mod.rs	2026-10-12 11:14:47.610431265 +0000
++++ b/servo-fonts-0.7.0/platform/mod.rs	2026-10-12 11:14:47.765768729 +0000
 @@ -21,14 +21,14 @@
      not(target_env = "ohos")
  ))]
@@ -235,8 +345,8 @@ diff -ruN a/servo-fonts-0.7.0/platform/mod.rs b/servo-fonts-0.7.0/platform/mod.r
  
  #[cfg(target_os = "macos")]
 diff -ruN a/servo-fonts-traits-0.7.0/font_identifier.rs b/servo-fonts-traits-0.7.0/font_identifier.rs
---- a/servo-fonts-traits-0.7.0/font_identifier.rs	2026-10-12 02:00:26.452586866 +0000
-+++ b/servo-fonts-traits-0.7.0/font_identifier.rs	2026-10-12 02:00:26.456832165 +0000
+--- a/servo-fonts-traits-0.7.0/font_identifier.rs	2026-10-12 11:14:49.756437665 +0000
++++ b/servo-fonts-traits-0.7.0/font_identifier.rs	2026-10-12 11:14:49.759987419 +0000
 @@ -24,7 +24,7 @@
      }
  }
@@ -247,8 +357,8 @@ diff -ruN a/servo-fonts-traits-0.7.0/font_identifier.rs b/servo-fonts-traits-0.7
      use std::fs::File;
      use std::path::{Path, PathBuf};
 diff -ruN a/servo-net-0.7.0/Cargo.toml b/servo-net-0.7.0/Cargo.toml
---- a/servo-net-0.7.0/Cargo.toml	2026-10-12 02:00:27.000100679 +0000
-+++ b/servo-net-0.7.0/Cargo.toml	2026-10-12 02:00:27.007756243 +0000
+--- a/servo-net-0.7.0/Cargo.toml	2026-10-12 11:14:50.481700599 +0000
++++ b/servo-net-0.7.0/Cargo.toml	2026-10-12 11:14:50.619074152 +0000
 @@ -64,10 +64,8 @@
  version = "0.35"
  features = ["tokio-rustls-webpki-roots"]
@@ -272,8 +382,8 @@ diff -ruN a/servo-net-0.7.0/Cargo.toml b/servo-net-0.7.0/Cargo.toml
  default-features = false
  
 diff -ruN a/servo-net-0.7.0/connector.rs b/servo-net-0.7.0/connector.rs
---- a/servo-net-0.7.0/connector.rs	2026-10-12 02:00:27.000783083 +0000
-+++ b/servo-net-0.7.0/connector.rs	2026-10-12 02:00:27.008010380 +0000
+--- a/servo-net-0.7.0/connector.rs	2026-10-12 11:14:50.481748420 +0000
++++ b/servo-net-0.7.0/connector.rs	2026-10-12 11:14:50.619265965 +0000
 @@ -25,7 +25,7 @@
  use parking_lot::Mutex;
  use rustls::client::danger::ServerCertVerifier;
@@ -293,8 +403,8 @@ diff -ruN a/servo-net-0.7.0/connector.rs b/servo-net-0.7.0/connector.rs
  });
  
 diff -ruN a/servo-net-0.7.0/subresource_integrity.rs b/servo-net-0.7.0/subresource_integrity.rs
---- a/servo-net-0.7.0/subresource_integrity.rs	2026-10-12 02:00:27.002275098 +0000
-+++ b/servo-net-0.7.0/subresource_integrity.rs	2026-10-12 02:00:27.009399930 +0000
+--- a/servo-net-0.7.0/subresource_integrity.rs	2026-10-12 11:14:50.482708239 +0000
++++ b/servo-net-0.7.0/subresource_integrity.rs	2026-10-12 11:14:50.620348633 +0000
 @@ -6,7 +6,7 @@
  use std::str::Split;
  use std::sync::LazyLock;
@@ -305,8 +415,8 @@ diff -ruN a/servo-net-0.7.0/subresource_integrity.rs b/servo-net-0.7.0/subresour
  use net_traits::response::{Response, ResponseBody, ResponseType};
  use parking_lot::MutexGuard;
 diff -ruN a/servo-script-0.7.0/Cargo.toml b/servo-script-0.7.0/Cargo.toml
---- a/servo-script-0.7.0/Cargo.toml	2026-10-12 02:00:26.527470939 +0000
-+++ b/servo-script-0.7.0/Cargo.toml	2026-10-12 02:00:26.662870708 +0000
+--- a/servo-script-0.7.0/Cargo.toml	2026-10-12 11:14:50.076579825 +0000
++++ b/servo-script-0.7.0/Cargo.toml	2026-10-12 11:14:50.116249316 +0000
 @@ -144,10 +144,8 @@
  [dependencies.atomic_refcell]
  version = "0.1.14"
@@ -329,8 +439,8 @@ diff -ruN a/servo-script-0.7.0/Cargo.toml b/servo-script-0.7.0/Cargo.toml
  ]
  default-features = false
 diff -ruN a/servo-script-0.7.0/dom/navigator/navigatorinfo.rs b/servo-script-0.7.0/dom/navigator/navigatorinfo.rs
---- a/servo-script-0.7.0/dom/navigator/navigatorinfo.rs	2026-10-12 02:00:26.593641518 +0000
-+++ b/servo-script-0.7.0/dom/navigator/navigatorinfo.rs	2026-10-12 02:00:26.691665891 +0000
+--- a/servo-script-0.7.0/dom/navigator/navigatorinfo.rs	2026-10-12 11:14:50.096777546 +0000
++++ b/servo-script-0.7.0/dom/navigator/navigatorinfo.rs	2026-10-12 11:14:50.133789837 +0000
 @@ -52,6 +52,12 @@
  }
  
@@ -345,8 +455,8 @@ diff -ruN a/servo-script-0.7.0/dom/navigator/navigatorinfo.rs b/servo-script-0.7
  pub(crate) fn Platform() -> DOMString {
      DOMString::from_static("Mac")
 diff -ruN a/servo-script-0.7.0/dom/webcrypto/subtlecrypto/hmac_operation.rs b/servo-script-0.7.0/dom/webcrypto/subtlecrypto/hmac_operation.rs
---- a/servo-script-0.7.0/dom/webcrypto/subtlecrypto/hmac_operation.rs	2026-10-12 02:00:26.622023565 +0000
-+++ b/servo-script-0.7.0/dom/webcrypto/subtlecrypto/hmac_operation.rs	2026-10-12 02:00:26.698859695 +0000
+--- a/servo-script-0.7.0/dom/webcrypto/subtlecrypto/hmac_operation.rs	2026-10-12 11:14:50.104424195 +0000
++++ b/servo-script-0.7.0/dom/webcrypto/subtlecrypto/hmac_operation.rs	2026-10-12 11:14:50.142156233 +0000
 @@ -2,8 +2,8 @@
   * License, v. 2.0. If a copy of the MPL was not distributed with this
   * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
@@ -359,8 +469,8 @@ diff -ruN a/servo-script-0.7.0/dom/webcrypto/subtlecrypto/hmac_operation.rs b/se
  use rand::TryRng;
  use rand::rngs::SysRng;
 diff -ruN a/servo-script-0.7.0/dom/webcrypto/subtlecrypto/pbkdf2_operation.rs b/servo-script-0.7.0/dom/webcrypto/subtlecrypto/pbkdf2_operation.rs
---- a/servo-script-0.7.0/dom/webcrypto/subtlecrypto/pbkdf2_operation.rs	2026-10-12 02:00:26.623208228 +0000
-+++ b/servo-script-0.7.0/dom/webcrypto/subtlecrypto/pbkdf2_operation.rs	2026-10-12 02:00:26.699108668 +0000
+--- a/servo-script-0.7.0/dom/webcrypto/subtlecrypto/pbkdf2_operation.rs	2026-10-12 11:14:50.104788723 +0000
++++ b/servo-script-0.7.0/dom/webcrypto/subtlecrypto/pbkdf2_operation.rs	2026-10-12 11:14:50.315873122 +0000
 @@ -4,7 +4,7 @@
  
  use std::num::NonZero;
@@ -371,8 +481,8 @@ diff -ruN a/servo-script-0.7.0/dom/webcrypto/subtlecrypto/pbkdf2_operation.rs b/
  
  use crate::dom::bindings::codegen::Bindings::CryptoKeyBinding::{KeyType, KeyUsage};
 diff -ruN a/servo-script-0.7.0/dom/webcrypto/subtlecrypto/sha_operation.rs b/servo-script-0.7.0/dom/webcrypto/subtlecrypto/sha_operation.rs
---- a/servo-script-0.7.0/dom/webcrypto/subtlecrypto/sha_operation.rs	2026-10-12 02:00:26.624108206 +0000
-+++ b/servo-script-0.7.0/dom/webcrypto/subtlecrypto/sha_operation.rs	2026-10-12 02:00:26.699281265 +0000
+--- a/servo-script-0.7.0/dom/webcrypto/subtlecrypto/sha_operation.rs	2026-10-12 11:14:50.104935155 +0000
++++ b/servo-script-0.7.0/dom/webcrypto/subtlecrypto/sha_operation.rs	2026-10-12 11:14:50.316283879 +0000
 @@ -2,7 +2,7 @@
   * License, v. 2.0. If a copy of the MPL was not distributed with this
   * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
@@ -383,8 +493,8 @@ diff -ruN a/servo-script-0.7.0/dom/webcrypto/subtlecrypto/sha_operation.rs b/ser
  use crate::dom::bindings::error::Error;
  use crate::dom::subtlecrypto::{Algorithm, CryptoAlgorithm};
 diff -ruN a/servo-script-bindings-0.7.0/Cargo.toml b/servo-script-bindings-0.7.0/Cargo.toml
---- a/servo-script-bindings-0.7.0/Cargo.toml	2026-10-12 02:00:26.712514991 +0000
-+++ b/servo-script-bindings-0.7.0/Cargo.toml	2026-10-12 02:00:26.758189165 +0000
+--- a/servo-script-bindings-0.7.0/Cargo.toml	2026-10-12 11:14:50.331592016 +0000
++++ b/servo-script-bindings-0.7.0/Cargo.toml	2026-10-12 11:14:50.355300619 +0000
 @@ -83,7 +83,6 @@
  [dependencies.js]
  version = "=0.26.4"
@@ -394,8 +504,8 @@ diff -ruN a/servo-script-bindings-0.7.0/Cargo.toml b/servo-script-bindings-0.7.0
  ]
  default-features = false
 diff -ruN a/tokio-rustls-0.26.6/Cargo.toml b/tokio-rustls-0.26.6/Cargo.toml
---- a/tokio-rustls-0.26.6/Cargo.toml	2026-10-12 02:00:27.332944015 +0000
-+++ b/tokio-rustls-0.26.6/Cargo.toml	2026-10-12 02:00:27.338441669 +0000
+--- a/tokio-rustls-0.26.6/Cargo.toml	2026-10-12 11:14:50.962914376 +0000
++++ b/tokio-rustls-0.26.6/Cargo.toml	2026-10-12 11:14:50.966757918 +0000
 @@ -56,7 +56,7 @@
  default = [
      "logging",

@@ -1,12 +1,13 @@
 //! servo-render: loads a local HTML page in Servo on Vexa, paints one frame through the
 //! software rendering context, writes it to a PNG and checks the pixels.
 //!
-//!   servo-render URL OUT.png
+//!   servo-render URL OUT.png [--render-test]
 //!
-//! The page is tests/servo/render-test.html: orange, with a blue square in the top-left
-//! corner. Prints "servo-render: passed" when the page loads and both pixels are right.
+//! It prints the page's title and writes the frame to OUT.png. With --render-test, the page is
+//! tests/servo/render-test.html (orange, with a blue square in the top-left corner), and the
+//! program checks the pixels and prints "servo-render: passed" when they are right.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::error::Error;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -40,6 +41,7 @@ impl EventLoopWaker for NoWaker {
 struct Page {
     loaded: Cell<bool>,
     frame_ready: Cell<bool>,
+    title: RefCell<Option<String>>,
 }
 
 impl WebViewDelegate for Page {
@@ -53,12 +55,17 @@ impl WebViewDelegate for Page {
     fn notify_new_frame_ready(&self, _: WebView) {
         self.frame_ready.set(true);
     }
+
+    fn notify_page_title_changed(&self, _: WebView, title: Option<String>) {
+        *self.title.borrow_mut() = title;
+    }
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = std::env::args().collect();
-    if args.len() != 3 {
-        eprintln!("usage: servo-render URL OUT.png");
+    let render_test = args.len() == 4 && args[3] == "--render-test";
+    if !(args.len() == 3 || render_test) {
+        eprintln!("usage: servo-render URL OUT.png [--render-test]");
         std::process::exit(2);
     }
     let url = Url::parse(&args[1])?;
@@ -107,6 +114,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         std::thread::sleep(Duration::from_millis(5));
     }
 
+    println!(
+        "servo-render: title {}",
+        page.title.borrow().as_deref().unwrap_or("")
+    );
     webview.paint();
     let rect = DeviceIntRect::new(
         DeviceIntPoint::new(0, 0),
@@ -125,6 +136,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         "servo-render: {url} rendered {WIDTH}x{HEIGHT}, centre {centre:?}, corner {corner:?}, written to {}",
         args[2]
     );
+    if !render_test {
+        return Ok(());
+    }
     if centre != ORANGE || corner != BLUE {
         println!("servo-render: pixels are wrong, expected centre {ORANGE:?} and corner {BLUE:?}");
         std::process::exit(1);

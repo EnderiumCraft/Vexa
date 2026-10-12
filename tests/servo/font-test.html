@@ -1,0 +1,14 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>font test</title>
+<!-- servo-render prints this page's title. A span of text has a width only if the page has a
+     font for it, so the title says whether the text got one. -->
+<style>
+  body { margin: 0; background: #ffffff; }
+  #text { position: absolute; left: 10px; top: 10px; font: 16px sans-serif; color: #000000; }
+</style>
+<span id="text">Hello from Vexa</span>
+<script>
+  const width = document.getElementById('text').getBoundingClientRect().width;
+  document.title = width > 60 ? 'fonts ok' : `fonts missing ${Math.round(width)}`;
+</script>
