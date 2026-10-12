@@ -13,11 +13,11 @@
 #   third_party/crates-vexa.patch     mio, socket2, tokio, getrandom and ring
 # The programs are in tools/servo/servo-render. servo-render loads a local HTML file, writes the
 # frame to a PNG, and prints "servo-render: passed" when the page's pixels are right.
-# servo-window opens a window on the Vexa desktop and shows the page in it.
+# vane is the browser: a window on the Vexa desktop with tabs, an address bar and the page.
 #
 #   build-servo-vexa.sh WORKDIR [--prepare-only]
 #
-# Output: WORKDIR/servo-render and WORKDIR/servo-window, stripped x86_64-unknown-vexa
+# Output: WORKDIR/servo-render and WORKDIR/vane, stripped x86_64-unknown-vexa
 # executables. With --prepare-only, the sources are made (WORKDIR/crates and WORKDIR/app) and
 # nothing is built.
 # Needs: the vexa-std toolchain (tools/rust/build-std-vexa.sh), the SDK (build/sdk/vexa-sdk),
@@ -97,9 +97,10 @@ llvm_lib=$(dirname "$host_cc")/../lib
 export LIBCLANG_PATH="$llvm_lib"
 export MOZBUILD_STATE_PATH="$work/state"
 export BINDGEN_EXTRA_CLANG_ARGS="-nostdinc++ -isystem $sdk/include/c++/v1 -nostdinc -isystem $sdk/include -isystem $llvm_lib/clang/19/include"
-(cd "$work/app" && cargo +vexa-std build --target "$target" -Zbuild-std=core,alloc,std,panic_abort)
+# An optimised build: the debug one takes seconds to paint a frame in the VM.
+(cd "$work/app" && cargo +vexa-std build --release --target "$target" -Zbuild-std=core,alloc,std,panic_abort)
 
-for program in servo-render servo-window; do
-    strip -o "$work/$program" "$work/app/target/x86_64-unknown-vexa/debug/$program"
+for program in servo-render vane; do
+    strip -o "$work/$program" "$work/app/target/x86_64-unknown-vexa/release/$program"
 done
-echo "built $work/servo-render and $work/servo-window"
+echo "built $work/servo-render and $work/vane"

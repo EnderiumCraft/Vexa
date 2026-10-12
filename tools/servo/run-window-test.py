@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Runs the window test in the Vexa VM: servo-window opens a window on the desktop with
+"""Runs the window test in the Vexa VM: Vane opens a window on the desktop with
 tests/servo/window-test.html in it, and the test drives the pointer, the wheel, the keyboard
-and a resize through the desktop. The page sets its title on each event, and servo-window
+and a resize through the desktop. The page sets its title on each event, and vane
 prints each title, so the serial log shows the events arriving.
 
   run-window-test.py WORKDIR
 
-WORKDIR is the one tools/servo/build-servo-vexa.sh built, with servo-window in it. This makes
-WORKDIR/window.img (a FAT disk with servo-window and the page), boots build/vexa.iso with it
+WORKDIR is the one tools/servo/build-servo-vexa.sh built, with vane in it. This makes
+WORKDIR/window.img (a FAT disk with vane and the page), boots build/vexa.iso with it
 through tools/qemu-smoke-test.py, and waits for each step. The VM's screen is kept in
 WORKDIR/window-vm.png. Needs mkfs.vfat and mtools."""
 import importlib.util
@@ -17,7 +17,7 @@ import sys
 
 repo = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 work = os.path.abspath(sys.argv[1])
-binary = os.path.join(work, "servo-window")
+binary = os.path.join(work, "vane")
 page = os.path.join(repo, "tests", "servo", "window-test.html")
 image = os.path.join(work, "window.img")
 os.chdir(repo)
@@ -26,7 +26,7 @@ subprocess.run(["dd", "if=/dev/zero", "of=" + image, "bs=1M", "count=512"], chec
                stderr=subprocess.DEVNULL)
 subprocess.run(["mkfs.vfat", "-F", "32", "-n", "SERVO", image], check=True,
                stdout=subprocess.DEVNULL)
-subprocess.run(["mcopy", "-i", image, binary, "::/servo-window"], check=True)
+subprocess.run(["mcopy", "-i", image, binary, "::/vane"], check=True)
 subprocess.run(["mcopy", "-i", image, page, "::/window-test.html"], check=True)
 
 spec = importlib.util.spec_from_file_location(
@@ -46,27 +46,27 @@ smoke.subprocess.Popen = popen_with_disk
 smoke.TYPED_COMMANDS = [
     ("#shell",),
     ("desktop", 'desktop: window 1 "Terminal"', 30),
-    ("@type /mnt/vda/servo-window file:///mnt/vda/window-test.html > /dev/console",
-     "servo-window: page loaded", 900),
-    # The pointer starts at the middle of the 1280x800 screen. The window's content is at
-    # (240, 129) on the screen. The address bar takes its top 40 pixels, so the page starts
-    # there, and the field is at (250, 215) in the page: (250, 255) in the window, which is
-    # (490, 384) on the screen.
+    ("@type /mnt/vda/vane file:///mnt/vda/window-test.html > /dev/console",
+     "vane: page loaded", 900),
+    # The pointer starts at the middle of the 1280x800 screen. The window, 960x680, is at
+    # (160, 89) on the screen. The tabs and the toolbar take its top 74 pixels, so the page
+    # starts there, and the field is at (350, 215) in the page: (350, 289) in the window, which
+    # is (510, 378) on the screen.
     ("@mouse_move -640 -400", None, 5),
-    ("@mouse_move 490 384", None, 5),
-    ("@mouse_button 1", "servo-window: title mousedown 250,215", 60),
+    ("@mouse_move 510 378", None, 5),
+    ("@mouse_button 1", "vane: title mousedown 350,215", 60),
     ("@mouse_button 0", None, 3),
     # The keyboard: the field has the focus after the press, so the typed text reaches it.
-    ("@type hi", "servo-window: title typed hi", 60),
+    ("@type hi", "vane: title typed hi", 60),
     # The wheel: a notch scrolls the page, and the page reports its new offset.
-    ("@mouse_move 0 0 -1", "servo-window: title wheel ", 60),
-    ("@mouse_move 0 0 0", "servo-window: title scroll 40 ", 60),
+    ("@mouse_move 0 0 -1", "vane: title wheel ", 60),
+    ("@mouse_move 0 0 0", "vane: title scroll 40 ", 60),
     # The window: snapping it to the top left resizes it, and the page reports the new size: the
-    # window's 744 pixels less the bar's 40.
-    ("@sendkey meta_l-up", "size 1278x704", 60),
+    # window's 744 pixels less the tabs' and toolbar's 74.
+    ("@sendkey meta_l-up", "size 1278x670", 60),
     # Painting is slow: the page's orange reaches the new right edge some seconds later, and the
     # program says so. The screenshot shows the resized page.
-    ("@mouse_move 0 0", "servo-window: edge #ff8000 at 1278", 400),
+    ("@mouse_move 0 0", "vane: edge #ff8000 at 1278", 400),
 ] + [("@mouse_move 0 0", None, 1)] * 6 + [
 ]
 sys.argv = ["qemu-smoke-test.py", "--no-linux", "--only", "shell", "--keep-log",
