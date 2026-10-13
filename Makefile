@@ -595,7 +595,8 @@ netsurf-source: $(NETSURF_SOURCE_TARBALL)
 # Vane, the web browser (the Servo engine, tools/servo): a Rust program, built for Vexa with
 # tools/servo/build-servo-vexa.sh, which needs the Vexa Rust toolchain (tools/rust/build-std-vexa.sh)
 # and crates.io. It is big (about 60 MB), so it stays on the boot CD (/cdrom/vane) like Doom's
-# game files, and the ISO has it when it has been built (`make vane`).
+# game files. The ISO is built with it (`make iso` builds it first, which takes a while the first
+# time: SpiderMonkey); `make iso VANE=` makes an ISO without it.
 VANE ?= $(BUILD)/vane/vane
 VANE_WORK := $(BUILD)/vane-work
 VANE_SOURCES := $(wildcard tools/servo/servo-render/src/bin/vane/*.rs) tools/servo/servo-render/Cargo.toml \
@@ -603,14 +604,14 @@ VANE_SOURCES := $(wildcard tools/servo/servo-render/src/bin/vane/*.rs) tools/ser
 	third_party/servo-vexa.patch third_party/crates-vexa.patch third_party/surfman-vexa.patch \
 	tools/servo/build-servo-vexa.sh
 
-$(VANE): $(VANE_SOURCES) $(SDK_DIR)/.complete
+$(VANE): $(VANE_SOURCES) $(SDK_DIR)/.complete $(ZLIB_NATIVE)
 	tools/servo/build-servo-vexa.sh $(VANE_WORK)
 	mkdir -p $(dir $@)
 	cp $(VANE_WORK)/vane $@
 
 vane: $(VANE)
 
-# Servo's and Vane's tests in the VM (they take a while, and need the ISO, which `make vane iso` builds
+# Servo's and Vane's tests in the VM (they take a while, and need the ISO, which `make iso` builds
 # with Vane in it).
 test-vane: $(ISO) $(VANE)
 	tools/servo/run-vane-tests.sh $(VANE_WORK)
@@ -676,7 +677,7 @@ LINUX_ON_CD := bin lib sbin usr
 # builds are reproducible).
 $(INITRAMFS): $(PROGRAM_BINS) $(LIBVEXA_SO) $(VEXA_LD) $(DLTEST_SO) $(ROOTFS_FILES) $(APP_FILES) $(LINUX_TREE) \
 		docs/USER-GUIDE.md $(DOOM_PROGRAM) $(CXX_TEST_PROGRAM) $(SDL_GL_TEST_PROGRAM) \
-		$(CORE_GL_TEST_PROGRAM) $(NETSURF_PROGRAM) $(wildcard $(VANE))
+		$(CORE_GL_TEST_PROGRAM) $(NETSURF_PROGRAM) $(VANE)
 	rm -rf $(BUILD)/rootfs
 	mkdir -p $(BUILD)/rootfs/bin $(BUILD)/rootfs/lib
 	cp -R rootfs/. $(BUILD)/rootfs/
@@ -700,7 +701,7 @@ $(INITRAMFS): $(PROGRAM_BINS) $(LIBVEXA_SO) $(VEXA_LD) $(DLTEST_SO) $(ROOTFS_FIL
 		mv $(BUILD)/rootfs/bin/$$exe $$bundle/Contents/Vexa/ && \
 		ln -s /apps/$${bundle##*/}/Contents/Vexa/$$exe $(BUILD)/rootfs/bin/$$exe || exit 1; \
 	done
-	# Vane's program is on the boot CD too (make_iso puts it there), when it has been built.
+	# Vane's program is on the boot CD too (make_iso puts it there); `make iso VANE=` leaves it out.
 	if [ -f "$(VANE)" ]; then ln -s /cdrom/vane/vane $(BUILD)/rootfs/bin/vane; \
 	else rm -rf $(BUILD)/rootfs/apps/Vane.vxapp; fi
 	# Doom's game files are on the boot CD (make_iso puts them there).
@@ -1091,11 +1092,11 @@ define make_iso
 endef
 
 $(ISO): $(KERNEL) $(INITRAMFS) $(BUILD)/limine.conf limine/limine $(LINUX_TREE) \
-		$(FREEDOOM_DIR)/freedoom1.wad $(MESA_VEXA_LIB)
+		$(FREEDOOM_DIR)/freedoom1.wad $(MESA_VEXA_LIB) $(VANE)
 	$(call make_iso,$(BUILD)/limine.conf,$@)
 
 $(SAFE_ISO): $(KERNEL) $(INITRAMFS) $(BUILD)/limine.conf limine/limine $(FREEDOOM_DIR)/freedoom1.wad \
-		$(MESA_VEXA_LIB)
+		$(MESA_VEXA_LIB) $(VANE)
 	{ echo 'default_entry: 2'; cat $(BUILD)/limine.conf; } > $(BUILD)/limine-safe-mode.conf
 	$(call make_iso,$(BUILD)/limine-safe-mode.conf,$@)
 
@@ -1140,14 +1141,14 @@ test-safe:
 		--usb ehci
 
 # Vexa must work without the Linux subsystem: build and boot a kernel without it.
-native-iso: $(DOOM) $(CXX_TEST) $(CXX_TEST_STATIC) $(MESA_VEXA) $(SDL_GL_TEST) $(CORE_GL_TEST) $(NETSURF) \
+native-iso: $(DOOM) $(CXX_TEST) $(CXX_TEST_STATIC) $(MESA_VEXA) $(SDL_GL_TEST) $(CORE_GL_TEST) $(NETSURF) $(VANE) \
 		$(BUILD)/freedoom/freedoom1.wad
 	$(MAKE) BUILD=$(BUILD)/native LINUX_COMPAT=0 DOOM_PROGRAM=$(abspath $(DOOM)) \
 		CXX_TEST_PROGRAM="$(abspath $(CXX_TEST) $(CXX_TEST_STATIC))" \
 		MESA_VEXA_LIB=$(abspath $(MESA_VEXA)) SDL_GL_TEST_PROGRAM=$(abspath $(SDL_GL_TEST)) \
 		CORE_GL_TEST_PROGRAM=$(abspath $(CORE_GL_TEST)) \
 		NETSURF_PROGRAM=$(abspath $(NETSURF)) NETSURF_RES=$(abspath $(NETSURF_DIR)/res) \
-		$(if $(wildcard $(VANE)),VANE=$(abspath $(VANE))) \
+		$(if $(VANE),VANE=$(abspath $(VANE))) \
 		FREEDOOM_DIR=$(abspath $(BUILD)/freedoom) iso
 # Installing on a disk (the Installer app), then starting from it.
 test-install: $(ISO)

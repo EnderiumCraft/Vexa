@@ -567,8 +567,8 @@ opens a menu. A new tab shows the start page.
 
 At a terminal, `vane https://example.org` opens a page (more addresses open more tabs).
 Vane follows the theme: dark pages that ask for it (`prefers-color-scheme`) get it.
-It is big, so its program stays on the boot CD (`/cdrom/vane`); an ISO built without
-`make vane` does not have it.
+It is big, so its program stays on the boot CD (`/cdrom/vane`). `make iso` builds it into
+the ISO (`make iso VANE=` makes one without it).
 
 ### NetSurf
 

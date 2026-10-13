@@ -302,9 +302,9 @@ lands.
      Alt+Right.
 6. **M6, integration.** Done except for the sandbox decision (`gaol` does not support Vexa).
    `apps/Vane.vxapp` (icon made by `tools/make-vane-icon.py`, the start page) and the
-   Makefile: `make vane` builds the program, and the ISO keeps it on the boot CD
-   (`/cdrom/vane/vane`, like Doom's game files, as it is about 60 MB) and has the app and
-   `/bin/vane` when it was built.
+   Makefile: `make vane` builds the program, and `make iso` builds it first (a long build the
+   first time), so the ISO always has it: on the boot CD (`/cdrom/vane/vane`, like Doom's game
+   files, as it is about 60 MB), with the app and `/bin/vane`. `make iso VANE=` leaves it out.
 
 ## Next step
 
