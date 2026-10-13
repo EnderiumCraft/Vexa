@@ -53,8 +53,8 @@ smoke.TYPED_COMMANDS = [
      "vane: title link test", 900),
     ("@mouse_move -640 -400", None, 5),
     ("@mouse_move 280 278", None, 5),
-    # A right click (the monitor's button 4): the page asks for its context menu.
-    ("@mouse_button 4", "vane: context menu", 300),
+    # A right click (the monitor's button 2): the page asks for its context menu.
+    ("@mouse_button 2", "vane: context menu", 300),
     ("@mouse_button 0", None, 3),
     # Down to the first item, and on to the one that opens the link in a new tab (see the menu
     # in the log: Vane prints its items).
