@@ -219,7 +219,7 @@ USER_OBJS := $(LIBVEXA_OBJS) \
 	$(patsubst %,$(BUILD)/%.o,$(wildcard $(addsuffix /*.c,$(addprefix userland/,$(PROGRAMS)))))
 
 .PHONY: all openssl curl mesa alsa linux-tarballs kernel programs iso run run-disk run-nographic test test-install test-disks clean distclean \
-	busybox busybox-source doom doom-source netsurf netsurf-source vane bash coreutils python x11 test-native test-quick native-iso \
+	busybox busybox-source doom doom-source netsurf netsurf-source vane test-vane bash coreutils python x11 test-native test-quick native-iso \
 	test-bios test-uefi test-safe test-native-boot test-virgl run-virgl sdk sdk-test packages
 
 all: iso
@@ -609,6 +609,11 @@ $(VANE): $(VANE_SOURCES) $(SDK_DIR)/.complete
 	cp $(VANE_WORK)/vane $@
 
 vane: $(VANE)
+
+# Servo's and Vane's tests in the VM (they take a while, and need the ISO, which `make vane iso` builds
+# with Vane in it).
+test-vane: $(ISO) $(VANE)
+	tools/servo/run-vane-tests.sh $(VANE_WORK)
 
 # Doom: Chocolate Doom (GPL-2.0), built with the SDK like any SDL program,
 # with Freedoom's levels and art (BSD), which stay on the boot CD (/cdrom/doom)
