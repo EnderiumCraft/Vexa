@@ -72,8 +72,9 @@ smoke.TYPED_COMMANDS = [
     ("@sendkey ret", "vane: navigate " + second, 60),
     ("@mouse_move 0 0", "vane: title window test", 300),
     ("@sendkey alt-left", "vane: title fonts ok", 300),
-    ("@sendkey alt-right", "vane: title window test", 300),
-    ("@mouse_move 0 0", "vane: corner #0000ff", 400),
+    # Going forward shows window-test.html again, with its blue corner. (Its title stays what
+    # the page's key handler made of the Alt key, so the corner is what the test waits for.)
+    ("@sendkey alt-right", "vane: corner #0000ff", 400),
 ] + [("@mouse_move 0 0", None, 1)] * 6
 sys.argv = ["qemu-smoke-test.py", "--no-linux", "--only", "shell", "--keep-log",
             "--memory", "2G", "--screenshot", os.path.join(work, "tabs-vm.png")]
