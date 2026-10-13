@@ -487,7 +487,9 @@ To add a system call: give it a number in `abi/vexa/abi.h`, handle it in
 
 `.github/workflows/build.yml` runs on every push: it installs the tools, restores the
 cached X and GTK build and the OpenGL build (keyed on their sources and scripts), builds
-the ISO, publishes it as the **Nightly** (untested, from the newest commit only), runs
+the ISO (with Vane, the browser: `make` builds Rust's std for Vexa from Rust
+`VEXA_RUST_BASE`, then Servo, and CI keeps the program until its sources, the patches, the
+Rust tools or libvexa's headers change; a build from nothing takes a long time), publishes it as the **Nightly** (untested, from the newest commit only), runs
 `make test` (with KVM), and if the tests pass publishes:
 
 - **Latest build**, replaced on every push

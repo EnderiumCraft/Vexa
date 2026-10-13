@@ -599,12 +599,22 @@ netsurf-source: $(NETSURF_SOURCE_TARBALL)
 # time: SpiderMonkey); `make iso VANE=` makes an ISO without it.
 VANE ?= $(BUILD)/vane/vane
 VANE_WORK := $(BUILD)/vane-work
-VANE_SOURCES := $(wildcard tools/servo/servo-render/src/bin/vane/*.rs) tools/servo/servo-render/Cargo.toml \
-	tools/servo/servo-render/Cargo.lock tools/servo/servo-render/build.rs \
+VANE_SOURCES := $(shell find tools/servo/servo-render -type f -not -path '*/target/*') \
 	third_party/servo-vexa.patch third_party/crates-vexa.patch third_party/surfman-vexa.patch \
-	tools/servo/build-servo-vexa.sh
+	third_party/mozjs-sys-vexa.patch third_party/mozjs-vexa.patch third_party/libc-vexa.patch \
+	tools/servo/build-servo-vexa.sh $(shell find libvexa/include -type f)
 
-$(VANE): $(VANE_SOURCES) $(SDK_DIR)/.complete $(ZLIB_NATIVE)
+# Rust's std for Vexa (the `vexa-std` rustup toolchain), made from the rust-src of the Rust
+# in VEXA_RUST_BASE (the stable toolchain, unless CI pins another).
+VEXA_STD_STAMP := $(BUILD)/vexa-std/.done
+$(VEXA_STD_STAMP): tools/rust/build-std-vexa.sh $(wildcard tools/rust/*.py) third_party/libc-vexa.patch \
+		$(shell find libvexa/include -type f) | $(SDK_DIR)/.done
+	PATH="$(abspath $(SDK_DIR))/bin:$$PATH" tools/rust/build-std-vexa.sh $(BUILD)/vexa-std
+	touch $@
+
+# (The SDK and zlib come first, but a newer one does not make Vane again: its own inputs, below,
+# are the ones that do. So CI can keep the program between runs.)
+$(VANE): $(VANE_SOURCES) $(VEXA_STD_STAMP) | $(SDK_DIR)/.complete $(ZLIB_NATIVE)
 	tools/servo/build-servo-vexa.sh $(VANE_WORK)
 	mkdir -p $(dir $@)
 	cp $(VANE_WORK)/vane $@

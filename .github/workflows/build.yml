@@ -18,6 +18,9 @@ on:
 env:
   # The last part of Vexa's version: every build has its own (the Makefile reads it).
   VEXA_BUILD: ${{ github.run_number }}
+  # The Rust that Vane's std for Vexa is made from (tools/rust/std-vexa-glue.py edits its sources,
+  # so a newer Rust needs the glue checked first).
+  VEXA_RUST_BASE: 1.94.1
 
 jobs:
   build:
@@ -34,11 +37,43 @@ jobs:
             build-essential xorriso qemu-system-x86 ovmf python3 e2fsprogs dosfstools exfatprogs mtools \
             musl-tools linux-libc-dev ninja-build pkg-config bison gperf \
             libglib2.0-dev-bin gtk-update-icon-cache python3-packaging \
-            cmake flex python3-mako clang libpng-dev zlib1g-dev
+            cmake flex python3-mako clang libpng-dev zlib1g-dev \
+            clang-19 libclang-19-dev llvm-19-dev patch
           # X.Org's packages want a newer Meson than Ubuntu's. GLib's build
           # looks for Python's "packaging" module in Meson's own environment.
           pipx install meson==1.12.1
           pipx inject meson packaging
+
+      # Vane (the browser: Servo, with SpiderMonkey) is built with Rust: its std for Vexa is made
+      # from this Rust's sources (make does it, tools/rust/build-std-vexa.sh).
+      - name: Install Rust for Vane
+        run: |
+          rustup toolchain install "$VEXA_RUST_BASE" --profile minimal --component rust-src
+          rustup default "$VEXA_RUST_BASE"
+
+      # Vane's build is the biggest (about 15 minutes with SpiderMonkey, and several GB of disk).
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      # Keep Vane's program until what it is made from changes (its sources, the patches, the Rust
+      # tools, libvexa's headers), so most runs don't build it again.
+      - name: Restore Vane
+        id: vane-cache
+        uses: actions/cache@v4
+        with:
+          path: build/vane/vane
+          key: vane-${{ env.VEXA_RUST_BASE }}-${{ hashFiles('tools/servo/**', 'tools/rust/**', 'third_party/*-vexa.patch', 'libvexa/include/**', 'abi/vexa/abi.h') }}
+
+      - name: Mark the restored Vane as up to date
+        if: steps.vane-cache.outputs.cache-hit == 'true'
+        run: |
+          # (Older than the program: make sees that Rust's std need not be made again.)
+          mkdir -p build/vexa-std
+          touch build/vexa-std/.done
+          sleep 1
+          touch build/vane/vane
 
       # The X Window System takes the longest to build: keep it (and its source
       # tarballs) between runs, until its sources or build script change.
@@ -115,7 +150,7 @@ jobs:
           touch build/openssl-root/.done
           touch build/curl-root/usr/bin/curl build/alsa-root/.done build/python-root/.done
 
-      - name: Build ISO (with BusyBox, bash, coreutils, Python and X, built from source), and the SDK
+      - name: Build ISO (with BusyBox, bash, coreutils, Python, X and Vane, built from source), and the SDK
         run: make && make busybox-source && make doom-source && make netsurf-source && make sdk && make packages
 
       - name: Read version
@@ -167,6 +202,8 @@ jobs:
           notes="Nightly build of commit ${short_sha} on \`${GITHUB_REF_NAME}\`, $(date -u '+%Y-%m-%d %H:%M UTC'), published as soon as it was built, **before the tests ran**: it may not work. \"Latest build\" and the versioned releases have passed the tests.
 
           Run it with: \`qemu-system-x86_64 -M q35 -m 512M -cdrom vexa-${VERSION}.iso\`
+
+          The ISO has Vane, the web browser (the Servo engine, MPL-2.0; Vexa's patches are in the repository).
 
           The sources of its GPL and LGPL parts are attached."
           # (Through the releases API: the workflow's token may not move a tag with

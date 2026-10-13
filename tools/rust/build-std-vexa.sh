@@ -6,7 +6,8 @@
 #
 #   build-std-vexa.sh WORKDIR
 #
-# Needs: rustup with the stable toolchain and its rust-src component, python3, patch,
+# Needs: rustup with the stable toolchain (or the one named in VEXA_RUST_BASE) and its rust-src
+# component, python3, patch,
 # cargo with network access to crates.io (for the libc 0.2.178 source), and vexa-cc on
 # PATH (the SDK's bin directory) for the target's linker.
 #
@@ -17,7 +18,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../.." && pwd)
 work=$(mkdir -p "$1" && cd "$1" && pwd)
 tc_name=vexa-std
-stable=$(rustup run stable rustc --print sysroot)
+stable=$(rustup run "${VEXA_RUST_BASE:-stable}" rustc --print sysroot)
 src=$stable/lib/rustlib/src/rust/library
 
 echo "== libc 0.2.178 with the Vexa patch and declarations"
