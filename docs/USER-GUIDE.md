@@ -548,8 +548,10 @@ bar and a menu (new tab, reload, zoom, copy the address). The address bar takes 
 address (`example.org`, `http://10.0.2.2:8000/`; without a scheme it is https, or http
 for `localhost` and addresses on your network) or words to search for. A click in it
 selects the address, and the usual keys edit it: the arrows, Home and End, Shift to
-select, Ctrl+A, Ctrl+C, Ctrl+X and Ctrl+V. Links that ask for a new window open as tabs,
-pages can use the clipboard, `alert` and `confirm` show as dialogs, and a `<select>`
+select, Ctrl+A, Ctrl+C, Ctrl+X and Ctrl+V. Tabs show their page's icon. A right click on a page opens its menu (open a link in a new
+tab, copy a link, Back, Forward, Reload, Cut, Copy, Paste, Select All), and the arrow keys,
+Enter and Escape work in it, as in every menu here. Links that ask for a new window open as
+tabs, pages can use the clipboard, `alert` and `confirm` show as dialogs, and a `<select>`
 opens a menu. A new tab shows the start page.
 
 | Keys | |

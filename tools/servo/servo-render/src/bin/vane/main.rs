@@ -1030,7 +1030,15 @@ impl App {
         for item in menu.items() {
             match item {
                 ContextMenuItem::Item { label, action, enabled } => {
-                    entries.push((label.as_str(), "", !*enabled));
+                    // Vane's words for what Servo's labels call views.
+                    let label = match action {
+                        ContextMenuAction::OpenLinkInNewWebView => "Open Link in New Tab",
+                        ContextMenuAction::OpenImageInNewView => "Open Image in New Tab",
+                        ContextMenuAction::CopyLink => "Copy Link Address",
+                        ContextMenuAction::CopyImageLink => "Copy Image Address",
+                        _ => label.as_str(),
+                    };
+                    entries.push((label, "", !*enabled));
                     actions.push(Some(*action));
                 },
                 ContextMenuItem::Separator => {

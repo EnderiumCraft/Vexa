@@ -278,6 +278,20 @@ lands.
      16 bytes too small. A debug build had padding there and never showed it. The repository's
      `third_party/libc-vexa.patch` is right; the toolchain has to be rebuilt from it
      (`tools/rust/build-std-vexa.sh`) whenever libvexa's headers change.
+   - **Context menu and icons.** A right click gives the page's context menu through
+     `show_embedder_control` (`EmbedderControl::ContextMenu`): Vane shows it as a pop-up and
+     answers with `ContextMenu::select(action)`, and Servo does the rest (a link opens as a tab
+     through `request_create_new`; copy and paste go through the clipboard delegate, which is
+     libvexa's). A `<select>` is a pop-up the same way, and the page's icon (`favicon()`) is
+     drawn at 16 by 16 in its tab. [`run-context-test.py`](../tools/servo/run-context-test.py)
+     right-clicks the link in `tests/servo/link-test.html`, moves down the menu with the keyboard
+     and opens the link in a new tab. [`run-vane-iso-test.py`](../tools/servo/run-vane-iso-test.py)
+     starts Vane from the ISO, which opens the start page.
+   - **Names.** libvexa resolves names with `/etc/hosts` first and then with the DNS server DHCP
+     gave. [`run-https-test.py`](../tools/servo/run-https-test.py) also loads a page by name
+     (`vane.test`, mapped to the host in the VM's `/etc/hosts`; the test certificate has the
+     name), so the hostname check and the lookup are tested; the sandbox has no DNS, so a real
+     site was not tried.
    - **Tabs, the address bar and navigation.** Vane's address bar edits the text (cursor,
      selection, the clipboard), takes an address or words to search for, and Enter loads it in
      the tab. [`run-address-test.py`](../tools/servo/run-address-test.py) clicks the bar, types
@@ -299,8 +313,8 @@ The browser, which is the goal:
 - Names: libvexa resolves with the DHCP server's DNS and `/etc/hosts`, so `https` works on real
   sites where the network has DNS (QEMU's user network uses the host's); the test sandbox has
   none, so the HTTPS test uses an address.
-- Prompt dialogs (`prompt()`), file pickers, colour pickers and the page's context menu are not
-  shown yet (they are cancelled); downloads, find in page and bookmarks do not exist.
+- Prompt dialogs (`prompt()`), file pickers and colour pickers are not shown yet (they are
+  cancelled); downloads, find in page and bookmarks do not exist.
 
 Two crashes seen in `servo-window` (a page fault reading the CA bundle at startup, and one writing a
 GPU buffer after a navigation) came about once in every 4 to 10 starts. The cause was in the

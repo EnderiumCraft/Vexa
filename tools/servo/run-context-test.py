@@ -56,8 +56,7 @@ smoke.TYPED_COMMANDS = [
     # A right click (the monitor's button 2): the page asks for its context menu.
     ("@mouse_button 2", "vane: context menu", 300),
     ("@mouse_button 0", None, 3),
-    # Down to the first item, and on to the one that opens the link in a new tab (see the menu
-    # in the log: Vane prints its items).
+    # Down to the first item, which opens the link in a new tab (Vane prints the items in the log).
     ("@sendkey down", None, 2),
     ("@sendkey ret", "vane: tab 2 of 2", 300),
     ("@mouse_move 0 0", "vane: title fonts ok", 300),
