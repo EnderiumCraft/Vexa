@@ -27,7 +27,8 @@ use std::time::{Duration, Instant};
 use dpi::PhysicalSize;
 use servo::resources::ResourceReaderMethods;
 use servo::{
-    Code, DeviceIntPoint, DeviceIntRect, DevicePoint, EmbedderControl, EventLoopWaker,
+    Code, ContextMenu, ContextMenuAction, ContextMenuItem, DeviceIntPoint, DeviceIntRect,
+    DevicePoint, EmbedderControl, EventLoopWaker,
     InputEvent, Key, KeyState, KeyboardEvent, Location, Modifiers, MouseButton,
     MouseButtonAction, MouseButtonEvent, MouseMoveEvent, NamedKey, RenderingContext, SelectElement,
     Servo, ServoBuilder, SimpleDialog, SoftwareRenderingContext, Theme, WebViewBuilder, WebViewPoint,
@@ -79,7 +80,9 @@ const K_F5: c_int = 63;
 const K_F6: c_int = 64;
 const K_HOME: c_int = 102;
 const K_PAGE_UP: c_int = 104;
+const K_UP: c_int = 103;
 const K_LEFT: c_int = 105;
+const K_DOWN: c_int = 108;
 const K_RIGHT: c_int = 106;
 const K_END: c_int = 107;
 const K_PAGE_DOWN: c_int = 109;
@@ -116,6 +119,8 @@ enum PopupKind {
     Browser,
     /// A page's `<select>`: the option ids, per menu item (None for a group's label).
     Select(SelectElement, Vec<Option<usize>>),
+    /// A page's context menu (a right click): the action per menu item (None for a line).
+    Context(ContextMenu, Vec<Option<ContextMenuAction>>),
 }
 
 struct Popup {
@@ -390,11 +395,26 @@ impl App {
         for (index, tab) in self.tabs.iter().enumerate() {
             let (x, y, w, h) = tab_rect(width, count, index);
             let chosen = index == self.active;
-            let label = elide(&tab.title_or_address(), w - 40);
-            ui.tab(x, y, w, h, &label, chosen);
-            if tab.state.loading() {
-                // A small dot in the tab's corner while the page loads.
-                ui.rounded(x + 6, y + h / 2 - 2, 4, 4, 2, theme.accent);
+            let favicon = tab.state.favicon.borrow();
+            let loading = tab.state.loading();
+            if let (Some(icon), false) = (favicon.as_ref(), loading) {
+                // The page's icon, and the title after it.
+                let label = elide(&tab.title_or_address(), w - 40 - tab::FAVICON_SIZE - 4);
+                ui.tab(x, y, w, h, "", chosen);
+                ui.blend_icon(x + 8, y + (h - tab::FAVICON_SIZE) / 2, icon, tab::FAVICON_SIZE);
+                let top = y + (h - ffi::font_height()) / 2;
+                let left = x + 8 + tab::FAVICON_SIZE + 4;
+                if chosen {
+                    ui.text(left, top + 1, &label, ffi::mix(theme.accent, 0x000000, 110));
+                }
+                ui.text(left, top, &label, if chosen { 0xffffff } else { theme.text });
+            } else {
+                let label = elide(&tab.title_or_address(), w - 40);
+                ui.tab(x, y, w, h, &label, chosen);
+                if loading {
+                    // A small dot in the tab's corner while the page loads.
+                    ui.rounded(x + 6, y + h / 2 - 2, 4, 4, 2, theme.accent);
+                }
             }
             let hot = self.hover == Hit::TabClose(index);
             if chosen || hot || matches!(self.hover, Hit::Tab(i) if i == index) {
@@ -616,9 +636,8 @@ impl App {
             return;
         }
         if self.popup.is_some() {
-            if down && event.key == K_ESC {
-                self.popup = None;
-                self.chrome_dirty = true;
+            if down {
+                self.popup_key(event.key);
             }
             return;
         }
@@ -858,6 +877,30 @@ impl App {
         self.chrome_dirty = true;
     }
 
+    /// A key while a pop-up menu is open: Up and Down move through its items, Enter chooses
+    /// the one marked, Escape closes it.
+    fn popup_key(&mut self, key: c_int) {
+        let Some(popup) = &mut self.popup else {
+            return;
+        };
+        match key {
+            K_ESC => {
+                self.popup = None;
+            },
+            K_UP | K_DOWN => {
+                let first = if popup.hot < 0 && key == K_UP { popup.menu.count() } else { popup.hot };
+                popup.hot = popup.menu.step(first, if key == K_UP { -1 } else { 1 });
+            },
+            K_ENTER if popup.hot >= 0 => {
+                let hot = popup.hot;
+                let popup = self.popup.take().unwrap();
+                self.popup_chosen(popup, hot);
+            },
+            _ => {},
+        }
+        self.chrome_dirty = true;
+    }
+
     fn open_browser_menu(&mut self) {
         let has_address = !self.address.text.is_empty();
         let menu = Menu::new(&[
@@ -908,6 +951,11 @@ impl App {
                     select.submit();
                 }
             },
+            PopupKind::Context(menu, actions) => {
+                if let Some(Some(action)) = actions.get(item as usize) {
+                    menu.select(*action);
+                }
+            },
         }
     }
 
@@ -936,8 +984,9 @@ impl App {
                     }
                 },
                 EmbedderControl::SelectElement(select) => self.open_select(select),
-                // Colour and file pickers, input methods and the page's context menu are not
-                // shown yet: dropping them cancels them.
+                EmbedderControl::ContextMenu(menu) => self.open_context_menu(menu),
+                // Colour and file pickers and input methods are not shown yet: dropping them
+                // cancels them.
                 _ => {},
             }
         }
@@ -972,6 +1021,35 @@ impl App {
         let x = position.min.x.clamp(0, (self.ui.width() - width).max(0));
         let y = (CHROME + position.max.y).min((self.ui.height() - height).max(CHROME));
         self.popup = Some(Popup { menu, x, y, hot: -1, kind: PopupKind::Select(select, ids) });
+        self.chrome_dirty = true;
+    }
+
+    fn open_context_menu(&mut self, menu: ContextMenu) {
+        let mut entries: Vec<(&str, &str, bool)> = Vec::new();
+        let mut actions: Vec<Option<ContextMenuAction>> = Vec::new();
+        for item in menu.items() {
+            match item {
+                ContextMenuItem::Item { label, action, enabled } => {
+                    entries.push((label.as_str(), "", !*enabled));
+                    actions.push(Some(*action));
+                },
+                ContextMenuItem::Separator => {
+                    entries.push(("", "", false));
+                    actions.push(None);
+                },
+            }
+        }
+        if entries.is_empty() {
+            return;
+        }
+        let labels: Vec<&str> = entries.iter().map(|e| e.0).filter(|l| !l.is_empty()).collect();
+        println!("vane: context menu: {}", labels.join(" | "));
+        let list = Menu::new(&entries);
+        let position = menu.position();
+        let (width, height) = list.size();
+        let x = position.min.x.clamp(0, (self.ui.width() - width).max(0));
+        let y = (CHROME + position.min.y).min((self.ui.height() - height).max(CHROME));
+        self.popup = Some(Popup { menu: list, x, y, hot: -1, kind: PopupKind::Context(menu, actions) });
         self.chrome_dirty = true;
     }
 

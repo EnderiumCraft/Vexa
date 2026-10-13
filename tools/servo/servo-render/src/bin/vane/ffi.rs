@@ -264,6 +264,7 @@ pub fn alert(title: &str, message: &str, detail: &str, buttons: &[&str], default
 /// A pop-up menu: its items, each with a label and an optional shortcut, or a line.
 pub struct Menu {
     items: Vec<MenuItem>,
+    selectable: Vec<bool>,
     _strings: Vec<CString>,
 }
 
@@ -272,6 +273,7 @@ impl Menu {
     pub fn new(items: &[(&str, &str, bool)]) -> Menu {
         let mut strings = Vec::new();
         let mut list = Vec::new();
+        let mut selectable = Vec::new();
         for (label, keys, disabled) in items {
             let label_pointer = if label.is_empty() {
                 std::ptr::null()
@@ -286,9 +288,25 @@ impl Menu {
                 strings.last().unwrap().as_ptr()
             };
             list.push(MenuItem { label: label_pointer, keys: keys_pointer, disabled: *disabled });
+            selectable.push(!label.is_empty() && !*disabled);
         }
         // The CStrings' buffers do not move when the Vec of them does.
-        Menu { items: list, _strings: strings }
+        Menu { items: list, selectable, _strings: strings }
+    }
+
+    /// The next item that can be chosen, from `from` (-1: none yet) in `direction` (1 or -1),
+    /// not going past the ends; `from` if there is none.
+    pub fn step(&self, from: i32, direction: i32) -> i32 {
+        let mut at = from;
+        loop {
+            at += direction;
+            if at < 0 || at >= self.count() {
+                return from;
+            }
+            if self.selectable[at as usize] {
+                return at;
+            }
+        }
     }
 
     pub fn count(&self) -> i32 {
@@ -408,6 +426,26 @@ impl Ui {
 
     pub fn menu(&self, x: i32, y: i32, menu: &Menu, hot: i32) {
         unsafe { vx_draw_menu(self.surface(), x, y, menu.items.as_ptr(), menu.count(), hot) };
+    }
+
+    /// Draws a square icon of `pixels` (0xAARRGGBB, `size` by `size`) over what is on the
+    /// surface, blended by their alpha.
+    pub fn blend_icon(&self, x: i32, y: i32, pixels: &[u32], size: i32) {
+        let surface = unsafe { &*self.surface() };
+        for row in 0..size {
+            for column in 0..size {
+                let pixel = pixels[(row * size + column) as usize];
+                let alpha = (pixel >> 24) as i32;
+                let (px, py) = (x + column, y + row);
+                if alpha == 0 || px < 0 || py < 0 || px >= surface.width || py >= surface.height {
+                    continue;
+                }
+                unsafe {
+                    let at = surface.pixels.offset((py * surface.stride + px) as isize);
+                    *at = mix(*at & 0xffffff, pixel & 0xffffff, alpha);
+                }
+            }
+        }
     }
 
     /// Writes a row of pixels (0xRRGGBB) into the surface.

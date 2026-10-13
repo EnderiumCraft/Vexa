@@ -44,6 +44,8 @@ pub struct TabState {
     pub load_changed: Cell<bool>,
     pub status: RefCell<Option<String>>,
     pub cursor: Cell<c_int>,
+    /// The page's icon, as 16 by 16 pixels (0xAARRGGBB).
+    pub favicon: RefCell<Option<Vec<u32>>>,
     /// The page closed itself (`window.close()`).
     pub closed: Cell<bool>,
 }
@@ -61,6 +63,7 @@ impl TabState {
             load_changed: Cell::new(false),
             status: RefCell::new(None),
             cursor: Cell::new(ffi::CURSOR_ARROW),
+            favicon: RefCell::new(None),
             closed: Cell::new(false),
         })
     }
@@ -130,6 +133,11 @@ impl WebViewDelegate for TabState {
         self.cursor.set(cursor_shape(cursor));
     }
 
+    fn notify_favicon_changed(&self, webview: WebView) {
+        let icon = webview.favicon().and_then(|image| favicon_pixels(&image));
+        *self.favicon.borrow_mut() = icon;
+    }
+
     fn notify_closed(&self, _: WebView) {
         self.closed.set(true);
     }
@@ -153,6 +161,42 @@ impl WebViewDelegate for TabState {
             .borrow_mut()
             .push((origin.unwrap_or_else(|| "this page".to_string()), control));
     }
+}
+
+/// The size tabs show icons at.
+pub const FAVICON_SIZE: i32 = 16;
+
+/// A page's icon, made `FAVICON_SIZE` square (the nearest pixels), as 0xAARRGGBB.
+fn favicon_pixels(image: &servo::Image) -> Option<Vec<u32>> {
+    use servo::PixelFormat;
+    let (width, height) = (image.width as usize, image.height as usize);
+    let bytes_per_pixel = match image.format {
+        PixelFormat::K8 => 1,
+        PixelFormat::KA8 => 2,
+        PixelFormat::RGB8 => 3,
+        PixelFormat::RGBA8 | PixelFormat::BGRA8 => 4,
+    };
+    let data = image.data();
+    if width == 0 || height == 0 || data.len() < width * height * bytes_per_pixel {
+        return None;
+    }
+    let size = FAVICON_SIZE as usize;
+    let mut pixels = Vec::with_capacity(size * size);
+    for row in 0..size {
+        for column in 0..size {
+            let at = ((row * height / size) * width + column * width / size) * bytes_per_pixel;
+            let p = &data[at..at + bytes_per_pixel];
+            let (r, g, b, a) = match image.format {
+                PixelFormat::K8 => (p[0], p[0], p[0], 255),
+                PixelFormat::KA8 => (p[0], p[0], p[0], p[1]),
+                PixelFormat::RGB8 => (p[0], p[1], p[2], 255),
+                PixelFormat::RGBA8 => (p[0], p[1], p[2], p[3]),
+                PixelFormat::BGRA8 => (p[2], p[1], p[0], p[3]),
+            };
+            pixels.push((a as u32) << 24 | (r as u32) << 16 | (g as u32) << 8 | b as u32);
+        }
+    }
+    Some(pixels)
 }
 
 /// The desktop's clipboard, for the pages' copy and paste.

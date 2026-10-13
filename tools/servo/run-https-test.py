@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Runs Servo's HTTPS load test in the Vexa VM: servo-render loads a page over TLS from this
-machine, at 10.0.2.2 (QEMU's user-mode NAT, the host as the guest sees it), so no DNS is needed.
+machine, at 10.0.2.2 (QEMU's user-mode NAT, the host as the guest sees it), by address, and by
+the name vane.test, which the VM's /etc/hosts maps to 10.0.2.2 (the sandbox has no DNS; libvexa
+resolves with /etc/hosts first, and then with the DNS server DHCP gave).
 The server's certificate is made here, by a test CA. The VM first loads the page without that CA,
 which must be refused, then with it: SSL_CERT_FILE points at a CA bundle that is the system's
 bundle plus the test CA, and rustls reads it through rustls-native-certs.
@@ -44,7 +46,7 @@ openssl("req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", "ca.key", "-
 openssl("req", "-newkey", "rsa:2048", "-nodes", "-keyout", "server.key", "-out", "server.csr",
         "-subj", "/CN=10.0.2.2")
 with open(os.path.join(certs, "server.ext"), "w") as ext:
-    ext.write("subjectAltName=IP:10.0.2.2\nbasicConstraints=CA:FALSE\n"
+    ext.write("subjectAltName=IP:10.0.2.2,DNS:vane.test\nbasicConstraints=CA:FALSE\n"
               "keyUsage=digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\n")
 openssl("x509", "-req", "-in", "server.csr", "-CA", "ca.pem", "-CAkey", "ca.key",
         "-CAcreateserial", "-out", "server.pem", "-days", "30", "-extfile", "server.ext")
@@ -110,6 +112,12 @@ smoke.TYPED_COMMANDS = [
      "servo-render: title fonts ok", 900),
     # The title comes before the frame is saved; this waits until the file is there.
     ("ls -l /mnt/vda", "https.png", 900),
+    # By name: /etc/hosts maps vane.test to the host, the certificate has it as a name, and the
+    # name is checked against it.
+    ("echo 10.0.2.2 vane.test > /etc/hosts", None, 5),
+    (f"/mnt/vda/servo-render https://vane.test:{port}/font-test.html /mnt/vda/https-name.png",
+     "servo-render: title fonts ok", 900),
+    ("ls -l /mnt/vda", "https-name.png", 900),
 ]
 sys.argv = ["qemu-smoke-test.py", "--no-linux", "--only", "shell", "--keep-log",
             "--memory", "2G", "--screenshot", os.path.join(work, "https-vm.png")]
