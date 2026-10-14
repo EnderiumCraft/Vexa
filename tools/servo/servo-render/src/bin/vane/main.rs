@@ -49,8 +49,12 @@ const TOOLBAR: i32 = 40;
 const CHROME: i32 = TAB_STRIP + TOOLBAR;
 /// What one notch of the wheel scrolls the page by.
 const PIXELS_PER_NOTCH: f64 = 40.0;
-/// How often the page is copied into the window whether or not Servo reports a frame.
+/// How often the page is copied into the window, whether or not Servo reports a frame, while
+/// the page is loading or just after an event (not when everything is still: painting the page
+/// and copying it takes a lot of the processor in a VM, and an idle page needs neither).
 const PRESENT_INTERVAL: Duration = Duration::from_millis(250);
+/// How long after the page's loading or an event that is.
+const SETTLE: Duration = Duration::from_secs(5);
 /// How often the toolbar is drawn while a page loads, for its moving bar.
 const CHROME_INTERVAL: Duration = Duration::from_millis(80);
 /// The page a new tab opens.
@@ -1174,11 +1178,16 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let mut last_present = Instant::now();
     let mut last_chrome = Instant::now();
+    let mut settle_until = Instant::now() + SETTLE;
     while !app.quit {
         app.servo.spin_event_loop();
 
         // Events come in every few milliseconds, and Servo gets a turn between them.
-        match app.ui.wait(10) {
+        let event = app.ui.wait(10);
+        if matches!(event, Some(Some(_))) {
+            settle_until = Instant::now() + SETTLE;
+        }
+        match event {
             None => break,
             Some(Some(event)) => match event.kind {
                 ffi::GUI_CLOSE => break,
@@ -1210,7 +1219,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
 
         let loading = app.tabs[app.active].state.loading();
-        if app.shared.frame_ready.replace(false) || last_present.elapsed() >= PRESENT_INTERVAL {
+        if loading {
+            settle_until = Instant::now() + SETTLE;
+        }
+        let timer = Instant::now() < settle_until && last_present.elapsed() >= PRESENT_INTERVAL;
+        if app.shared.frame_ready.replace(false) || timer {
             app.present_page();
             last_present = Instant::now();
             last_chrome = Instant::now();
