@@ -42,7 +42,6 @@ if [ ! -f "$zlib/zlib.h" ] || [ ! -f "$repo/build/zlib-native/libz.a" ]; then
     echo "no zlib for Vexa: run make build/zlib-native/libz.a" >&2
     exit 1
 fi
-registry=$(ls -d "${CARGO_HOME:-$HOME/.cargo}"/registry/src/*/ | head -1)
 
 echo "== the crates, fetched at the versions in the lock"
 rm -rf "$work/fetch"
@@ -52,13 +51,36 @@ cp -r "$here/servo-render/." "$work/fetch/"
 sed -i '/^\[patch.crates-io\]/,/^$/d' "$work/fetch/Cargo.toml"
 (cd "$work/fetch" && cargo fetch -q)
 
+# The crates that get patches (the app's manifest points at their copies below). The lock has no
+# entry with a source for them, so the fetch above doesn't get them, and a plain resolve would
+# take whatever version is newest that day: they are fetched at exactly these versions.
+patched="getrandom-0.2.17 getrandom-0.3.4 getrandom-0.4.3 mio-1.2.4 socket2-0.6.5 tokio-1.53.2
+    ring-0.17.14 servo-0.7.0 servo-constellation-0.7.0 servo-fonts-0.7.0 servo-fonts-traits-0.7.0
+    servo-layout-0.7.0 rustix-1.1.5 servo-script-0.7.0 servo-script-bindings-0.7.0 servo-net-0.7.0
+    rustls-0.23.45 tokio-rustls-0.26.6 inventory-0.3.25 surfman-0.14.0 libc-0.2.190
+    mozjs_sys-153.3.0-1"
+
+echo "== the crates to patch, at their exact versions"
+rm -rf "$work/fetch-patched"
+mkdir -p "$work/fetch-patched/src"
+{
+    printf '[package]\nname = "fetch-patched"\nversion = "0.0.0"\nedition = "2021"\n\n[dependencies]\n'
+    n=0
+    for c in $patched; do
+        name=$(echo "$c" | sed 's/-[0-9][^-]*\(-[0-9][0-9]*\)\{0,1\}$//')
+        version=${c#"$name"-}
+        n=$((n + 1))
+        printf 'p%s = { package = "%s", version = "=%s" }\n' "$n" "$name" "$version"
+    done
+} > "$work/fetch-patched/Cargo.toml"
+echo 'fn main() {}' > "$work/fetch-patched/src/main.rs"
+(cd "$work/fetch-patched" && cargo fetch -q)
+registry=$(ls -d "${CARGO_HOME:-$HOME/.cargo}"/registry/src/*/ | head -1)
+
 echo "== the registry crates, with the patches for Vexa"
 rm -rf "$work/crates"
 mkdir -p "$work/crates"
-for c in getrandom-0.2.17 getrandom-0.3.4 getrandom-0.4.3 mio-1.2.4 socket2-0.6.5 tokio-1.53.2 \
-    ring-0.17.14 servo-0.7.0 servo-constellation-0.7.0 servo-fonts-0.7.0 servo-fonts-traits-0.7.0 \
-    servo-layout-0.7.0 rustix-1.1.5 servo-script-0.7.0 servo-script-bindings-0.7.0 servo-net-0.7.0 rustls-0.23.45 \
-    tokio-rustls-0.26.6 inventory-0.3.25 surfman-0.14.0 libc-0.2.190 mozjs_sys-153.3.0-1; do
+for c in $patched; do
     cp -r "$registry/$c" "$work/crates/$c"
 done
 chmod -R u+w "$work/crates"
