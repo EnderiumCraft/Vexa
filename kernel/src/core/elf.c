@@ -90,6 +90,33 @@ static bool has_vexa_note(struct file *file, const struct elf64_phdr *ph) {
     return found;
 }
 
+/* A segment this big is read when its pages are first touched, not now (a browser's program is
+ * tens of megabytes, from a CD, and the program that starts it waits until it's loaded). */
+#define LAZY_SEGMENT_BYTES (1u << 20)
+
+/* Whether segment `index` can be loaded lazily: it is big, and no other segment shares a page
+ * with it (the pages of both would need to be filled from two places). */
+static bool can_load_lazily(const struct elf64_phdr *phdrs, int count, int index) {
+    const struct elf64_phdr *ph = &phdrs[index];
+    if (ph->filesz < LAZY_SEGMENT_BYTES) {
+        return false;
+    }
+    uint64_t first = ph->vaddr & ~(PAGE_SIZE - 1);
+    uint64_t last = (ph->vaddr + ph->memsz + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+    for (int i = 0; i < count; i++) {
+        const struct elf64_phdr *other = &phdrs[i];
+        if (i == index || other->type != PT_LOAD || other->memsz == 0) {
+            continue;
+        }
+        uint64_t other_first = other->vaddr & ~(PAGE_SIZE - 1);
+        uint64_t other_last = (other->vaddr + other->memsz + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+        if (other_first < last && first < other_last) {
+            return false;
+        }
+    }
+    return true;
+}
+
 static int load_segment(struct address_space *as, struct file *file,
                         const struct elf64_phdr *ph, uint64_t base) {
     unsigned flags = (ph->flags & PF_W ? VM_WRITE : 0) | (ph->flags & PF_X ? VM_EXEC : 0);
@@ -192,7 +219,13 @@ int elf_load(struct address_space *as, struct file *file, uint64_t load_base,
             *reason = "a segment is outside the file or outside user memory";
             goto out;
         }
-        if (load_segment(as, file, ph, base) != 0) {
+        unsigned flags = (ph->flags & PF_W ? VM_WRITE : 0) | (ph->flags & PF_X ? VM_EXEC : 0);
+        if (can_load_lazily(phdrs, header.phnum, i) &&
+            vm_add_file_area(as, vaddr & ~(PAGE_SIZE - 1),
+                             (vaddr + ph->memsz + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1), flags, file,
+                             vaddr, vaddr + ph->filesz, ph->offset) == 0) {
+            /* (Nothing more to do now.) */
+        } else if (load_segment(as, file, ph, base) != 0) {
             *reason = "out of memory, or the file could not be read";
             result = -VX_ENOMEM;
             goto out;

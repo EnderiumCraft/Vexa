@@ -929,6 +929,10 @@ static void release_resources(struct process *process) {
     if (handles) {
         handle_table_destroy(handles);
     }
+    /* (The program's file, which a big program's pages are read from, the same way.) */
+    if (process->address_space) {
+        vm_release_files(process->address_space);
+    }
     /* Children lose their parent: exited ones are collected now, the others
      * will be when they exit. */
     struct process *orphans[16];

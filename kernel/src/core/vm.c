@@ -2,8 +2,10 @@
 #include <vexa/arch.h>
 #include <vexa/kprintf.h>
 #include <vexa/mm.h>
+#include <vexa/object.h>
 #include <vexa/string.h>
 #include <vexa/uaccess.h>
+#include <vexa/vfs.h>
 #include "paging.h"
 
 /* Where vm_map() looks for room: downward from here, above the program. */
@@ -81,6 +83,17 @@ static void insert_area(struct address_space *as, struct vm_area *area) {
     *link = area;
 }
 
+/* Gives `to` the same file part as `from` (and a reference to its file). */
+static void copy_file(struct vm_area *to, const struct vm_area *from) {
+    if (from->file) {
+        object_ref(&from->file->object);
+        to->file = from->file;
+        to->file_start = from->file_start;
+        to->file_end = from->file_end;
+        to->file_offset = from->file_offset;
+    }
+}
+
 static struct vm_area *new_area(uint64_t start, uint64_t end, unsigned flags) {
     struct vm_area *area = kmalloc(sizeof(*area));
     if (area) {
@@ -99,6 +112,7 @@ static bool split_at(struct address_space *as, uint64_t address) {
     if (!tail) {
         return false;
     }
+    copy_file(tail, area);
     area->end = address;
     tail->next = area->next;
     area->next = tail;
@@ -109,7 +123,7 @@ static bool split_at(struct address_space *as, uint64_t address) {
 static void merge_areas(struct address_space *as) {
     for (struct vm_area *area = as->areas; area && area->next;) {
         struct vm_area *next = area->next;
-        if (area->end == next->start && area->flags == next->flags) {
+        if (area->end == next->start && area->flags == next->flags && !area->file && !next->file) {
             area->end = next->end;
             area->next = next->next;
             kfree(next);
@@ -174,6 +188,9 @@ static void vm_destroy(struct address_space *as) {
     pmm_free(as->pml4_phys, 0);
     while (as->areas) {
         struct vm_area *next = as->areas->next;
+        if (as->areas->file) {
+            vfs_close(as->areas->file);
+        }
         kfree(as->areas);
         as->areas = next;
     }
@@ -221,6 +238,7 @@ struct address_space *vm_fork(struct address_space *parent) {
         struct vm_area *copy = new_area(area->start, area->end, area->flags);
         ok = copy != NULL;
         if (copy) {
+            copy_file(copy, area);
             insert_area(child, copy);
         }
     }
@@ -364,18 +382,66 @@ int vm_unmap(struct address_space *as, uint64_t start, uint64_t size) {
         spin_unlock_irqrestore(&as->lock, lock_flags);
         return -VX_ENOMEM;
     }
+    struct vm_area *removed = NULL;
     for (struct vm_area **link = &as->areas; *link;) {
         struct vm_area *area = *link;
         if (area->start >= start && area->end <= end) {
             *link = area->next;
-            kfree(area);
+            area->next = removed;
+            removed = area;
         } else {
             link = &area->next;
         }
     }
     unmap_pages(as, start, end);
     spin_unlock_irqrestore(&as->lock, lock_flags);
+    /* (Letting go of a file can wait, so it's done without the lock.) */
+    while (removed) {
+        struct vm_area *next = removed->next;
+        if (removed->file) {
+            vfs_close(removed->file);
+        }
+        kfree(removed);
+        removed = next;
+    }
     return 0;
+}
+
+void vm_release_files(struct address_space *as) {
+    for (;;) {
+        struct file *file = NULL;
+        uint64_t lock_flags = spin_lock_irqsave(&as->lock);
+        for (struct vm_area *area = as->areas; area && !file; area = area->next) {
+            file = area->file;
+            area->file = NULL;
+        }
+        spin_unlock_irqrestore(&as->lock, lock_flags);
+        if (!file) {
+            return;
+        }
+        vfs_close(file);
+    }
+}
+
+int vm_add_file_area(struct address_space *as, uint64_t start, uint64_t end, unsigned flags,
+                     struct file *file, uint64_t file_start, uint64_t file_end,
+                     uint64_t file_offset) {
+    uint64_t lock_flags = spin_lock_irqsave(&as->lock);
+    int error = -VX_EBUSY;
+    if (range_free(as, start, end)) {
+        struct vm_area *area = new_area(start, end, flags);
+        error = area ? 0 : -VX_ENOMEM;
+        if (area) {
+            object_ref(&file->object);
+            area->file = file;
+            area->file_start = file_start;
+            area->file_end = file_end;
+            area->file_offset = file_offset;
+            insert_area(as, area);
+        }
+    }
+    spin_unlock_irqrestore(&as->lock, lock_flags);
+    return error;
 }
 
 int vm_populate_shared(struct address_space *as, uint64_t start, size_t count,
@@ -504,8 +570,52 @@ static uint64_t resolve(struct address_space *as, uint64_t address, bool write) 
     return phys;
 }
 
+/* A new page with the file's part of `page` in it (see struct vm_area), the rest zeros. This
+ * waits for the disk, so no lock may be held. */
+static uint64_t read_file_page(struct file *file, uint64_t page, uint64_t file_start,
+                               uint64_t file_end, uint64_t file_offset) {
+    uint64_t phys = page_ref_new();
+    if (!phys) {
+        return 0;
+    }
+    uint64_t from = page > file_start ? page : file_start;
+    uint64_t to = page + PAGE_SIZE < file_end ? page + PAGE_SIZE : file_end;
+    if (from < to && vfs_pread(file, (uint8_t *)phys_to_virt(phys) + (from - page), to - from,
+                               file_offset + (from - file_start)) != (int64_t)(to - from)) {
+        page_ref_put(phys);
+        return 0;
+    }
+    return phys;
+}
+
 uint64_t vm_page_for(struct address_space *as, uint64_t address, bool write) {
+    uint64_t page = page_down(address);
     uint64_t lock_flags = spin_lock_irqsave(&as->lock);
+    struct vm_area *area = find_area(as, page);
+    bool from_file = area && area->file && (!write || (area->flags & VM_WRITE));
+    uint64_t *pte = from_file ? user_pte(as, page, false) : NULL;
+    if (from_file && (!pte || !(*pte & PTE_PRESENT))) {
+        /* A page of a program's file, touched for the first time: read it with the lock
+         * dropped (the read waits), then use it unless another thread got there first. */
+        struct file *file = area->file;
+        uint64_t file_start = area->file_start, file_end = area->file_end;
+        uint64_t file_offset = area->file_offset;
+        object_ref(&file->object);
+        spin_unlock_irqrestore(&as->lock, lock_flags);
+        uint64_t fresh = read_file_page(file, page, file_start, file_end, file_offset);
+        lock_flags = spin_lock_irqsave(&as->lock);
+        area = find_area(as, page);
+        pte = fresh && area && area->file == file ? user_pte(as, page, true) : NULL;
+        if (pte && !(*pte & PTE_PRESENT)) {
+            *pte = fresh | pte_flags(area->flags, true);
+        } else if (fresh) {
+            page_ref_put(fresh);
+        }
+        uint64_t phys = fresh ? resolve(as, address, write) : 0;
+        spin_unlock_irqrestore(&as->lock, lock_flags);
+        vfs_close(file);
+        return phys;
+    }
     uint64_t phys = resolve(as, address, write);
     spin_unlock_irqrestore(&as->lock, lock_flags);
     return phys;

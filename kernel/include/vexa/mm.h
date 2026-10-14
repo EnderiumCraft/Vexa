@@ -98,10 +98,18 @@ bool vmm_is_stack_guard(uint64_t virt);
 #define VM_EXEC 0x2
 #define VM_SHARED 0x4 /* Pages stay shared (not copy-on-write) across fork. */
 
+struct file;
+
 struct vm_area {
     uint64_t start, end; /* Page aligned, end exclusive. */
     unsigned flags;      /* VM_* (every area is readable). */
     struct vm_area *next;
+    /* A big program's segment is read from its file when a page is first touched, not when
+     * the program starts (the program of a browser is tens of megabytes, from a CD): the
+     * bytes [file_start, file_end) of the address space are the file's bytes from
+     * file_offset on, and the rest of each page is zeros. The area holds a reference. */
+    struct file *file;
+    uint64_t file_start, file_end, file_offset;
 };
 
 struct address_space {
@@ -130,6 +138,15 @@ struct address_space *vm_fork(struct address_space *parent);
 /* Adds [start, end) (page aligned) with `flags`. Where it overlaps existing
  * areas, those parts get the union of both flags (ELF segments can share a page). */
 int vm_add_area(struct address_space *as, uint64_t start, uint64_t end, unsigned flags);
+/* Adds [start, end) as an area whose pages are read from `file` when first touched (see
+ * struct vm_area). The range must be free. */
+int vm_add_file_area(struct address_space *as, uint64_t start, uint64_t end, unsigned flags,
+                     struct file *file, uint64_t file_start, uint64_t file_end,
+                     uint64_t file_offset);
+/* Lets go of the files that areas hold (see struct vm_area). A process does this when its last
+ * thread ends, in a thread: closing a file can wait, and the address space itself is let go
+ * where nothing may wait. */
+void vm_release_files(struct address_space *as);
 /* Finds room for `size` bytes and adds an area there. Returns 0 if full. */
 uint64_t vm_map(struct address_space *as, uint64_t size, unsigned flags);
 /* Fills a shared area (from vm_map/vm_map_fixed with VM_SHARED) with pages:

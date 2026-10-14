@@ -113,10 +113,16 @@ void interrupt_dispatch(struct interrupt_frame *frame) {
         bool reserved = frame->error_code & 8;
         /* Only a missing page, or a write to a present one, can be fixed up;
          * reading or running a present page that faulted is a real fault. */
-        if (frame->vector == 14 && !reserved && (!present || write) &&
-            vm_handle_fault(process->address_space, cr2, write)) {
-            signal_deliver(frame);
-            return;
+        if (frame->vector == 14 && !reserved && (!present || write)) {
+            /* (A page of a program's file is read from the disk here, which waits for the
+             * disk's interrupt: they are on, as they were in the program.) */
+            __asm__ volatile("sti" : : : "memory");
+            bool fixed = vm_handle_fault(process->address_space, cr2, write);
+            __asm__ volatile("cli" : : : "memory");
+            if (fixed) {
+                signal_deliver(frame);
+                return;
+            }
         }
         /* A real fault: the program gets a signal, which usually ends it. */
         int signal = frame->vector == 14 || frame->vector == 13 ? VX_SIGSEGV
