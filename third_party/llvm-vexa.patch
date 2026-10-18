@@ -1,0 +1,98 @@
+diff -ruN a/llvm/include/llvm/ADT/bit.h b/llvm/include/llvm/ADT/bit.h
+--- a/llvm/include/llvm/ADT/bit.h
++++ b/llvm/include/llvm/ADT/bit.h
+@@ -43,6 +43,10 @@
+ #else
+ #define BYTE_ORDER LITTLE_ENDIAN
+ #endif
++#elif defined(__vexa__)
++#define BIG_ENDIAN __ORDER_BIG_ENDIAN__
++#define LITTLE_ENDIAN __ORDER_LITTLE_ENDIAN__
++#define BYTE_ORDER __BYTE_ORDER__
+ #elif defined(__MVS__)
+ #define BIG_ENDIAN 4321
+ #define LITTLE_ENDIAN 1234
+diff -ruN a/llvm/include/llvm/Support/ConvertUTF.h b/llvm/include/llvm/Support/ConvertUTF.h
+--- a/llvm/include/llvm/Support/ConvertUTF.h
++++ b/llvm/include/llvm/Support/ConvertUTF.h
+@@ -220,6 +220,8 @@
+ bool ConvertUTF8toWide(unsigned WideCharWidth, llvm::StringRef Source,
+                        char *&ResultPtr, const UTF8 *&ErrorPtr);
+ 
++// (Vexa's C++ library has no wide strings.)
++#ifndef __vexa__
+ /**
+ * Converts a UTF-8 StringRef to a std::wstring.
+ * \return true on success.
+@@ -237,6 +239,8 @@
+ * \return true on success.
+ */
+ bool convertWideToUTF8(const std::wstring &Source, std::string &Result);
++#endif
++
+ 
+ 
+ /**
+diff -ruN a/llvm/include/llvm/Support/ExitCodes.h b/llvm/include/llvm/Support/ExitCodes.h
+--- a/llvm/include/llvm/Support/ExitCodes.h
++++ b/llvm/include/llvm/Support/ExitCodes.h
+@@ -20,7 +20,7 @@
+ 
+ #if HAVE_SYSEXITS_H
+ #include <sysexits.h>
+-#elif __MVS__ || defined(_WIN32)
++#elif __MVS__ || defined(_WIN32) || defined(__vexa__)
+ // <sysexits.h> does not exist on z/OS and Windows. The only value used in LLVM
+ // is EX_IOERR, which is used to signal a special error condition (broken pipe).
+ // Define the macro with its usual value from BSD systems, which is chosen to
+diff -ruN a/llvm/lib/Support/CMakeLists.txt b/llvm/lib/Support/CMakeLists.txt
+--- a/llvm/lib/Support/CMakeLists.txt
++++ b/llvm/lib/Support/CMakeLists.txt
+@@ -250,7 +250,6 @@
+   WithColor.cpp
+   YAMLParser.cpp
+   YAMLTraits.cpp
+-  raw_os_ostream.cpp
+   raw_ostream.cpp
+   raw_socket_stream.cpp
+   regcomp.c
+diff -ruN a/llvm/lib/Support/ConvertUTFWrapper.cpp b/llvm/lib/Support/ConvertUTFWrapper.cpp
+--- a/llvm/lib/Support/ConvertUTFWrapper.cpp
++++ b/llvm/lib/Support/ConvertUTFWrapper.cpp
+@@ -239,6 +239,7 @@
+                   sizeof(wchar_t) == 4,
+               "Expected wchar_t to be 1, 2, or 4 bytes");
+ 
++#ifndef __vexa__
+ template <typename TResult>
+ static inline bool ConvertUTF8toWideInternal(llvm::StringRef Source,
+                                              TResult &Result) {
+@@ -303,6 +304,7 @@
+         "Control should never reach this point; see static_assert further up");
+   }
+ }
++#endif
+ 
+ } // end namespace llvm
+ 
+diff -ruN a/llvm/lib/Support/Unix/Watchdog.inc b/llvm/lib/Support/Unix/Watchdog.inc
+--- a/llvm/lib/Support/Unix/Watchdog.inc
++++ b/llvm/lib/Support/Unix/Watchdog.inc
+@@ -18,14 +18,15 @@
+ 
+ namespace llvm {
+ namespace sys {
++// (Vexa has no alarm(): no watchdog there.)
+ Watchdog::Watchdog(unsigned int seconds) {
+-#ifdef HAVE_UNISTD_H
++#if defined(HAVE_UNISTD_H) && !defined(__vexa__)
+   alarm(seconds);
+ #endif
+ }
+ 
+ Watchdog::~Watchdog() {
+-#ifdef HAVE_UNISTD_H
++#if defined(HAVE_UNISTD_H) && !defined(__vexa__)
+   alarm(0);
+ #endif
+ }

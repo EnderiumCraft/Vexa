@@ -8,6 +8,11 @@
 # this machine. Mesa asks llvm-config how to use LLVM; the real one would be a Vexa program,
 # so WORK/bin/llvm-config is a small script that answers for the libraries built here.
 #
+# Vexa's C++ library has no wide strings and no locales (so no iostreams):
+# third_party/llvm-vexa.patch leaves out LLVM's few wide-string and watchdog bits and says
+# where the byte order is, and third_party/llvm-vexa/include has a small <sstream> for the
+# few files that build strings with std::stringstream.
+#
 # Usage: tools/build-llvm-vexa.sh <llvm-project tarball> <SDK dir> <work dir>
 # Each step is skipped if it's done already (stamps in the work directory).
 set -eu
@@ -15,6 +20,7 @@ llvm_tarball=$(realpath "$1") sdk=$(realpath "$2")
 mkdir -p "$3"
 work=$(realpath "$3")
 jobs=$(nproc)
+here=$(dirname "$(realpath "$0")")
 src="$work/$(basename "$llvm_tarball" .tar.xz)"
 version=$(basename "$llvm_tarball" .src.tar.xz | sed 's/^llvm-project-//')
 
@@ -35,6 +41,7 @@ build_source() {
     rm -rf "$src"
     tar -xJf "$llvm_tarball" -C "$work" "$(basename "$src")/llvm" "$(basename "$src")/cmake" \
         "$(basename "$src")/third-party"
+    patch -p1 -s -d "$src" < "$here/../third_party/llvm-vexa.patch"
 }
 
 # llvm-tblgen for this machine (with this machine's compiler).
@@ -57,6 +64,7 @@ build_llvm() {
         -DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=x86_64 \
         -DCMAKE_C_COMPILER="$sdk/bin/vexa-cc" -DCMAKE_CXX_COMPILER="$sdk/bin/vexa-c++" \
         -DCMAKE_AR="$(command -v ar)" -DCMAKE_RANLIB="$(command -v ranlib)" \
+        -DCMAKE_CXX_FLAGS="-I$here/../third_party/llvm-vexa/include" \
         -DLLVM_TABLEGEN="$work/host/bin/llvm-tblgen" \
         -DLLVM_TARGETS_TO_BUILD=X86 -DLLVM_TARGET_ARCH=X86 \
         -DLLVM_HOST_TRIPLE=x86_64-unknown-linux-gnu \
@@ -70,7 +78,10 @@ build_llvm() {
         -DLLVM_INCLUDE_DOCS=OFF -DLLVM_INCLUDE_UTILS=OFF -DLLVM_INCLUDE_TOOLS=OFF \
         -DLLVM_BUILD_TOOLS=OFF -DLLVM_BUILD_UTILS=OFF \
         > "$work/llvm.log" 2>&1 || { tail -30 "$work/llvm.log"; return 1; }
-    ninja -C "$work/build" -j"$jobs" -k 0 llvm-libraries >> "$work/llvm.log" 2>&1 ||
+    # Only what Mesa's llvmpipe uses (and what that needs).
+    ninja -C "$work/build" -j"$jobs" LLVMMCJIT LLVMX86CodeGen LLVMX86AsmParser \
+        LLVMX86Disassembler LLVMBitWriter LLVMMCDisassembler LLVMPasses LLVMCoroutines LLVMipo \
+        LLVMIRReader >> "$work/llvm.log" 2>&1 ||
         { grep -B2 -A8 'error:' "$work/llvm.log" | head -80; return 1; }
 }
 
