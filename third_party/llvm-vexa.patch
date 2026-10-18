@@ -45,17 +45,6 @@ diff -ruN a/llvm/include/llvm/Support/ExitCodes.h b/llvm/include/llvm/Support/Ex
  // <sysexits.h> does not exist on z/OS and Windows. The only value used in LLVM
  // is EX_IOERR, which is used to signal a special error condition (broken pipe).
  // Define the macro with its usual value from BSD systems, which is chosen to
-diff -ruN a/llvm/lib/Support/CMakeLists.txt b/llvm/lib/Support/CMakeLists.txt
---- a/llvm/lib/Support/CMakeLists.txt
-+++ b/llvm/lib/Support/CMakeLists.txt
-@@ -250,7 +250,6 @@
-   WithColor.cpp
-   YAMLParser.cpp
-   YAMLTraits.cpp
--  raw_os_ostream.cpp
-   raw_ostream.cpp
-   raw_socket_stream.cpp
-   regcomp.c
 diff -ruN a/llvm/lib/Support/ConvertUTFWrapper.cpp b/llvm/lib/Support/ConvertUTFWrapper.cpp
 --- a/llvm/lib/Support/ConvertUTFWrapper.cpp
 +++ b/llvm/lib/Support/ConvertUTFWrapper.cpp
@@ -96,3 +85,20 @@ diff -ruN a/llvm/lib/Support/Unix/Watchdog.inc b/llvm/lib/Support/Unix/Watchdog.
    alarm(0);
  #endif
  }
+diff -ruN a/llvm/lib/Support/raw_os_ostream.cpp b/llvm/lib/Support/raw_os_ostream.cpp
+--- a/llvm/lib/Support/raw_os_ostream.cpp
++++ b/llvm/lib/Support/raw_os_ostream.cpp
+@@ -10,6 +10,8 @@
+ //
+ //===----------------------------------------------------------------------===//
+ 
++// (Vexa's C++ library has no iostreams: nothing here there.)
++#ifndef __vexa__
+ #include "llvm/Support/raw_os_ostream.h"
+ #include <ostream>
+ using namespace llvm;
+@@ -27,3 +29,4 @@
+ }
+ 
+ uint64_t raw_os_ostream::current_pos() const { return OS.tellp(); }
++#endif

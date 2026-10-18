@@ -10,7 +10,7 @@
 #
 # Vexa's C++ library has no wide strings and no locales (so no iostreams):
 # third_party/llvm-vexa.patch leaves out LLVM's few wide-string and watchdog bits and says
-# where the byte order is, and third_party/llvm-vexa/include has a small <sstream> for the
+# where the byte order is (and leaves out raw_os_ostream, for std::ostream), and third_party/llvm-vexa/include has a small <sstream> for the
 # few files that build strings with std::stringstream.
 #
 # Usage: tools/build-llvm-vexa.sh <llvm-project tarball> <SDK dir> <work dir>
@@ -79,7 +79,7 @@ build_llvm() {
         -DLLVM_BUILD_TOOLS=OFF -DLLVM_BUILD_UTILS=OFF \
         > "$work/llvm.log" 2>&1 || { tail -30 "$work/llvm.log"; return 1; }
     # Only what Mesa's llvmpipe uses (and what that needs).
-    ninja -C "$work/build" -j"$jobs" LLVMMCJIT LLVMX86CodeGen LLVMX86AsmParser \
+    ninja -C "$work/build" -j"$jobs" -k 0 LLVMMCJIT LLVMX86CodeGen LLVMX86AsmParser \
         LLVMX86Disassembler LLVMBitWriter LLVMMCDisassembler LLVMPasses LLVMCoroutines LLVMipo \
         LLVMIRReader >> "$work/llvm.log" 2>&1 ||
         { grep -B2 -A8 'error:' "$work/llvm.log" | head -80; return 1; }
