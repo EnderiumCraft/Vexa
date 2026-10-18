@@ -8,12 +8,13 @@
 #define ST_RDONLY 1
 #define ST_NOSUID 2
 #define ST_LOCAL 4
+#define MNT_LOCAL ST_LOCAL
 
 struct statvfs {
     unsigned long f_bsize, f_frsize;
     unsigned long f_blocks, f_bfree, f_bavail;
     unsigned long f_files, f_ffree, f_favail;
-    unsigned long f_fsid, f_flag, f_namemax;
+    unsigned long f_fsid, f_flag, f_flags, f_namemax;
 };
 
 static inline int statvfs(const char *path, struct statvfs *buf) {

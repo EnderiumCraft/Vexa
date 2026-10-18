@@ -82,6 +82,23 @@ diff -ruN a/llvm/lib/Support/LockFileManager.cpp b/llvm/lib/Support/LockFileMana
  
    auto StartTime = std::chrono::steady_clock::now();
  
+diff -ruN a/llvm/lib/Support/Unix/Path.inc b/llvm/lib/Support/Unix/Path.inc
+--- a/llvm/lib/Support/Unix/Path.inc
++++ b/llvm/lib/Support/Unix/Path.inc
+@@ -334,6 +334,13 @@
+   char link_path[PATH_MAX];
+   if (realpath(DLInfo.dli_fname, link_path))
+     return link_path;
++#elif defined(__vexa__)
++  // (Vexa: from argv[0].)
++  (void)MainAddr;
++  char exe_path[PATH_MAX];
++  if (argv0 && realpath(argv0, exe_path))
++    return exe_path;
++  return argv0 ? argv0 : "";
+ #else
+ #error GetMainExecutable is not implemented on this host yet.
+ #endif
 diff -ruN a/llvm/lib/Support/Unix/Watchdog.inc b/llvm/lib/Support/Unix/Watchdog.inc
 --- a/llvm/lib/Support/Unix/Watchdog.inc
 +++ b/llvm/lib/Support/Unix/Watchdog.inc

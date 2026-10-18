@@ -7,11 +7,14 @@
 
 #include <ctype.h>
 #include <errno.h>
+#include <pwd.h>
+#include <stddef.h>
 #include <signal.h>
 #include <string.h>
 #include <sys/resource.h>
 #include <sys/time.h>
 #include <sys/types.h>
+#include <sys/mman.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -26,6 +29,12 @@
 #endif
 #ifndef _SC_ARG_MAX
 #define _SC_ARG_MAX 0 /* (libvexa's sysconf doesn't know it: LLVM then takes _POSIX_ARG_MAX.) */
+#endif
+#ifndef _SC_GETPW_R_SIZE_MAX
+#define _SC_GETPW_R_SIZE_MAX 70 /* (Unknown to libvexa's sysconf: LLVM then takes a size.) */
+#endif
+#ifndef MADV_DONTNEED
+#define MADV_DONTNEED 4
 #endif
 #ifndef _POSIX_ARG_MAX
 #define _POSIX_ARG_MAX 4096
@@ -59,6 +68,38 @@ static inline pid_t wait4(pid_t pid, int *status, int options, struct rusage *us
         memset(usage, 0, sizeof(*usage));
     }
     return waitpid(pid, status, options);
+}
+
+/* No hard links. */
+static inline int link(const char *from, const char *to) {
+    (void)from;
+    (void)to;
+    errno = ENOSYS;
+    return -1;
+}
+/* A hint: nothing to do. */
+static inline int madvise(void *address, size_t length, int advice) {
+    (void)address;
+    (void)length;
+    (void)advice;
+    return 0;
+}
+/* The reentrant forms, on libvexa's getpwuid/getpwnam (the strings stay theirs). */
+static inline int getpwuid_r(uid_t uid, struct passwd *pwd, char *buffer, size_t size,
+                             struct passwd **result) {
+    (void)buffer;
+    (void)size;
+    struct passwd *found = getpwuid(uid);
+    *result = found ? (*pwd = *found, pwd) : NULL;
+    return found ? 0 : ENOENT;
+}
+static inline int getpwnam_r(const char *name, struct passwd *pwd, char *buffer, size_t size,
+                             struct passwd **result) {
+    (void)buffer;
+    (void)size;
+    struct passwd *found = getpwnam(name);
+    *result = found ? (*pwd = *found, pwd) : NULL;
+    return found ? 0 : ENOENT;
 }
 
 #ifdef __cplusplus
