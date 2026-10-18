@@ -64,6 +64,24 @@ diff -ruN a/llvm/lib/Support/ConvertUTFWrapper.cpp b/llvm/lib/Support/ConvertUTF
  
  } // end namespace llvm
  
+diff -ruN a/llvm/lib/Support/LockFileManager.cpp b/llvm/lib/Support/LockFileManager.cpp
+--- a/llvm/lib/Support/LockFileManager.cpp
++++ b/llvm/lib/Support/LockFileManager.cpp
+@@ -303,8 +303,14 @@
+   unsigned long WaitMultiplier = 1;
+   unsigned long ElapsedTimeSeconds = 0;
+ 
++#ifdef __vexa__
++  // (Vexa's C++ library has no std::random_device.)
++  std::default_random_engine Engine(
++      std::chrono::steady_clock::now().time_since_epoch().count());
++#else
+   std::random_device Device;
+   std::default_random_engine Engine(Device());
++#endif
+ 
+   auto StartTime = std::chrono::steady_clock::now();
+ 
 diff -ruN a/llvm/lib/Support/Unix/Watchdog.inc b/llvm/lib/Support/Unix/Watchdog.inc
 --- a/llvm/lib/Support/Unix/Watchdog.inc
 +++ b/llvm/lib/Support/Unix/Watchdog.inc

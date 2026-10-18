@@ -10,11 +10,12 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <iosfwd>
 
-namespace std {
-
-class __vexa_stringstream;
-using __vexa_manip = __vexa_stringstream &(*)(__vexa_stringstream &);
+// libc++ declares basic_stringstream and basic_ostringstream (and the stringstream aliases)
+// even without locales, but never defines them: the char versions are defined here, inside
+// libc++'s own namespace, on a small shared base.
+_LIBCPP_BEGIN_NAMESPACE_STD
 
 struct __vexa_setw {
     int width;
@@ -23,10 +24,13 @@ inline __vexa_setw setw(int width) {
     return {width};
 }
 
-class __vexa_stringstream {
+class __vexa_stream_base;
+using __vexa_manip = __vexa_stream_base &(*)(__vexa_stream_base &);
+
+class __vexa_stream_base {
 public:
-    __vexa_stringstream() = default;
-    explicit __vexa_stringstream(const string &initial) : buffer_(initial) {}
+    __vexa_stream_base() = default;
+    explicit __vexa_stream_base(const string &initial) : buffer_(initial) {}
 
     string str() const {
         return buffer_;
@@ -35,36 +39,36 @@ public:
         buffer_ = text;
     }
 
-    __vexa_stringstream &operator<<(__vexa_manip manip) {
+    __vexa_stream_base &operator<<(__vexa_manip manip) {
         return manip(*this);
     }
-    __vexa_stringstream &operator<<(__vexa_setw w) {
+    __vexa_stream_base &operator<<(__vexa_setw w) {
         width_ = w.width;
         return *this;
     }
-    __vexa_stringstream &operator<<(const char *text) {
+    __vexa_stream_base &operator<<(const char *text) {
         return put(text ? string_view(text) : string_view("(null)"));
     }
-    __vexa_stringstream &operator<<(const string &text) {
+    __vexa_stream_base &operator<<(const string &text) {
         return put(text);
     }
-    __vexa_stringstream &operator<<(string_view text) {
+    __vexa_stream_base &operator<<(string_view text) {
         return put(text);
     }
-    __vexa_stringstream &operator<<(char c) {
+    __vexa_stream_base &operator<<(char c) {
         return put(string_view(&c, 1));
     }
-    __vexa_stringstream &operator<<(bool b) {
+    __vexa_stream_base &operator<<(bool b) {
         return put(b ? "1" : "0");
     }
-    __vexa_stringstream &operator<<(const void *p) {
+    __vexa_stream_base &operator<<(const void *p) {
         char text[32];
         snprintf(text, sizeof(text), "%p", p);
         return put(text);
     }
     template <typename T, enable_if_t<is_integral_v<T> && !is_same_v<T, char> &&
                                           !is_same_v<T, bool>, int> = 0>
-    __vexa_stringstream &operator<<(T value) {
+    __vexa_stream_base &operator<<(T value) {
         char text[32];
         if (hex_) {
             snprintf(text, sizeof(text), "%llx", (unsigned long long)value);
@@ -76,7 +80,7 @@ public:
         return put(text);
     }
     template <typename T, enable_if_t<is_floating_point_v<T>, int> = 0>
-    __vexa_stringstream &operator<<(T value) {
+    __vexa_stream_base &operator<<(T value) {
         char text[64];
         snprintf(text, sizeof(text), "%g", (double)value);
         return put(text);
@@ -84,7 +88,7 @@ public:
     // Anything that converts to a string (llvm::StringRef, say).
     template <typename T, enable_if_t<!is_arithmetic_v<T> && !is_pointer_v<T> &&
                                           is_convertible_v<const T &, string>, int> = 0>
-    __vexa_stringstream &operator<<(const T &value) {
+    __vexa_stream_base &operator<<(const T &value) {
         return put(string(value));
     }
 
@@ -93,7 +97,7 @@ public:
     }
 
 private:
-    __vexa_stringstream &put(string_view text) {
+    __vexa_stream_base &put(string_view text) {
         if (width_ > 0 && text.size() < (size_t)width_) {
             buffer_.append(width_ - text.size(), ' ');
         }
@@ -107,18 +111,26 @@ private:
     bool hex_ = false;
 };
 
-inline __vexa_stringstream &hex(__vexa_stringstream &s) {
+inline __vexa_stream_base &hex(__vexa_stream_base &s) {
     s.set_hex(true);
     return s;
 }
-inline __vexa_stringstream &dec(__vexa_stringstream &s) {
+inline __vexa_stream_base &dec(__vexa_stream_base &s) {
     s.set_hex(false);
     return s;
 }
 
-using stringstream = __vexa_stringstream;
-using ostringstream = __vexa_stringstream;
+template <>
+class basic_stringstream<char, char_traits<char>, allocator<char>> : public __vexa_stream_base {
+public:
+    using __vexa_stream_base::__vexa_stream_base;
+};
+template <>
+class basic_ostringstream<char, char_traits<char>, allocator<char>> : public __vexa_stream_base {
+public:
+    using __vexa_stream_base::__vexa_stream_base;
+};
 
-} // namespace std
+_LIBCPP_END_NAMESPACE_STD
 
 #endif

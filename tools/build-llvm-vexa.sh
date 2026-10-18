@@ -11,7 +11,8 @@
 # Vexa's C++ library has no wide strings and no locales (so no iostreams):
 # third_party/llvm-vexa.patch leaves out LLVM's few wide-string and watchdog bits and says
 # where the byte order is (and leaves out raw_os_ostream, for std::ostream), and third_party/llvm-vexa/include has a small <sstream> for the
-# few files that build strings with std::stringstream.
+# few files that build strings with std::stringstream, and vexa-compat.h (included in every
+# file) with what LLVM's Unix code expects that libvexa leaves out (fork, wait4, statvfs...).
 #
 # Usage: tools/build-llvm-vexa.sh <llvm-project tarball> <SDK dir> <work dir>
 # Each step is skipped if it's done already (stamps in the work directory).
@@ -59,12 +60,13 @@ build_tblgen() {
 # The libraries, for Vexa. (Vexa is no Linux, but CMake's "Linux" gives LLVM its Unix code;
 # the SDK's compilers leave __linux__ undefined, and LLVM's checks find what libvexa has.)
 build_llvm() {
+    compat="-I$here/../third_party/llvm-vexa/include -include $here/../third_party/llvm-vexa/include/vexa-compat.h"
     rm -rf "$work/build"
     cmake -G Ninja -S "$src/llvm" -B "$work/build" -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=x86_64 \
         -DCMAKE_C_COMPILER="$sdk/bin/vexa-cc" -DCMAKE_CXX_COMPILER="$sdk/bin/vexa-c++" \
         -DCMAKE_AR="$(command -v ar)" -DCMAKE_RANLIB="$(command -v ranlib)" \
-        -DCMAKE_CXX_FLAGS="-I$here/../third_party/llvm-vexa/include" \
+        -DCMAKE_C_FLAGS="$compat" -DCMAKE_CXX_FLAGS="$compat" \
         -DLLVM_TABLEGEN="$work/host/bin/llvm-tblgen" \
         -DLLVM_TARGETS_TO_BUILD=X86 -DLLVM_TARGET_ARCH=X86 \
         -DLLVM_HOST_TRIPLE=x86_64-unknown-linux-gnu \
