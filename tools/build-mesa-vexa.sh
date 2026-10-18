@@ -1,19 +1,22 @@
 #!/bin/sh
 # Builds OpenGL for native Vexa programs, from source: Mesa's OSMesa
-# (OpenGL drawn into memory) with softpipe (gallium's software renderer, no
-# LLVM) and virgl (the host's GPU, through the virtio GPU, when there's one),
+# (OpenGL drawn into memory) with llvmpipe (gallium's software renderer that
+# turns shaders into machine code with LLVM, on every processor; given the
+# llvm-config of tools/build-llvm-vexa.sh) or else softpipe (which interprets
+# them, on one), and virgl (the host's GPU, through the virtio GPU, when there's one),
 # built against libvexa with the SDK's vexa-cc and vexa-c++, as one shared
 # library, libOSMesa.so, with the C++ runtime and a small libdrm
 # (third_party/libdrm-vexa) linked in. SDL's Vexa driver loads it for
 # OpenGL windows; programs can also link to it.
 #
-# Usage: tools/build-mesa-vexa.sh <mesa tarball> <SDK dir> <work dir> <out dir>
+# Usage: tools/build-mesa-vexa.sh <mesa tarball> <SDK dir> <work dir> <out dir> [llvm-config]
 # (<out dir> gets lib/libOSMesa.so, include/GL and include/KHR, and Mesa's
 # license.)
 set -eu
 mesa_tarball=$(realpath "$1") sdk=$(realpath "$2")
 mkdir -p "$3" "$4"
 work=$(realpath "$3") out=$(realpath "$4")
+llvm_config=${5:+$(realpath "$5")}
 here=$(dirname "$(realpath "$0")")
 jobs=$(nproc)
 
@@ -45,6 +48,7 @@ cpp = '$sdk/bin/vexa-c++'
 ar = 'ar'
 strip = 'strip'
 pkg-config = 'pkg-config'
+${llvm_config:+llvm-config = '$llvm_config'}
 
 [properties]
 pkg_config_libdir = ['$drm/pkgconfig']
@@ -58,7 +62,8 @@ INI
 PKG_CONFIG_PATH= meson setup _build --cross-file cross.ini --prefix=/ --libdir=lib \
     --buildtype=release -Dplatforms= -Dglx=disabled -Dgallium-drivers=swrast,virgl \
     -Dvulkan-drivers= -Degl=disabled -Dgbm=disabled -Dgles1=disabled -Dgles2=disabled \
-    -Dopengl=true -Dosmesa=true -Dllvm=disabled -Dshared-glapi=disabled \
+    -Dopengl=true -Dosmesa=true -Dshared-glapi=disabled \
+    -Dllvm=$([ -n "$llvm_config" ] && echo enabled || echo disabled) -Dshared-llvm=disabled \
     -Dxmlconfig=disabled -Dzstd=disabled -Dzlib=disabled -Dvalgrind=disabled -Dlibunwind=disabled \
     -Dlmsensors=disabled -Dbuild-tests=false -Dshader-cache=disabled -Dexpat=disabled \
     -Dgallium-va=disabled -Dgallium-vdpau=disabled -Dgallium-xa=disabled \
