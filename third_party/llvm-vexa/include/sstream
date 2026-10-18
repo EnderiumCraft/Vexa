@@ -2,7 +2,8 @@
 //
 // The SDK's libc++ has no locales, so no iostreams. A few of LLVM's files build short strings
 // with std::stringstream (debug output, error messages): this is enough of it for them, on
-// std::string. Numbers are formatted with snprintf; std::setw and std::hex/std::dec work.
+// std::string. Numbers are formatted with snprintf; std::setw, std::setfill, std::setprecision
+// and std::hex/std::dec work.
 #ifndef VEXA_LLVM_SSTREAM
 #define VEXA_LLVM_SSTREAM
 
@@ -22,6 +23,18 @@ struct __vexa_setw {
 };
 inline __vexa_setw setw(int width) {
     return {width};
+}
+struct __vexa_setfill {
+    char fill;
+};
+inline __vexa_setfill setfill(char fill) {
+    return {fill};
+}
+struct __vexa_setprecision {
+    int precision;
+};
+inline __vexa_setprecision setprecision(int precision) {
+    return {precision};
 }
 
 class __vexa_stream_base;
@@ -44,6 +57,14 @@ public:
     }
     __vexa_stream_base &operator<<(__vexa_setw w) {
         width_ = w.width;
+        return *this;
+    }
+    __vexa_stream_base &operator<<(__vexa_setfill f) {
+        fill_ = f.fill;
+        return *this;
+    }
+    __vexa_stream_base &operator<<(__vexa_setprecision p) {
+        precision_ = p.precision;
         return *this;
     }
     __vexa_stream_base &operator<<(const char *text) {
@@ -82,7 +103,7 @@ public:
     template <typename T, enable_if_t<is_floating_point_v<T>, int> = 0>
     __vexa_stream_base &operator<<(T value) {
         char text[64];
-        snprintf(text, sizeof(text), "%g", (double)value);
+        snprintf(text, sizeof(text), "%.*g", precision_, (double)value);
         return put(text);
     }
     // Anything that converts to a string (llvm::StringRef, say).
@@ -99,7 +120,7 @@ public:
 private:
     __vexa_stream_base &put(string_view text) {
         if (width_ > 0 && text.size() < (size_t)width_) {
-            buffer_.append(width_ - text.size(), ' ');
+            buffer_.append(width_ - text.size(), fill_);
         }
         width_ = 0;
         buffer_.append(text);
@@ -108,6 +129,8 @@ private:
 
     string buffer_;
     int width_ = 0;
+    int precision_ = 6;
+    char fill_ = ' ';
     bool hex_ = false;
 };
 

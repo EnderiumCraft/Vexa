@@ -17,6 +17,9 @@
 #include <sys/mman.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#ifdef __cplusplus
+#include <cctype>
+#endif
 
 #ifndef SA_ONSTACK
 #define SA_ONSTACK 0
@@ -74,6 +77,19 @@ static inline pid_t wait4(pid_t pid, int *status, int options, struct rusage *us
 static inline int link(const char *from, const char *to) {
     (void)from;
     (void)to;
+    errno = ENOSYS;
+    return -1;
+}
+/* No POSIX shared memory objects (ORC's shared-memory mapper fails cleanly). */
+static inline int shm_open(const char *name, int flags, mode_t mode) {
+    (void)name;
+    (void)flags;
+    (void)mode;
+    errno = ENOSYS;
+    return -1;
+}
+static inline int shm_unlink(const char *name) {
+    (void)name;
     errno = ENOSYS;
     return -1;
 }
